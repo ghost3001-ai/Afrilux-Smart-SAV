@@ -1,12 +1,23 @@
 #!/bin/sh
 set -e
 
+is_true() {
+  case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on|oui)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 DB_ENGINE="${DJANGO_DB_ENGINE:-}"
 if [ -z "$DB_ENGINE" ] && [ -n "${DJANGO_DB_HOST:-}" ]; then
   DB_ENGINE="django.db.backends.postgresql"
 fi
 
-if echo "$DB_ENGINE" | grep -qi "postgresql" && [ "${DJANGO_WAIT_FOR_DB:-true}" = "true" ] && [ -n "${DJANGO_DB_HOST:-}" ]; then
+if echo "$DB_ENGINE" | grep -qi "postgresql" && is_true "${DJANGO_WAIT_FOR_DB:-true}" && [ -n "${DJANGO_DB_HOST:-}" ]; then
   until pg_isready \
     -h "$DJANGO_DB_HOST" \
     -p "${DJANGO_DB_PORT:-5432}" \
@@ -17,18 +28,27 @@ if echo "$DB_ENGINE" | grep -qi "postgresql" && [ "${DJANGO_WAIT_FOR_DB:-true}" 
   done
 fi
 
-if [ "${DJANGO_RUN_MIGRATIONS_ON_STARTUP:-true}" = "true" ]; then
+if is_true "${DJANGO_RUN_MIGRATIONS_ON_STARTUP:-true}"; then
   python manage.py migrate --noinput
 fi
 
-if [ "${DJANGO_COLLECTSTATIC_ON_STARTUP:-false}" = "true" ]; then
+COLLECTSTATIC_ON_STARTUP="${DJANGO_COLLECTSTATIC_ON_STARTUP:-}"
+if [ -z "$COLLECTSTATIC_ON_STARTUP" ]; then
+  if is_true "${DJANGO_SERVE_STATIC_LOCAL:-${RENDER:-false}}"; then
+    COLLECTSTATIC_ON_STARTUP="true"
+  else
+    COLLECTSTATIC_ON_STARTUP="false"
+  fi
+fi
+
+if is_true "$COLLECTSTATIC_ON_STARTUP"; then
   python manage.py collectstatic --noinput
 fi
 
 scheduler_pid=""
-if [ "${DJANGO_RUN_SCHEDULER_IN_WEB:-false}" = "true" ]; then
+if is_true "${DJANGO_RUN_SCHEDULER_IN_WEB:-false}"; then
   if [ -n "${SCHEDULER_ORGANIZATION_SLUG:-}" ]; then
-    if [ "${SCHEDULER_SKIP_BACKUP:-false}" = "true" ]; then
+    if is_true "${SCHEDULER_SKIP_BACKUP:-false}"; then
       python manage.py run_platform_scheduler \
         --interval-seconds "${SCHEDULER_INTERVAL_SECONDS:-60}" \
         --backup-hour "${SCHEDULER_BACKUP_HOUR:-2}" \
@@ -42,7 +62,7 @@ if [ "${DJANGO_RUN_SCHEDULER_IN_WEB:-false}" = "true" ]; then
         --backup-minute "${SCHEDULER_BACKUP_MINUTE:-0}" \
         --organization-slug "${SCHEDULER_ORGANIZATION_SLUG}" &
     fi
-  elif [ "${SCHEDULER_SKIP_BACKUP:-false}" = "true" ]; then
+  elif is_true "${SCHEDULER_SKIP_BACKUP:-false}"; then
     python manage.py run_platform_scheduler \
       --interval-seconds "${SCHEDULER_INTERVAL_SECONDS:-60}" \
       --backup-hour "${SCHEDULER_BACKUP_HOUR:-2}" \

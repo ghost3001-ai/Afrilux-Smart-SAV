@@ -99,7 +99,10 @@ def _dashboard_snapshot(user):
     alerts = scope_predictive_alert_queryset(PredictiveAlert.objects.select_related("product", "ticket"), user)
     notifications = scope_notification_queryset(Notification.objects.select_related("ticket"), user)
     messages = Message.objects.filter(ticket__in=tickets, sentiment_score__isnull=False)
-    technicians = scope_user_queryset(User.objects.filter(role__in=User.ASSIGNABLE_ROLES), user)
+    technicians = scope_user_queryset(
+        User.objects.filter(role=User.ROLE_TECHNICIAN, is_active=True),
+        user,
+    )
 
     status_labels = _choice_map(Ticket.STATUS_CHOICES)
     priority_labels = _choice_map(Ticket.PRIORITY_CHOICES)
@@ -282,7 +285,7 @@ class TechnicianPlanningPageView(LoginRequiredMixin, ManagerRequiredMixin, Templ
         week_start = selected_date - timedelta(days=selected_date.weekday())
         week_end = week_start + timedelta(days=7)
         technicians = scope_user_queryset(
-            User.objects.filter(role__in=User.ASSIGNABLE_ROLES, is_active=True),
+            User.objects.filter(role=User.ROLE_TECHNICIAN, is_active=True),
             self.request.user,
         ).order_by("first_name", "last_name", "username")
         tickets = scope_ticket_queryset(

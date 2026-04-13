@@ -1517,7 +1517,10 @@ class DashboardView(APIView):
         transactions = scope_financial_transaction_queryset(FinancialTransaction.objects.all(), request.user)
         feedbacks = scope_ticket_feedback_queryset(TicketFeedback.objects.all(), request.user)
         users = scope_user_queryset(User.objects.filter(role=User.ROLE_CLIENT), request.user)
-        technicians = scope_user_queryset(User.objects.filter(role__in=User.ASSIGNABLE_ROLES), request.user)
+        technicians = scope_user_queryset(
+            User.objects.filter(role=User.ROLE_TECHNICIAN, is_active=True),
+            request.user,
+        )
 
         status_breakdown = list(tickets.values("status").annotate(total=Count("id")).order_by("status"))
         priority_breakdown = list(tickets.values("priority").annotate(total=Count("id")).order_by("priority"))
@@ -1699,7 +1702,10 @@ class TechnicianPlanningView(APIView):
             raise PermissionDenied("Le planning technicien est reserve aux profils internes.")
 
         technician = get_object_or_404(
-            scope_user_queryset(User.objects.filter(role__in=User.ASSIGNABLE_ROLES), request.user),
+            scope_user_queryset(
+                User.objects.filter(role=User.ROLE_TECHNICIAN, is_active=True),
+                request.user,
+            ),
             pk=pk,
         )
         date_from = _parse_anchor_date(request.query_params.get("date_from")) or timezone.localdate()

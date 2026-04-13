@@ -634,6 +634,14 @@ class SavPlatformTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "sav/dashboard.html")
 
+    def test_dashboard_does_not_count_non_technician_internal_users_as_technicians(self):
+        response = self.api.get(reverse("sav_api:dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        technician_rows = {row["status"]: row["total"] for row in response.data["technician_status_breakdown"]}
+        self.assertEqual(sum(technician_rows.values()), 0)
+        self.assertEqual(technician_rows["on_site"], 0)
+
     def test_api_docs_page_renders(self):
         response = self.client.get(reverse("api-docs"))
 
@@ -996,6 +1004,11 @@ class SavPlatformTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "sav/planning.html")
+
+    def test_technician_planning_api_rejects_non_technician_internal_users(self):
+        response = self.api.get(reverse("sav_api:technician-planning", args=[self.agent.pk]))
+
+        self.assertEqual(response.status_code, 404)
 
     def test_administration_page_renders_for_admin(self):
         admin_user = User.objects.create_user(
