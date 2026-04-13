@@ -1,0 +1,83 @@
+services:
+  - type: web
+    runtime: docker
+    name: afrilux-sav-web
+    region: frankfurt
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health/
+    maxShutdownDelaySeconds: 60
+    disk:
+      name: media
+      mountPath: /app/media
+      sizeGB: 5
+    envVars:
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_DEBUG
+        value: "false"
+      - key: DJANGO_DB_ENGINE
+        value: django.db.backends.postgresql
+      - key: DJANGO_DB_HOST
+        fromDatabase:
+          name: afrilux-sav-db
+          property: host
+      - key: DJANGO_DB_PORT
+        fromDatabase:
+          name: afrilux-sav-db
+          property: port
+      - key: DJANGO_DB_NAME
+        fromDatabase:
+          name: afrilux-sav-db
+          property: database
+      - key: DJANGO_DB_USER
+        fromDatabase:
+          name: afrilux-sav-db
+          property: user
+      - key: DJANGO_DB_PASSWORD
+        fromDatabase:
+          name: afrilux-sav-db
+          property: password
+      - key: DJANGO_DB_SSLMODE
+        value: prefer
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: afrilux-sav-redis
+          property: connectionString
+      - key: DJANGO_WAIT_FOR_DB
+        value: "true"
+      - key: DJANGO_RUN_MIGRATIONS_ON_STARTUP
+        value: "true"
+      - key: DJANGO_COLLECTSTATIC_ON_STARTUP
+        value: "true"
+      - key: DJANGO_SERVE_STATIC_LOCAL
+        value: "true"
+      - key: DJANGO_RUN_SCHEDULER_IN_WEB
+        value: "true"
+      - key: SCHEDULER_INTERVAL_SECONDS
+        value: "60"
+      - key: SCHEDULER_SKIP_BACKUP
+        value: "true"
+      - key: SAV_BACKUP_DIR
+        value: /app/media/backups
+      - key: SECURE_SSL_REDIRECT
+        value: "true"
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+      - key: CSRF_COOKIE_SECURE
+        value: "true"
+
+  - type: keyvalue
+    name: afrilux-sav-redis
+    region: frankfurt
+    plan: starter
+    ipAllowList: []
+    maxmemoryPolicy: allkeys-lru
+
+databases:
+  - name: afrilux-sav-db
+    region: frankfurt
+    plan: basic-256mb
+    postgresMajorVersion: "16"
+    ipAllowList: []
