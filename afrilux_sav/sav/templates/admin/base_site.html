@@ -1,0 +1,28 @@
+{% extends "admin/base.html" %}
+{% load i18n static %}
+
+{% block title %}{% if subtitle %}{{ subtitle }} | {% endif %}{{ title }} | Afrilux SAV Admin{% endblock %}
+
+{% block extrastyle %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'sav/admin-theme.css' %}">
+{% endblock %}
+
+{% block branding %}
+    <div class="sav-admin-brand">
+        <a class="sav-admin-brand__link" href="{% url 'admin:index' %}">
+            <span class="sav-admin-brand__mark">AF</span>
+            <span class="sav-admin-brand__copy">
+                <strong>Afrilux SAV</strong>
+                <small>Back-office et administration</small>
+            </span>
+        </a>
+    </div>
+{% endblock %}
+
+{% block nav-global %}
+    <div class="sav-admin-nav">
+        <a class="sav-admin-nav__link" href="{% url 'dashboard' %}">Retour au portail</a>
+    </div>
+{% endblock %}
+

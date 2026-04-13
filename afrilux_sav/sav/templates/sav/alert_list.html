@@ -1,0 +1,50 @@
+{% extends "sav/base.html" %}
+{% load sav_extras %}
+
+{% block title %}Alertes predictives | Afrilux SAV{% endblock %}
+
+{% block content %}
+<section class="section-head section-head--page">
+    <div>
+        <p class="eyebrow">Predictif</p>
+        <h1>Alertes et pre-pannes</h1>
+    </div>
+</section>
+
+<section class="card filter-card">
+    <form method="get" class="filter-grid">
+        <select name="status">
+            <option value="">Tous les statuts</option>
+            {% for value, label in status_choices %}
+                <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <select name="severity">
+            <option value="">Toutes les severites</option>
+            {% for value, label in severity_choices %}
+                <option value="{{ value }}" {% if severity_filter == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <button class="button button--ghost" type="submit">Filtrer</button>
+    </form>
+</section>
+
+<section class="card-grid">
+    {% for alert in alerts %}
+        <article class="card">
+            <div class="ticket-card__top">
+                <span class="badge badge--{{ alert.severity|badge_tone }}">{{ alert.get_severity_display }}</span>
+                <span class="badge badge--{{ alert.status|badge_tone }}">{{ alert.get_status_display }}</span>
+            </div>
+            <h2>{{ alert.title }}</h2>
+            <p>{{ alert.description }}</p>
+            <div class="ticket-card__meta">
+                <span>{{ alert.product.name }}</span>
+                <span>{% if alert.ticket %}{{ alert.ticket.reference }}{% else %}Sans ticket{% endif %}</span>
+            </div>
+        </article>
+    {% empty %}
+        <article class="card"><p class="muted">Aucune alerte predictive visible.</p></article>
+    {% endfor %}
+</section>
+{% endblock %}

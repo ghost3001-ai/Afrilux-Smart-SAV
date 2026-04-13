@@ -1,0 +1,102 @@
+{% extends "sav/base.html" %}
+{% load sav_extras %}
+
+{% block title %}Planning Techniciens | Afrilux SAV{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <div>
+        <p class="eyebrow">Planning techniciens</p>
+        <h1>Semaine du {{ week_start|date:"d/m/Y" }} au {{ week_end|date:"d/m/Y" }}</h1>
+        <p class="hero__lead">
+            Affectez les tickets ouverts par glisser-deposer et suivez le calendrier hebdomadaire des interventions par technicien.
+        </p>
+    </div>
+    <div class="hero__actions">
+        <a class="button button--ghost" href="{% url 'ticket-list' %}?assignment=unassigned">Tickets non assignes</a>
+        <a class="button button--primary" href="{% url 'reporting-page' %}">Voir le reporting</a>
+    </div>
+</section>
+
+<section class="planning-grid" data-planning-board data-assign-url-template="{{ ticket_assign_url_template }}">
+    <aside class="planning-sidebar">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Backlog</p>
+                <h2>Tickets a affecter</h2>
+            </div>
+            <span class="badge badge--warning">{{ unassigned_tickets|length }}</span>
+        </div>
+        <div class="planning-column__dropzone">
+            {% for ticket in unassigned_tickets %}
+                <article class="planning-ticket" draggable="true" data-ticket-id="{{ ticket.id }}">
+                    <strong>{{ ticket.reference }}</strong>
+                    <p>{{ ticket.title }}</p>
+                    <div class="chip-row">
+                        <span class="badge badge--{{ ticket.priority|badge_tone }}">{{ ticket.get_priority_display }}</span>
+                        <span class="badge badge--neutral">{{ ticket.client }}</span>
+                    </div>
+                </article>
+            {% empty %}
+                <p class="muted">Aucun ticket non assigne cette semaine.</p>
+            {% endfor %}
+        </div>
+    </aside>
+
+    <div class="planning-board">
+        {% for card in technician_cards %}
+            <article class="planning-column">
+                <div class="section-head">
+                    <div>
+                        <p class="eyebrow">{{ card.technician.get_role_display }}</p>
+                        <h2>{{ card.technician }}</h2>
+                    </div>
+                    <div class="chip-row">
+                        <span class="badge badge--{{ card.technician.technician_status|badge_tone }}">{{ card.technician.get_technician_status_display }}</span>
+                        {% if card.technician.primary_city %}<span class="badge badge--neutral">{{ card.technician.primary_city }}</span>{% endif %}
+                    </div>
+                </div>
+
+                <div class="planning-column__dropzone" data-technician-dropzone="{{ card.technician.id }}">
+                    {% for ticket in card.assigned_tickets %}
+                        <article class="planning-ticket" draggable="true" data-ticket-id="{{ ticket.id }}">
+                            <strong>{{ ticket.reference }}</strong>
+                            <p>{{ ticket.title }}</p>
+                            <div class="chip-row">
+                                <span class="badge badge--{{ ticket.priority|badge_tone }}">{{ ticket.get_priority_display }}</span>
+                                <span class="badge badge--{{ ticket.status|badge_tone }}">{{ ticket.get_status_display }}</span>
+                            </div>
+                            <small>{{ ticket.client }}{% if ticket.location %} · {{ ticket.location }}{% endif %}</small>
+                        </article>
+                    {% empty %}
+                        <p class="muted">Aucun ticket actuellement affecte.</p>
+                    {% endfor %}
+                </div>
+
+                <hr class="divider">
+
+                <div class="planning-calendar">
+                    {% for row in card.calendar_rows %}
+                        <div class="planning-day">
+                            <strong>{{ row.day|date:"l d/m" }}</strong>
+                            <div class="planning-day__items">
+                                {% for item in row.items %}
+                                    <div class="planning-day__item">
+                                        <strong>{{ item.ticket.reference }}</strong>
+                                        <p>{{ item.ticket.client }}</p>
+                                        <small>{{ item.scheduled_for|date:"H:i" }} · {{ item.action_taken }}</small>
+                                    </div>
+                                {% empty %}
+                                    <small class="muted">Aucune intervention planifiee.</small>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            </article>
+        {% empty %}
+            <p class="muted">Aucun technicien actif dans cette organisation.</p>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

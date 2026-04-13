@@ -1,0 +1,383 @@
+{% extends "sav/base.html" %}
+{% load sav_extras %}
+
+{% block title %}{{ ticket.reference }} | Afrilux SAV{% endblock %}
+
+{% block content %}
+<section class="section-head section-head--page">
+    <div>
+        <p class="eyebrow">{{ ticket.reference }}</p>
+        <h1>{{ ticket.title }}</h1>
+        <div class="chip-row">
+            <span class="badge badge--{{ ticket.priority|badge_tone }}">{{ ticket.get_priority_display }}</span>
+            <span class="badge badge--{{ ticket.status|badge_tone }}">{{ ticket.get_status_display }}</span>
+            <span class="badge badge--neutral">{{ ticket.get_channel_display }}</span>
+            {% if ticket.suspected_fraud %}
+                <span class="badge badge--warning">Fraude suspectee</span>
+            {% endif %}
+        </div>
+    </div>
+    <div class="hero__actions">
+        {% if can_edit %}
+            <a class="button button--ghost" href="{% url 'ticket-update' ticket.pk %}">Modifier</a>
+        {% endif %}
+        {% if can_confirm_resolution %}
+            <form method="post" action="{% url 'ticket-confirm-resolution' ticket.pk %}">
+                {% csrf_token %}
+                <button class="button button--primary" type="submit">Valider la resolution</button>
+            </form>
+        {% endif %}
+        {% if can_reopen %}
+            <form method="post" action="{% url 'ticket-reopen-web' ticket.pk %}">
+                {% csrf_token %}
+                <button class="button button--ghost" type="submit">Rouvrir</button>
+            </form>
+        {% endif %}
+        {% if sav_shell.is_internal %}
+            <form method="post" action="{% url 'ticket-agentic-web' ticket.pk %}">
+                {% csrf_token %}
+                <button class="button button--primary" type="submit">Resolution agentique</button>
+            </form>
+        {% endif %}
+        {% if sav_shell.is_internal %}
+            <form method="post" action="{% url 'ticket-automation-web' ticket.pk %}">
+                {% csrf_token %}
+                <button class="button button--ghost" type="submit">Executer workflow</button>
+            </form>
+        {% endif %}
+    </div>
+</section>
+
+<section class="two-col">
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Contexte</p>
+            <h2>Informations dossier</h2>
+        </div>
+        <dl class="detail-grid">
+            <div><dt>Client</dt><dd>{{ ticket.client }}</dd></div>
+            <div><dt>Type client</dt><dd>{{ ticket.client.get_client_type_display|default:"Non precise" }}</dd></div>
+            <div><dt>Technicien / referent</dt><dd>{{ ticket.assigned_agent|default:"Non affecte" }}</dd></div>
+            <div><dt>Secteur</dt><dd>{{ ticket.client.sector|default:"Non precise" }}</dd></div>
+            <div><dt>Domaine metier</dt><dd>{{ ticket.get_business_domain_display }}</dd></div>
+            <div><dt>Categorie</dt><dd>{{ ticket.get_category_display }}</dd></div>
+            <div><dt>SLA</dt><dd>{{ ticket.sla_deadline|default:"Non defini" }}</dd></div>
+            <div><dt>Canal d'entree</dt><dd>{{ ticket.get_channel_display }}</dd></div>
+            <div><dt>Localisation</dt><dd>{{ ticket.location|default:"Non renseignee" }}</dd></div>
+            <div><dt>NINEA / RC</dt><dd>{{ ticket.client.tax_identifier|default:"-" }}</dd></div>
+            {% if ticket.related_transaction %}
+                <div><dt>Transaction</dt><dd>{{ ticket.related_transaction.external_reference|default:ticket.related_transaction.provider_reference|default:ticket.related_transaction.pk }}</dd></div>
+                <div><dt>Montant</dt><dd>{{ ticket.related_transaction.amount }} {{ ticket.related_transaction.currency }}</dd></div>
+            {% endif %}
+            <div class="detail-grid__full"><dt>Adresse client</dt><dd>{{ ticket.client.address|default:"Non renseignee" }}</dd></div>
+            <div class="detail-grid__full"><dt>Description</dt><dd>{{ ticket.description }}</dd></div>
+            {% if ticket.resolution_summary %}
+                <div class="detail-grid__full"><dt>Resolution</dt><dd>{{ ticket.resolution_summary }}</dd></div>
+            {% endif %}
+        </dl>
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Produit</p>
+            <h2>Equipement associe</h2>
+        </div>
+        {% if ticket.product %}
+            <div class="product-panel">
+                <h3><a href="{% url 'product-detail' ticket.product.pk %}">{{ ticket.product.name }}</a></h3>
+                <p>{{ ticket.product.serial_number }}</p>
+                <div class="chip-row">
+                    <span class="badge badge--{{ ticket.product.status|badge_tone }}">{{ ticket.product.get_status_display }}</span>
+                    <span class="badge badge--{% if ticket.product.is_under_warranty %}success{% else %}warning{% endif %}">
+                        {% if ticket.product.is_under_warranty %}Sous garantie{% else %}Hors garantie{% endif %}
+                    </span>
+                    <span class="badge badge--neutral">Sante {{ ticket.product.health_score }}/100</span>
+                </div>
+            </div>
+        {% else %}
+            <p class="muted">Aucun produit rattache.</p>
+        {% endif %}
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Contacts client</p>
+            <h2>Interlocuteurs</h2>
+        </div>
+        {% for contact in client_contacts %}
+            <div class="list-row">
+                <div>
+                    <strong>{{ contact.first_name }} {{ contact.last_name }}</strong>
+                    <p>{{ contact.job_title|default:"Contact" }}{% if contact.is_primary %} · Principal{% endif %}</p>
+                </div>
+                <div class="list-row__stats">
+                    <span>{{ contact.phone|default:"-" }}</span>
+                    <span>{{ contact.email|default:"-" }}</span>
+                </div>
+            </div>
+        {% empty %}
+            <p class="muted">Aucun contact secondaire enregistre.</p>
+        {% endfor %}
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Affectations</p>
+            <h2>Historique technicien</h2>
+        </div>
+        {% for assignment in assignment_history %}
+            <div class="list-row">
+                <div>
+                    <strong>{{ assignment.technician }}</strong>
+                    <p>
+                        {{ assignment.assigned_at|date:"d/m/Y H:i" }}
+                        {% if assignment.assigned_by %} · par {{ assignment.assigned_by }}{% endif %}
+                    </p>
+                </div>
+                <div class="list-row__stats">
+                    <span class="badge badge--{{ assignment.status|badge_tone }}">{{ assignment.get_status_display }}</span>
+                    {% if assignment.released_at %}<span>{{ assignment.released_at|date:"d/m H:i" }}</span>{% endif %}
+                </div>
+            </div>
+        {% empty %}
+            <p class="muted">Aucune affectation historisee pour ce ticket.</p>
+        {% endfor %}
+    </article>
+</section>
+
+<section class="three-col">
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Conversation</p>
+            <h2>Messages</h2>
+        </div>
+        <div class="timeline">
+            {% for message in visible_messages %}
+                <div class="timeline__item">
+                    <div class="timeline__head">
+                        <strong>{{ message.sender }}</strong>
+                        <span class="badge badge--{{ message.message_type|badge_tone }}">{{ message.get_message_type_display }}</span>
+                    </div>
+                    <p>{{ message.content }}</p>
+                    <small>{{ message.created_at }} · {{ message.get_channel_display }}</small>
+                </div>
+            {% empty %}
+                <p class="muted">Aucun message enregistre.</p>
+            {% endfor %}
+        </div>
+        <form method="post" action="{% url 'ticket-message-create' ticket.pk %}" class="form-grid">
+            {% csrf_token %}
+            {% for field in message_form %}
+                <label class="field {% if field.name == 'content' %}field--full{% endif %}">
+                    {% if not field.is_hidden %}<span>{{ field.label }}</span>{% endif %}
+                    {{ field }}
+                    {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
+                </label>
+            {% endfor %}
+            <button class="button button--primary" type="submit">Ajouter le message</button>
+        </form>
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Preuves</p>
+            <h2>Pieces jointes</h2>
+        </div>
+        {% for attachment in attachments %}
+            <div class="list-row">
+                <div>
+                    <strong><a href="{{ attachment.file.url }}" target="_blank" rel="noopener">{{ attachment.original_name|default:"Fichier" }}</a></strong>
+                    <p>{{ attachment.get_kind_display }}{% if attachment.note %} · {{ attachment.note }}{% endif %}</p>
+                </div>
+                <span class="badge badge--neutral">{{ attachment.created_at|date:"d/m H:i" }}</span>
+            </div>
+        {% empty %}
+            <p class="muted">Aucune preuve ou capture rattachee.</p>
+        {% endfor %}
+        <hr class="divider">
+        <form method="post" action="{% url 'ticket-attachment-create' ticket.pk %}" enctype="multipart/form-data" class="form-grid">
+            {% csrf_token %}
+            {% for field in attachment_form %}
+                <label class="field {% if field.name == 'file' %}field--full{% endif %}">
+                    <span>{{ field.label }}</span>
+                    {{ field }}
+                    {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
+                </label>
+            {% endfor %}
+            <button class="button button--primary" type="submit">Ajouter une preuve</button>
+        </form>
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Actions metier</p>
+            <h2>Credits compte</h2>
+        </div>
+        {% for credit in account_credits %}
+            <div class="list-row">
+                <div>
+                    <strong>{% if credit.currency == "XAF" %}{{ credit.amount|currency_xaf }}{% else %}{{ credit.amount }} {{ credit.currency }}{% endif %}</strong>
+                    <p>{{ credit.reason }}{% if credit.note %} · {{ credit.note|truncatechars:80 }}{% endif %}</p>
+                </div>
+                <span class="badge badge--success">{{ credit.executed_at|date:"d/m H:i" }}</span>
+            </div>
+        {% empty %}
+            <p class="muted">Aucun credit compte execute sur ce dossier.</p>
+        {% endfor %}
+        {% if ticket.feedback %}
+            <hr class="divider">
+            <div class="mini-card">
+                <strong>Feedback client: {{ ticket.feedback.rating }}/5</strong>
+                <p>{{ ticket.feedback.comment|default:"Aucun commentaire" }}</p>
+            </div>
+        {% endif %}
+        {% if can_credit_account %}
+            <hr class="divider">
+            <form method="post" action="{% url 'ticket-credit-account' ticket.pk %}" class="form-grid">
+                {% csrf_token %}
+                {% for field in credit_form %}
+                    <label class="field {% if field.name == 'note' %}field--full{% endif %}">
+                        <span>{{ field.label }}</span>
+                        {{ field }}
+                        {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
+                    </label>
+                {% endfor %}
+                <button class="button button--primary" type="submit">Crediter le compte</button>
+            </form>
+        {% endif %}
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Execution</p>
+            <h2>Interventions et sessions</h2>
+        </div>
+        {% for intervention in ticket.interventions.all %}
+            <div class="mini-card">
+                <div class="section-head">
+                    <div>
+                        <strong>{{ intervention.action_taken }}</strong>
+                        <p>{{ intervention.agent }} · {{ intervention.get_intervention_type_display }}</p>
+                    </div>
+                    <span class="badge badge--{{ intervention.status|badge_tone }}">{{ intervention.get_status_display }}</span>
+                </div>
+                <p><strong>Diagnostic:</strong> {{ intervention.diagnosis|default:"-" }}</p>
+                <p><strong>Rapport:</strong> {{ intervention.technical_report|default:"Aucun rapport detaille." }}</p>
+                <p><strong>Lieu:</strong> {{ intervention.location_snapshot|default:"-" }} · <strong>Temps:</strong> {{ intervention.time_spent_minutes }} min</p>
+                <p><strong>Pieces:</strong> {{ intervention.parts_used|default:"Aucune piece declaree" }}</p>
+                <div class="chip-row">
+                    {% if intervention.report_pdf %}
+                        <a class="button button--ghost" href="{% url 'ticket-intervention-pdf' ticket.pk intervention.pk %}">Bon PDF</a>
+                    {% endif %}
+                    {% if intervention.client_signed_by %}
+                        <span class="badge badge--success">Signe par {{ intervention.client_signed_by }}</span>
+                    {% endif %}
+                </div>
+                {% if intervention.media.all %}
+                    <div class="timeline" style="margin-top: 1rem;">
+                        {% for media in intervention.media.all %}
+                            <div class="timeline__item">
+                                <strong>{{ media.get_kind_display }}</strong>
+                                <p>{{ media.note|default:media.file.name }}</p>
+                                <small><a href="{{ media.file.url }}" target="_blank" rel="noopener">Ouvrir le fichier</a></small>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+        {% empty %}
+            <p class="muted">Aucune intervention rattachee.</p>
+        {% endfor %}
+        {% if can_edit %}
+            <hr class="divider">
+            <form method="post" action="{% url 'ticket-intervention-create' ticket.pk %}" enctype="multipart/form-data" class="form-grid">
+                {% csrf_token %}
+                {% for field in intervention_form %}
+                    <label class="field {% if field.name == 'diagnosis' or field.name == 'technical_report' or field.name == 'parts_used' or field.name == 'structured_parts_used' or field.name == 'intervention_media' %}field--full{% endif %}">
+                        <span>{{ field.label }}</span>
+                        {{ field }}
+                        {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+                        {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
+                    </label>
+                {% endfor %}
+                <button class="button button--primary" type="submit">Ajouter une intervention</button>
+            </form>
+        {% endif %}
+        <hr class="divider">
+        {% for session in ticket.support_sessions.all %}
+            <div class="list-row">
+                <div>
+                    <strong>{{ session.get_session_type_display }}</strong>
+                    <p>{{ session.annotations_summary|default:"Session support" }}</p>
+                </div>
+                <span class="badge badge--{{ session.status|badge_tone }}">{{ session.get_status_display }}</span>
+            </div>
+        {% empty %}
+            <p class="muted">Aucune session visio ou AR.</p>
+        {% endfor %}
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">IA et recommandations</p>
+            <h2>Assistants</h2>
+        </div>
+        {% for action in ai_actions %}
+            <div class="mini-card">
+                <strong>{{ action.get_action_type_display }}</strong>
+                <p>{{ action.rationale|truncatechars:130 }}</p>
+                <small>Confiance {{ action.confidence }}%</small>
+            </div>
+        {% empty %}
+            <p class="muted">Aucune action IA journalisee.</p>
+        {% endfor %}
+        <hr class="divider">
+        {% for offer in offers %}
+            <div class="mini-card">
+                <strong>{{ offer.title }}</strong>
+                <p>{{ offer.description }}</p>
+                <small>{{ offer.price|currency_xaf }} · {{ offer.get_status_display }}</small>
+            </div>
+        {% empty %}
+            <p class="muted">Aucune offre contextuelle sur ce ticket.</p>
+        {% endfor %}
+    </article>
+</section>
+
+<section class="two-col">
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Alertes produit</p>
+            <h2>Predictif</h2>
+        </div>
+        {% for alert in product_alerts %}
+            <div class="list-row">
+                <div>
+                    <strong>{{ alert.title }}</strong>
+                    <p>{{ alert.description|truncatechars:100 }}</p>
+                </div>
+                <span class="badge badge--{{ alert.severity|badge_tone }}">{{ alert.get_severity_display }}</span>
+            </div>
+        {% empty %}
+            <p class="muted">Aucune alerte predictive sur le produit.</p>
+        {% endfor %}
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Knowledge</p>
+            <h2>Articles relies</h2>
+        </div>
+        {% for article in knowledge_articles %}
+            <a class="list-row list-row--link" href="{% url 'knowledge-detail' article.slug %}">
+                <div>
+                    <strong>{{ article.title }}</strong>
+                    <p>{{ article.summary|default:article.content|truncatechars:100 }}</p>
+                </div>
+            </a>
+        {% empty %}
+            <p class="muted">Aucun article pertinent trouve.</p>
+        {% endfor %}
+    </article>
+</section>
+{% endblock %}

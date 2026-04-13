@@ -1,0 +1,38 @@
+{% extends "sav/base.html" %}
+{% load sav_extras %}
+
+{% block title %}Notifications | Afrilux SAV{% endblock %}
+
+{% block content %}
+<section class="section-head section-head--page">
+    <div>
+        <p class="eyebrow">Communication</p>
+        <h1>Notifications</h1>
+    </div>
+</section>
+
+<section class="stack">
+    {% for notification in notifications %}
+        <article class="card notification-card {% if notification.status != 'read' %}notification-card--active{% endif %}">
+            <div class="ticket-card__top">
+                <span class="badge badge--{{ notification.channel|badge_tone }}">{{ notification.get_channel_display }}</span>
+                <span class="badge badge--{{ notification.status|badge_tone }}">{{ notification.get_status_display }}</span>
+            </div>
+            <h2>{{ notification.subject }}</h2>
+            <p>{{ notification.message }}</p>
+            <div class="ticket-card__meta">
+                <span>{{ notification.created_at }}</span>
+                <span>{% if notification.ticket %}{{ notification.ticket.reference }}{% else %}Systeme{% endif %}</span>
+            </div>
+            {% if notification.status != 'read' %}
+                <form method="post" action="{% url 'notification-read' notification.pk %}">
+                    {% csrf_token %}
+                    <button class="button button--ghost" type="submit">Marquer comme lue</button>
+                </form>
+            {% endif %}
+        </article>
+    {% empty %}
+        <article class="card"><p class="muted">Aucune notification disponible.</p></article>
+    {% endfor %}
+</section>
+{% endblock %}

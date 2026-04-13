@@ -1,0 +1,34 @@
+{% extends "sav/base.html" %}
+
+{% block title %}{% if object %}Modifier {{ object.name }}{% else %}Nouveau produit{% endif %} | Afrilux SAV{% endblock %}
+
+{% block content %}
+<section class="section-head section-head--page">
+    <div>
+        <p class="eyebrow">Parc installe</p>
+        <h1>{% if object %}Modifier {{ object.name }}{% else %}Ajouter un produit{% endif %}</h1>
+        <p class="muted">Gestion reservee a l'administrateur de l'organisation.</p>
+    </div>
+</section>
+
+<section class="card form-card">
+    <form method="post" enctype="multipart/form-data" class="form-grid form-grid--two">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+            <div class="form-errors form-errors--full">{{ form.non_field_errors }}</div>
+        {% endif %}
+        {% for field in form %}
+            <label class="field {% if field.name == 'notes' or field.name == 'equipment_photo' or field.name == 'installation_address' %}field--full{% endif %}">
+                <span>{{ field.label }}</span>
+                {{ field }}
+                {% if field.help_text %}<small class="field__help">{{ field.help_text }}</small>{% endif %}
+                {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
+            </label>
+        {% endfor %}
+        <div class="form-actions field--full">
+            <button class="button button--primary" type="submit">{% if object %}Enregistrer les modifications{% else %}Enregistrer le produit{% endif %}</button>
+            <a class="button button--ghost" href="{% if object %}{% url 'product-detail' object.pk %}{% else %}{% url 'product-list' %}{% endif %}">Annuler</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

@@ -1,0 +1,131 @@
+{% extends "sav/base.html" %}
+
+{% block title %}Reporting | Afrilux SAV{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <div>
+        <p class="eyebrow">Reporting SAV</p>
+        <h1>Rapports journaliers, hebdomadaires et mensuels</h1>
+        <p class="hero__lead">Consultez les indicateurs d'activite, la performance terrain et exportez les rapports au format Excel, CSV ou PDF.</p>
+    </div>
+    <div class="hero__actions">
+        <a class="button button--primary" href="/api/rapports/export/journalier/?format=xlsx">Exporter journalier</a>
+        <a class="button button--ghost" href="/api/rapports/export/mensuel/?format=pdf">Exporter mensuel PDF</a>
+    </div>
+</section>
+
+<section class="three-col">
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Journalier</p>
+            <h2>{{ daily_report.period_label }}</h2>
+        </div>
+        <div class="list-row"><strong>Tickets crees</strong><span>{{ daily_report.summary.tickets_crees }}</span></div>
+        <div class="list-row"><strong>Tickets resolus</strong><span>{{ daily_report.summary.tickets_resolus }}</span></div>
+        <div class="list-row"><strong>Tickets hors SLA</strong><span>{{ daily_report.summary.tickets_hors_sla }}</span></div>
+        <div class="list-row"><strong>Taux de resolution</strong><span>{{ daily_report.resolution_rate_percent }}%</span></div>
+        <div class="list-row"><strong>Non assignes &gt; 30 min</strong><span>{{ daily_report.tickets_non_assignes_30min }}</span></div>
+        <div class="hero__actions">
+            <a class="button button--ghost" href="/api/rapports/export/journalier/?format=xlsx">Excel</a>
+            <a class="button button--ghost" href="/api/rapports/export/journalier/?format=csv">CSV</a>
+            <a class="button button--ghost" href="/api/rapports/export/journalier/?format=pdf">PDF</a>
+        </div>
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Hebdomadaire</p>
+            <h2>{{ weekly_report.period_label }}</h2>
+        </div>
+        <div class="list-row"><strong>Tickets crees</strong><span>{{ weekly_report.summary.tickets_crees }}</span></div>
+        <div class="list-row"><strong>Tickets resolus</strong><span>{{ weekly_report.summary.tickets_resolus }}</span></div>
+        <div class="list-row"><strong>Tickets ouverts</strong><span>{{ weekly_report.summary.tickets_ouverts }}</span></div>
+        <div class="list-row"><strong>Tickets annules</strong><span>{{ weekly_report.tickets_annules }}</span></div>
+        <div class="list-row"><strong>Top clients</strong><span>{{ weekly_report.top_clients|length }}</span></div>
+        <div class="hero__actions">
+            <a class="button button--ghost" href="/api/rapports/export/hebdomadaire/?format=xlsx">Excel</a>
+            <a class="button button--ghost" href="/api/rapports/export/hebdomadaire/?format=csv">CSV</a>
+            <a class="button button--ghost" href="/api/rapports/export/hebdomadaire/?format=pdf">PDF</a>
+        </div>
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Mensuel</p>
+            <h2>{{ monthly_report.period_label }}</h2>
+        </div>
+        <div class="list-row"><strong>Tickets crees</strong><span>{{ monthly_report.summary.tickets_crees }}</span></div>
+        <div class="list-row"><strong>Tickets resolus</strong><span>{{ monthly_report.summary.tickets_resolus }}</span></div>
+        <div class="list-row"><strong>Resolution moyenne</strong><span>{{ monthly_report.summary.resolution_moyenne_h }} h</span></div>
+        <div class="list-row"><strong>Satisfaction</strong><span>{{ monthly_report.satisfaction_moyenne }}/5</span></div>
+        <div class="list-row"><strong>Causes recurrentes</strong><span>{{ monthly_report.causes_recurrentes|length }}</span></div>
+        <div class="hero__actions">
+            <a class="button button--ghost" href="/api/rapports/export/mensuel/?format=xlsx">Excel</a>
+            <a class="button button--ghost" href="/api/rapports/export/mensuel/?format=csv">CSV</a>
+            <a class="button button--ghost" href="/api/rapports/export/mensuel/?format=pdf">PDF</a>
+        </div>
+    </article>
+</section>
+
+<section class="two-col">
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Top techniciens</p>
+            <h2>Semaine en cours</h2>
+        </div>
+        {% for agent in weekly_report.performance_techniciens %}
+            <div class="list-row">
+                <div>
+                    <strong>{{ agent.agent_name }}</strong>
+                    <p>{{ agent.resolved_tickets }} resolu(s)</p>
+                </div>
+                <span>{% if agent.average_resolution_hours != None %}{{ agent.average_resolution_hours }} h{% else %}N/A{% endif %}</span>
+            </div>
+        {% empty %}
+            <p class="muted">Aucune performance a afficher.</p>
+        {% endfor %}
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">SLA par priorite</p>
+            <h2>Respect des delais</h2>
+        </div>
+        {% for row in weekly_report.sla_par_priorite %}
+            <div class="list-row">
+                <div>
+                    <strong>{{ row.priorite }}</strong>
+                    <p>{{ row.dans_les_delais }}/{{ row.total }} dans les delais</p>
+                </div>
+                <span>{{ row.pourcentage }}%</span>
+            </div>
+        {% empty %}
+            <p class="muted">Aucune donnee SLA disponible.</p>
+        {% endfor %}
+    </article>
+</section>
+
+<section class="card">
+    <div class="section-head">
+        <p class="eyebrow">Archives</p>
+        <h2>Rapports deja generes</h2>
+    </div>
+    {% for report in generated_reports %}
+        <div class="list-row">
+            <div>
+                <strong>{{ report.get_report_type_display }} · {{ report.period_label }}</strong>
+                <p>{{ report.created_at }}{% if report.generated_by %} · par {{ report.generated_by }}{% endif %}</p>
+            </div>
+            <div class="list-row__stats">
+                <span>{{ report.get_export_format_display }}</span>
+                {% if report.archive_file %}
+                    <a class="button button--ghost" href="{{ report.archive_file.url }}" target="_blank" rel="noopener">Ouvrir</a>
+                {% endif %}
+            </div>
+        </div>
+    {% empty %}
+        <p class="muted">Aucune archive de rapport pour le moment.</p>
+    {% endfor %}
+</section>
+{% endblock %}

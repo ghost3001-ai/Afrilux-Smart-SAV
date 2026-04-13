@@ -1,0 +1,240 @@
+:root {
+    --primary: #17222d;
+    --secondary: #b57643;
+    --accent: #1f6f67;
+    --primary-fg: #f7f3ec;
+    --body-bg: #f4efe8;
+    --body-quiet-color: #6b7783;
+    --body-loud-color: #17222d;
+    --header-color: #f7f3ec;
+    --header-branding-color: #f7f3ec;
+    --header-bg: linear-gradient(135deg, #17222d 0%, #213548 64%, #b57643 100%);
+    --header-link-color: #f7f3ec;
+    --breadcrumbs-bg: rgba(255, 255, 255, 0.78);
+    --breadcrumbs-fg: #51606c;
+    --breadcrumbs-link-fg: #17222d;
+    --link-fg: #8d572f;
+    --link-hover-color: #17222d;
+    --link-selected-fg: #1f6f67;
+    --hairline-color: rgba(23, 34, 45, 0.08);
+    --border-color: rgba(23, 34, 45, 0.12);
+    --error-fg: #a63d34;
+    --message-success-bg: rgba(31, 111, 103, 0.12);
+    --message-warning-bg: rgba(181, 118, 67, 0.16);
+    --message-error-bg: rgba(166, 61, 52, 0.14);
+    --darkened-bg: rgba(23, 34, 45, 0.04);
+    --selected-bg: rgba(181, 118, 67, 0.08);
+    --close-button-bg: #a63d34;
+    --close-button-hover-bg: #882f28;
+}
+
+body {
+    background:
+        radial-gradient(circle at top left, rgba(33, 53, 72, 0.12), transparent 28%),
+        radial-gradient(circle at top right, rgba(181, 118, 67, 0.14), transparent 30%),
+        linear-gradient(180deg, #f8f4ed 0%, #efe8de 100%);
+    color: #17222d;
+}
+
+#header {
+    color: var(--header-color);
+    background: var(--header-bg);
+    box-shadow: 0 18px 40px rgba(17, 30, 42, 0.12);
+}
+
+#header a:link,
+#header a:visited {
+    color: var(--header-link-color);
+}
+
+#branding,
+#user-tools {
+    display: flex;
+    align-items: center;
+}
+
+.sav-admin-brand__link {
+    display: inline-flex;
+    align-items: center;
+    gap: 14px;
+    color: inherit;
+}
+
+.sav-admin-brand__mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 46px;
+    height: 46px;
+    border-radius: 14px;
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.18), rgba(181, 118, 67, 0.26));
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+}
+
+.sav-admin-brand__copy {
+    display: grid;
+    gap: 2px;
+}
+
+.sav-admin-brand__copy strong {
+    font-size: 1rem;
+    letter-spacing: -0.02em;
+}
+
+.sav-admin-brand__copy small {
+    color: rgba(247, 243, 236, 0.78);
+    font-size: 0.82rem;
+}
+
+.sav-admin-nav {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 0 18px 18px;
+}
+
+.sav-admin-nav__link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 38px;
+    padding: 0 14px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.08);
+    color: #f7f3ec;
+    font-weight: 600;
+}
+
+div.breadcrumbs {
+    border-bottom: 1px solid rgba(23, 34, 45, 0.06);
+    background: rgba(255, 255, 255, 0.76);
+    backdrop-filter: blur(12px);
+}
+
+#nav-sidebar,
+.module,
+.inline-group,
+.selector,
+.submit-row,
+.paginator,
+.dashboard .module table,
+.dashboard .module table th,
+.dashboard .module table td,
+#changelist-filter,
+#changelist-form .actions,
+#content-related {
+    border-color: rgba(23, 34, 45, 0.08);
+}
+
+#content,
+.module,
+.inline-group,
+#changelist-filter,
+#content-related,
+.selector,
+.submit-row,
+.dashboard .module {
+    border-radius: 18px;
+}
+
+.module,
+.inline-group,
+#changelist-filter,
+#content-related,
+.selector,
+.submit-row,
+.dashboard .module,
+.login #container {
+    background: rgba(255, 255, 255, 0.84);
+    box-shadow: 0 14px 30px rgba(17, 30, 42, 0.06);
+}
+
+.dashboard .module caption,
+.module caption,
+.inline-group h2 {
+    background: linear-gradient(135deg, rgba(23, 34, 45, 0.94), rgba(33, 53, 72, 0.94));
+    color: #f7f3ec;
+    border-radius: 16px 16px 0 0;
+}
+
+.button,
+input[type="submit"],
+input[type="button"],
+.submit-row input,
+a.button {
+    border-radius: 14px;
+    background: linear-gradient(135deg, #17222d, #b57643);
+    border: 0;
+    box-shadow: 0 12px 24px rgba(17, 30, 42, 0.12);
+}
+
+.button.default,
+input[type="submit"].default,
+.submit-row input.default {
+    background: linear-gradient(135deg, #17222d, #1f6f67);
+}
+
+.button.cancel-link,
+.deletelink,
+a.deletelink {
+    border-radius: 14px;
+}
+
+input,
+textarea,
+select,
+.vTextField,
+.vLargeTextField,
+.selector select {
+    border-radius: 12px;
+    border: 1px solid rgba(23, 34, 45, 0.14);
+    background: rgba(255, 255, 255, 0.92);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+    border-color: rgba(181, 118, 67, 0.4);
+    box-shadow: 0 0 0 4px rgba(181, 118, 67, 0.12);
+}
+
+table thead th {
+    background: rgba(244, 239, 232, 0.92);
+}
+
+tr:nth-child(even),
+.row-form-errors {
+    background: rgba(23, 34, 45, 0.02);
+}
+
+.login #header {
+    min-height: 112px;
+}
+
+.login #content {
+    padding-top: 24px;
+}
+
+.login #container {
+    overflow: hidden;
+    border: 1px solid rgba(23, 34, 45, 0.08);
+}
+
+.login .form-row {
+    padding: 0;
+    border: 0;
+}
+
+@media (max-width: 767px) {
+    #branding,
+    #user-tools,
+    .sav-admin-nav {
+        display: block;
+    }
+
+    .sav-admin-nav {
+        padding-top: 12px;
+    }
+}

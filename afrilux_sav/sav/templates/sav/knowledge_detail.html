@@ -1,0 +1,17 @@
+{% extends "sav/base.html" %}
+
+{% block title %}{{ article.title }} | Afrilux SAV{% endblock %}
+
+{% block content %}
+<article class="card article-card">
+    <p class="eyebrow">{{ article.category|default:"Guide" }}</p>
+    <h1>{{ article.title }}</h1>
+    <p class="hero__lead">{{ article.summary }}</p>
+    {% if article.product %}
+        <p class="muted">Produit concerne: {{ article.product.name }} ({{ article.product.serial_number }})</p>
+    {% endif %}
+    <div class="article-content">
+        {{ article.content|linebreaks }}
+    </div>
+</article>
+{% endblock %}

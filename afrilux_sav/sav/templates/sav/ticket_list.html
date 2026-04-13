@@ -1,0 +1,75 @@
+{% extends "sav/base.html" %}
+{% load sav_extras %}
+
+{% block title %}Tickets | Afrilux SAV{% endblock %}
+
+{% block content %}
+<section class="section-head section-head--page">
+    <div>
+        <p class="eyebrow">Dossiers SAV</p>
+        <h1>Tous les tickets</h1>
+    </div>
+    <div class="hero__actions">
+        {% if sav_shell.has_backoffice_access %}
+            <a class="button button--ghost" href="{% url 'planning-page' %}">Planning</a>
+        {% endif %}
+        <a class="button button--primary" href="{% url 'ticket-create' %}">Nouveau ticket</a>
+    </div>
+</section>
+
+<section class="card filter-card">
+    <form method="get" class="filter-grid">
+        <input type="search" name="q" value="{{ filters.q }}" placeholder="Reference, client, produit, mot-cle...">
+        <select name="status">
+            <option value="">Tous les statuts</option>
+            {% for value, label in status_choices %}
+                <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <select name="priority">
+            <option value="">Toutes les priorites</option>
+            {% for value, label in priority_choices %}
+                <option value="{{ value }}" {% if filters.priority == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <select name="focus">
+            <option value="">Vue standard</option>
+            <option value="urgent" {% if filters.focus == "urgent" %}selected{% endif %}>Urgents</option>
+            <option value="fraud" {% if filters.focus == "fraud" %}selected{% endif %}>Fraude suspectee</option>
+        </select>
+        {% if sav_shell.is_internal %}
+            <select name="assignment">
+                <option value="">Toutes les affectations</option>
+                <option value="mine" {% if filters.assignment == "mine" %}selected{% endif %}>Mes tickets</option>
+                <option value="unassigned" {% if filters.assignment == "unassigned" %}selected{% endif %}>Non assignes</option>
+            </select>
+        {% endif %}
+        <button class="button button--ghost" type="submit">Filtrer</button>
+    </form>
+</section>
+
+<section class="card-grid">
+    {% for ticket in tickets %}
+        <article class="card ticket-card">
+            <div class="ticket-card__top">
+                <span class="badge badge--{{ ticket.priority|badge_tone }}">{{ ticket.get_priority_display }}</span>
+                <span class="badge badge--{{ ticket.status|badge_tone }}">{{ ticket.get_status_display }}</span>
+                {% if ticket.suspected_fraud %}
+                    <span class="badge badge--warning">Fraude suspectee</span>
+                {% endif %}
+            </div>
+            <h2><a href="{% url 'ticket-detail' ticket.pk %}">{{ ticket.title }}</a></h2>
+            <p class="muted">{{ ticket.reference }} · {{ ticket.client }}</p>
+            <p>{{ ticket.description|truncatechars:140 }}</p>
+            <div class="ticket-card__meta">
+                <span>{{ ticket.get_category_display }}</span>
+                <span>{% if ticket.product %}{{ ticket.product.serial_number }}{% else %}Sans produit{% endif %}</span>
+            </div>
+        </article>
+    {% empty %}
+        <article class="card">
+            <p class="muted">Aucun ticket ne correspond aux filtres actuels.</p>
+        </article>
+    {% endfor %}
+</section>
+{% endblock %}

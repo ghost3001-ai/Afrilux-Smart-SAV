@@ -1,0 +1,71 @@
+{% load static sav_extras %}
+<!DOCTYPE html>
+<html lang="{{ LANGUAGE_CODE|default:'fr' }}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Afrilux SAV{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'sav/styles.css' %}">
+    {% if sav_shell.organization_primary_color %}
+        <style>
+            :root {
+                --accent: {{ sav_shell.organization_primary_color }};
+                --accent-strong: {{ sav_shell.organization_primary_color }};
+                --success: {{ sav_shell.organization_accent_color|default:sav_shell.organization_primary_color }};
+            }
+        </style>
+    {% endif %}
+    <script defer src="{% static 'sav/app.js' %}"></script>
+</head>
+<body>
+    <div class="ambient ambient--one"></div>
+    <div class="ambient ambient--two"></div>
+    <div class="layout">
+        <header class="topbar">
+            <a class="brand" href="{% if request.user.is_authenticated %}{% url 'dashboard' %}{% else %}{% url 'login' %}{% endif %}">
+                <span class="brand__mark">{{ sav_shell.organization_initials|default:"AF" }}</span>
+                <span>
+                    <strong>{% if sav_shell.organization_name %}{{ sav_shell.organization_name }}{% else %}Afrilux SAV{% endif %}</strong>
+                    <small>{% if sav_shell.organization_tagline %}{{ sav_shell.organization_tagline }}{% else %}Service apres-vente intelligent{% endif %}</small>
+                </span>
+            </a>
+            {% if request.user.is_authenticated %}
+                <nav class="nav">
+                    <a href="{% url 'dashboard' %}">Dashboard</a>
+                    <a href="{% if sav_shell.has_backoffice_access %}{% url 'ticket-list' %}{% else %}{% url 'support-page' %}{% endif %}">{% if sav_shell.has_backoffice_access %}Tickets{% else %}Support{% endif %} <span class="nav__badge">{{ sav_shell.open_tickets }}</span></a>
+                    {% if request.user.role == 'technician' or request.user.role == 'support' or request.user.role == 'agent' %}
+                        <a href="{% url 'technician-space' %}">Espace technicien</a>
+                    {% endif %}
+                    {% if sav_shell.has_backoffice_access %}
+                        <a href="{% url 'planning-page' %}">Planning</a>
+                    {% endif %}
+                    <a href="{% url 'product-list' %}">Produits</a>
+                    {% if sav_shell.has_backoffice_access %}
+                        <a href="{% url 'alert-list' %}">Alertes</a>
+                        <a href="{% url 'reporting-page' %}">Reporting</a>
+                        <a href="{% url 'analytics-page' %}">Analytics</a>
+                    {% endif %}
+                    {% if request.user.role == 'admin' or request.user.is_superuser %}
+                        <a href="{% url 'administration-page' %}">Administration</a>
+                    {% endif %}
+                    <a href="{% url 'knowledge-list' %}">Knowledge</a>
+                    <a href="{% url 'notifications' %}">Notifications <span class="nav__badge">{{ sav_shell.unread_notifications }}</span></a>
+                    <button class="button button--ghost button--compact" type="button" data-theme-toggle>Theme</button>
+                    <a href="{% url 'logout' %}">Deconnexion</a>
+                </nav>
+            {% endif %}
+        </header>
+
+        <main class="page">
+            {% if messages %}
+                <section class="flash-stack">
+                    {% for message in messages %}
+                        <div class="flash flash--{{ message.tags|default:'info' }}">{{ message }}</div>
+                    {% endfor %}
+                </section>
+            {% endif %}
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+</body>
+</html>

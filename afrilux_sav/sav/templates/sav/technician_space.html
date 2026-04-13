@@ -1,0 +1,152 @@
+{% extends "sav/base.html" %}
+{% load sav_extras %}
+
+{% block title %}Espace Technicien | Afrilux SAV{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <div>
+        <p class="eyebrow">Tableau de bord technicien</p>
+        <h1>{{ technician.get_full_name|default:technician.username }}</h1>
+        <p class="hero__lead">
+            Suivez vos tickets assignes, les echeances SLA, les interventions du jour et votre historique des 30 derniers jours.
+        </p>
+        <div class="chip-row">
+            <span class="badge badge--{{ technician.technician_status|badge_tone }}">{{ technician.get_technician_status_display }}</span>
+            {% if technician.primary_city %}<span class="badge badge--neutral">{{ technician.primary_city }}</span>{% endif %}
+            {% if technician.primary_region %}<span class="badge badge--neutral">{{ technician.primary_region }}</span>{% endif %}
+        </div>
+    </div>
+    <div class="hero__actions">
+        <a class="button button--primary" href="{% url 'ticket-list' %}?assignment=mine">Mes tickets</a>
+        <a class="button button--ghost" href="{% url 'notifications' %}">Mes alertes</a>
+    </div>
+</section>
+
+<section class="stats-grid">
+    <article class="stat-card">
+        <span>Tickets assignes</span>
+        <strong>{{ assigned_tickets|length }}</strong>
+        <small>charge active</small>
+    </article>
+    <article class="stat-card">
+        <span>SLA proches</span>
+        <strong>{{ sla_due_soon_tickets|length }}</strong>
+        <small>moins de 2h</small>
+    </article>
+    <article class="stat-card">
+        <span>Interventions du jour</span>
+        <strong>{{ interventions_today|length }}</strong>
+        <small>planning terrain</small>
+    </article>
+    <article class="stat-card">
+        <span>Historique 30 jours</span>
+        <strong>{{ history_30_days|length }}</strong>
+        <small>interventions recentes</small>
+    </article>
+</section>
+
+<section class="three-col">
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Mes tickets</p>
+            <h2>Par priorite et SLA</h2>
+        </div>
+        {% for ticket in assigned_tickets %}
+            <a class="list-row list-row--link" href="{% url 'ticket-detail' ticket.pk %}">
+                <div>
+                    <strong>{{ ticket.reference }}</strong>
+                    <p>{{ ticket.title }}</p>
+                </div>
+                <div class="list-row__stats">
+                    <span class="badge badge--{{ ticket.priority|badge_tone }}">{{ ticket.get_priority_display }}</span>
+                    <span>{{ ticket.sla_deadline|date:"d/m H:i"|default:"-" }}</span>
+                </div>
+            </a>
+        {% empty %}
+            <p class="muted">Aucun ticket assigne.</p>
+        {% endfor %}
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Alertes SLA</p>
+            <h2>Actions a traiter</h2>
+        </div>
+        {% for ticket in sla_due_soon_tickets %}
+            <a class="list-row list-row--link" href="{% url 'ticket-detail' ticket.pk %}">
+                <div>
+                    <strong>{{ ticket.reference }}</strong>
+                    <p>{{ ticket.title }}</p>
+                </div>
+                <span class="badge badge--warning">{{ ticket.sla_deadline|date:"d/m H:i" }}</span>
+            </a>
+        {% empty %}
+            <p class="muted">Aucun ticket a risque immediat.</p>
+        {% endfor %}
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Itineraire suggere</p>
+            <h2>Tournee du jour</h2>
+        </div>
+        {% for stop in route_stops %}
+            <div class="list-row">
+                <div>
+                    <strong>Etape {{ stop.order }} · {{ stop.reference }}</strong>
+                    <p>{{ stop.location|default:"Localisation non renseignee" }}</p>
+                </div>
+                <span>{{ stop.scheduled_for|date:"H:i"|default:"-" }}</span>
+            </div>
+        {% empty %}
+            <p class="muted">Aucune intervention planifiee aujourd'hui.</p>
+        {% endfor %}
+    </article>
+</section>
+
+<section class="two-col">
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Interventions du jour</p>
+            <h2>Rapports terrain</h2>
+        </div>
+        {% for intervention in interventions_today %}
+            <div class="mini-card">
+                <strong>{{ intervention.ticket.reference }} · {{ intervention.ticket.client }}</strong>
+                <p>{{ intervention.action_taken }}</p>
+                <small>{{ intervention.location_snapshot|default:intervention.ticket.location|default:"Lieu non renseigne" }}</small>
+                <div class="chip-row">
+                    <span class="badge badge--{{ intervention.status|badge_tone }}">{{ intervention.get_status_display }}</span>
+                    <a class="button button--ghost" href="{% url 'ticket-detail' intervention.ticket.pk %}">Ouvrir le dossier</a>
+                </div>
+            </div>
+        {% empty %}
+            <p class="muted">Aucune intervention a saisir aujourd'hui.</p>
+        {% endfor %}
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Historique</p>
+            <h2>30 derniers jours</h2>
+        </div>
+        {% for intervention in history_30_days %}
+            <div class="list-row">
+                <div>
+                    <strong>{{ intervention.ticket.reference }}</strong>
+                    <p>{{ intervention.action_taken }}</p>
+                </div>
+                <div class="list-row__stats">
+                    <span>{{ intervention.created_at|date:"d/m" }}</span>
+                    {% if intervention.report_pdf %}
+                        <a class="button button--ghost" href="{{ intervention.report_pdf.url }}" target="_blank" rel="noopener">PDF</a>
+                    {% endif %}
+                </div>
+            </div>
+        {% empty %}
+            <p class="muted">Aucune intervention recente.</p>
+        {% endfor %}
+    </article>
+</section>
+{% endblock %}

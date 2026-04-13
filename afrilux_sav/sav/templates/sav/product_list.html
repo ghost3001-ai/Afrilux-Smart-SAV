@@ -1,0 +1,46 @@
+{% extends "sav/base.html" %}
+
+{% block title %}Produits | Afrilux SAV{% endblock %}
+
+{% block content %}
+<section class="section-head section-head--page">
+    <div>
+        <p class="eyebrow">Parc installe</p>
+        <h1>Produits suivis</h1>
+    </div>
+    {% if can_create_product %}
+        <a class="button button--primary" href="{% url 'product-create' %}">Ajouter un produit</a>
+    {% endif %}
+</section>
+
+<section class="card filter-card">
+    <form method="get" class="filter-grid">
+        <input type="search" name="q" value="{{ q }}" placeholder="Nom, serial, SKU, client...">
+        <button class="button button--ghost" type="submit">Rechercher</button>
+    </form>
+</section>
+
+<section class="card-grid">
+    {% for product in products %}
+        <article class="card product-card">
+            <div class="ticket-card__top">
+                <span class="badge badge--{% if product.is_under_warranty %}success{% else %}warning{% endif %}">
+                    {% if product.is_under_warranty %}Garantie active{% else %}Garantie echue{% endif %}
+                </span>
+                <span class="badge badge--neutral">Sante {{ product.health_score }}/100</span>
+            </div>
+            <h2><a href="{% url 'product-detail' product.pk %}">{{ product.name }}</a></h2>
+            <p class="muted">{{ product.serial_number }}</p>
+            <p>{{ product.client }}</p>
+            <div class="ticket-card__meta">
+                <span>{{ product.sku|default:"Sans SKU" }}</span>
+                <span>{% if product.iot_enabled %}IoT actif{% else %}IoT inactif{% endif %}</span>
+            </div>
+        </article>
+    {% empty %}
+        <article class="card">
+            <p class="muted">Aucun produit visible sur votre perimetre.</p>
+        </article>
+    {% endfor %}
+</section>
+{% endblock %}

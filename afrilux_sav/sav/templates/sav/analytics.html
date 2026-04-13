@@ -1,0 +1,32 @@
+{% extends "sav/base.html" %}
+
+{% block title %}Analytics | Afrilux SAV{% endblock %}
+
+{% block content %}
+<section class="section-head section-head--page">
+    <div>
+        <p class="eyebrow">BI conversationnelle</p>
+        <h1>Interroger le SAV en langage naturel</h1>
+    </div>
+</section>
+
+<section class="card">
+    <form method="post" class="form-inline">
+        {% csrf_token %}
+        {{ form.question }}
+        <button class="button button--primary" type="submit">Analyser</button>
+    </form>
+    <p class="muted">Exemples: "Quels produits sont encore sous garantie ?", "Combien de tickets critiques avons-nous ?" ou "Y a-t-il des alertes predictives ouvertes ?"</p>
+</section>
+
+{% if answer %}
+    <section class="card">
+        <div class="section-head">
+            <p class="eyebrow">{{ answer.matched_intent }}</p>
+            <h2>Reponse</h2>
+        </div>
+        <p class="hero__lead">{{ answer.answer }}</p>
+        <div class="json-block">{{ answer.data }}</div>
+    </section>
+{% endif %}
+{% endblock %}

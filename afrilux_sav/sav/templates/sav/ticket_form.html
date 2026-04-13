@@ -1,0 +1,88 @@
+{% extends "sav/base.html" %}
+
+{% block title %}{% if object %}Modifier le ticket{% else %}Nouveau ticket{% endif %} | Afrilux SAV{% endblock %}
+
+{% block content %}
+<section class="section-head section-head--page">
+    <div>
+        <p class="eyebrow">Dossier SAV</p>
+        <h1>{% if object %}Mettre a jour {{ object.reference }}{% else %}Creer un ticket{% endif %}</h1>
+    </div>
+</section>
+
+<section class="card form-card">
+    <form method="post" enctype="multipart/form-data" class="wizard" data-ticket-wizard>
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+            <div class="form-errors form-errors--full">{{ form.non_field_errors }}</div>
+        {% endif %}
+        {% for field in form %}
+            {% if field.is_hidden %}
+                {{ field }}
+            {% endif %}
+        {% endfor %}
+        <div class="wizard__steps">
+            <div class="wizard__step is-active" data-wizard-step>
+                <strong>1. Contexte</strong>
+                <span>Client, equipement et transaction</span>
+            </div>
+            <div class="wizard__step" data-wizard-step>
+                <strong>2. Incident</strong>
+                <span>Description, domaine et canal</span>
+            </div>
+            <div class="wizard__step" data-wizard-step>
+                <strong>3. Priorisation</strong>
+                <span>SLA, affectation et pieces jointes</span>
+            </div>
+        </div>
+
+        <div class="wizard__panel is-active form-grid form-grid--two" data-wizard-panel>
+            {% for field in form %}
+                {% if not field.is_hidden and field.name == 'client' or not field.is_hidden and field.name == 'product' or not field.is_hidden and field.name == 'related_transaction' or not field.is_hidden and field.name == 'title' %}
+                    <label class="field {% if field.name == 'title' %}field--full{% endif %}">
+                        <span>{{ field.label }}</span>
+                        {{ field }}
+                        {% if field.help_text %}<small class="field__help">{{ field.help_text }}</small>{% endif %}
+                        {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
+                    </label>
+                {% endif %}
+            {% endfor %}
+        </div>
+
+        <div class="wizard__panel form-grid form-grid--two" data-wizard-panel>
+            {% for field in form %}
+                {% if not field.is_hidden and field.name == 'description' or not field.is_hidden and field.name == 'business_domain' or not field.is_hidden and field.name == 'category' or not field.is_hidden and field.name == 'channel' or not field.is_hidden and field.name == 'location' %}
+                    <label class="field {% if field.name == 'description' %}field--full{% endif %}">
+                        <span>{{ field.label }}</span>
+                        {{ field }}
+                        {% if field.help_text %}<small class="field__help">{{ field.help_text }}</small>{% endif %}
+                        {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
+                    </label>
+                {% endif %}
+            {% endfor %}
+        </div>
+
+        <div class="wizard__panel form-grid form-grid--two" data-wizard-panel>
+            {% for field in form %}
+                {% if not field.is_hidden and field.name == 'assigned_agent' or not field.is_hidden and field.name == 'status' or not field.is_hidden and field.name == 'priority' or not field.is_hidden and field.name == 'suspected_fraud' or not field.is_hidden and field.name == 'sla_deadline' or not field.is_hidden and field.name == 'initial_attachments' %}
+                    <label class="field {% if field.name == 'initial_attachments' %}field--full{% endif %}">
+                        <span>{{ field.label }}</span>
+                        {{ field }}
+                        {% if field.help_text %}<small class="field__help">{{ field.help_text }}</small>{% endif %}
+                        {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
+                    </label>
+                {% endif %}
+            {% endfor %}
+        </div>
+
+        <div class="wizard__nav">
+            <button class="button button--ghost" type="button" data-wizard-prev hidden>Etape precedente</button>
+            <div class="hero__actions">
+                <button class="button button--ghost" type="button" data-wizard-next>Etape suivante</button>
+                <button class="button button--primary" type="submit" data-wizard-submit hidden>Enregistrer</button>
+                <a class="button button--ghost" href="{% if request.user.role == 'client' %}{% url 'support-page' %}{% else %}{% url 'ticket-list' %}{% endif %}">Annuler</a>
+            </div>
+        </div>
+    </form>
+</section>
+{% endblock %}

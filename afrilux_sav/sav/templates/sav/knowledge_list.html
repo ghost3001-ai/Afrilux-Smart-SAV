@@ -1,0 +1,35 @@
+{% extends "sav/base.html" %}
+
+{% block title %}Knowledge Base | Afrilux SAV{% endblock %}
+
+{% block content %}
+<section class="section-head section-head--page">
+    <div>
+        <p class="eyebrow">Self-service</p>
+        <h1>Base de connaissances</h1>
+    </div>
+</section>
+
+<section class="card filter-card">
+    <form method="get" class="filter-grid">
+        <input type="search" name="q" value="{{ q }}" placeholder="Rechercher un guide, une procedure, un mot-cle...">
+        <button class="button button--ghost" type="submit">Rechercher</button>
+    </form>
+</section>
+
+<section class="card-grid">
+    {% for article in articles %}
+        <article class="card">
+            <p class="eyebrow">{{ article.category|default:"General" }}</p>
+            <h2><a href="{% url 'knowledge-detail' article.slug %}">{{ article.title }}</a></h2>
+            <p>{{ article.summary|default:article.content|truncatechars:150 }}</p>
+            <div class="ticket-card__meta">
+                <span>{% if article.product %}{{ article.product.name }}{% else %}Multi-produits{% endif %}</span>
+                <span>{{ article.helpful_votes }} utiles</span>
+            </div>
+        </article>
+    {% empty %}
+        <article class="card"><p class="muted">Aucun article trouve.</p></article>
+    {% endfor %}
+</section>
+{% endblock %}

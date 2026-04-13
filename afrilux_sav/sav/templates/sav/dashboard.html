@@ -1,0 +1,365 @@
+{% extends "sav/base.html" %}
+{% load sav_extras %}
+
+{% block title %}Dashboard | Afrilux SAV{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <div>
+        <p class="eyebrow">{% if sav_shell.is_internal %}Operations SAV{% else %}Espace client{% endif %}</p>
+        <h1>Pilotez le service apres-vente avec visibilite temps reel.</h1>
+        <p class="hero__lead">
+            Tickets, alertes predictives, sentiment client, offres contextuelles et knowledge base sont unifies dans une seule interface.
+        </p>
+        {% if sav_shell.organization_name %}
+            <p class="muted">Organisation active: {{ sav_shell.organization_name }}</p>
+        {% endif %}
+    </div>
+    <div class="hero__aside">
+        <div class="hero__actions">
+            <a class="button button--primary" href="{% url 'ticket-create' %}">Nouveau ticket</a>
+            <a class="button button--ghost" href="{% url 'analytics-page' %}">Poser une question BI</a>
+        </div>
+        <div class="hero__summary">
+            <article class="hero__summary-item">
+                <span>Tickets ouverts</span>
+                <strong>{{ tickets_open }}</strong>
+                <small>{{ tickets_unassigned }} non affectes</small>
+            </article>
+            <article class="hero__summary-item">
+                <span>SLA sous tension</span>
+                <strong>{{ tickets_overdue }}</strong>
+                <small>{{ sla_due_soon }} proches de l'echeance</small>
+            </article>
+            <article class="hero__summary-item">
+                <span>Alertes actives</span>
+                <strong>{{ alerts_open }}</strong>
+                <small>{{ alerts_critical }} critiques</small>
+            </article>
+        </div>
+    </div>
+</section>
+
+<section class="stats-grid">
+    <article class="stat-card">
+        <span>Tickets ouverts</span>
+        <strong>{{ tickets_open }}</strong>
+        <small>{{ tickets_overdue }} hors SLA</small>
+    </article>
+    <article class="stat-card">
+        <span>Critiques actifs</span>
+        <strong>{{ tickets_critical_open }}</strong>
+        <small>{{ tickets_unassigned }} non affectes</small>
+    </article>
+    <article class="stat-card">
+        <span>Parc produits</span>
+        <strong>{{ products_total }}</strong>
+        <small>{{ products_under_warranty }} encore sous garantie</small>
+    </article>
+    <article class="stat-card">
+        <span>Alertes predictives</span>
+        <strong>{{ alerts_open }}</strong>
+        <small>{{ alerts_critical }} critiques</small>
+    </article>
+    <article class="stat-card">
+        <span>Notifications</span>
+        <strong>{{ notifications_unread }}</strong>
+        <small>non lues</small>
+    </article>
+    <article class="stat-card">
+        <span>Sentiment moyen</span>
+        <strong>{% if average_sentiment != None %}{{ average_sentiment }}{% else %}N/A{% endif %}</strong>
+        <small>signal client consolide</small>
+    </article>
+    <article class="stat-card">
+        <span>Reclamations</span>
+        <strong>{{ complaints_total }}</strong>
+        <small>{{ fraud_suspected_open }} fraude(s) ouverte(s)</small>
+    </article>
+    <article class="stat-card">
+        <span>Resolution moyenne</span>
+        <strong>{% if average_resolution_hours != None %}{{ average_resolution_hours }} h{% else %}N/A{% endif %}</strong>
+        <small>temps moyen de cloture</small>
+    </article>
+    <article class="stat-card">
+        <span>Premiere reponse</span>
+        <strong>{% if average_first_response_hours != None %}{{ average_first_response_hours }} h{% else %}N/A{% endif %}</strong>
+        <small>temps moyen avant prise en charge</small>
+    </article>
+    <article class="stat-card">
+        <span>SLA proches</span>
+        <strong>{{ sla_due_soon }}</strong>
+        <small>tickets a moins de 2h de l'echeance</small>
+    </article>
+</section>
+
+<section class="two-col">
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Pipeline tickets</p>
+            <h2>Repartition des statuts</h2>
+        </div>
+        <div class="bar-list">
+            {% for row in status_breakdown %}
+                <div class="bar-item">
+                    <div class="bar-item__meta">
+                        <span>{{ row.label }}</span>
+                        <strong>{{ row.total }}</strong>
+                    </div>
+                    <div class="bar">
+                        <span style="width: {{ row.percent }}%"></span>
+                    </div>
+                </div>
+            {% empty %}
+                <p class="muted">Aucun ticket pour le moment.</p>
+            {% endfor %}
+        </div>
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Priorites</p>
+            <h2>Charge par criticite</h2>
+        </div>
+        <div class="bar-list">
+            {% for row in priority_breakdown %}
+                <div class="bar-item">
+                    <div class="bar-item__meta">
+                        <span class="badge badge--{{ row.value|badge_tone }}">{{ row.label }}</span>
+                        <strong>{{ row.total }}</strong>
+                    </div>
+                    <div class="bar bar--priority">
+                        <span style="width: {{ row.percent }}%"></span>
+                    </div>
+                </div>
+            {% empty %}
+                <p class="muted">Aucune priorite a afficher.</p>
+            {% endfor %}
+        </div>
+    </article>
+</section>
+
+{% if client_insight %}
+<section class="card insight-card">
+    <div class="section-head">
+        <p class="eyebrow">Intelligence client</p>
+        <h2>Votre synthese automatique</h2>
+    </div>
+    <div class="insight-grid">
+        <div>
+            <p>{{ client_insight.summary }}</p>
+            <div class="chip-row">
+                <span class="badge badge--{{ client_insight.risk_level|badge_tone }}">Risque {{ client_insight.risk_level }}</span>
+                <span class="badge badge--neutral">{{ client_insight.open_tickets }} ticket(s) ouvert(s)</span>
+                <span class="badge badge--{{ client_insight.average_sentiment|sentiment_tone }}">Sentiment {{ client_insight.average_sentiment }}</span>
+            </div>
+        </div>
+        <div>
+            <h3>Offres recommandees</h3>
+            {% for offer in client_insight.recommended_offers %}
+                <div class="mini-card">
+                    <strong>{{ offer.title }}</strong>
+                    <p>{{ offer.description }}</p>
+                </div>
+            {% empty %}
+                <p class="muted">Aucune offre contextuelle immediate.</p>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% endif %}
+
+{% if sav_shell.is_internal %}
+<section class="three-col">
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Comptes sensibles</p>
+            <h2>Clients a surveiller</h2>
+        </div>
+        {% for client in at_risk_clients %}
+            <div class="list-row">
+                <div>
+                    <strong>{{ client.username }}</strong>
+                    <p>{{ client.company_name|default:"Compte standard" }}</p>
+                </div>
+                <div class="list-row__stats">
+                    <span>{{ client.critical_open }} critique(s)</span>
+                    <span>{{ client.open_total }} ouvert(s)</span>
+                </div>
+            </div>
+        {% empty %}
+            <p class="muted">Aucun client en zone de tension actuellement.</p>
+        {% endfor %}
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Performance terrain</p>
+            <h2>Agents performants</h2>
+        </div>
+        {% for agent in top_agents %}
+            <div class="list-row">
+                <div>
+                    <strong>{{ agent.agent_name }}</strong>
+                    <p>{% if agent.average_resolution_hours != None %}{{ agent.average_resolution_hours }} h de resolution moyenne{% else %}Pas encore de cloture{% endif %}</p>
+                </div>
+                <div class="list-row__stats">
+                    <span>{{ agent.resolved_tickets }} resolu(s)</span>
+                    <span>{{ agent.open_tickets }} ouvert(s)</span>
+                </div>
+            </div>
+        {% empty %}
+            <p class="muted">Pas encore assez d'historique pour comparer les agents.</p>
+        {% endfor %}
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">BI conversationnelle</p>
+            <h2>Question rapide</h2>
+        </div>
+        <form class="form-inline" method="get" action="{% url 'analytics-page' %}">
+            {{ analytics_form.question }}
+            <button class="button button--primary" type="submit">Analyser</button>
+        </form>
+        <p class="muted">Exemples: "Combien de tickets critiques avons-nous ?" ou "Quels produits sont encore sous garantie ?"</p>
+    </article>
+</section>
+
+<section class="three-col">
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Carte de chaleur</p>
+            <h2>Zones d'intervention</h2>
+        </div>
+        <div class="heatmap-grid" data-heatmap="geo-hotspots">
+            {% for hotspot in geo_hotspots %}
+                <article class="heatmap-tile">
+                    <strong>{{ hotspot.location }}</strong>
+                    <p>{{ hotspot.total }} intervention(s)</p>
+                    <div class="heatmap-tile__meter"><span style="width: 0"></span></div>
+                </article>
+            {% empty %}
+                <p class="muted">Aucune localisation exploitable.</p>
+            {% endfor %}
+        </div>
+    </article>
+
+    <article class="card chart-card">
+        <div class="section-head">
+            <p class="eyebrow">Charge 7 jours</p>
+            <h2>Creations et resolutions</h2>
+        </div>
+        <div class="chart-surface" data-chart="trend-7"></div>
+        <div class="chart-legend">
+            <span><span class="chart-dot chart-dot--created"></span> Tickets crees</span>
+            <span><span class="chart-dot chart-dot--resolved"></span> Tickets resolus</span>
+        </div>
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Terrain</p>
+            <h2>Statut techniciens</h2>
+        </div>
+        {% for row in technician_status_breakdown %}
+            <div class="list-row">
+                <div>
+                    <strong>{{ row.label }}</strong>
+                    <p>{{ row.total }} technicien(s)</p>
+                </div>
+                <span class="badge badge--neutral">Statut terrain</span>
+            </div>
+        {% endfor %}
+    </article>
+</section>
+{% endif %}
+
+{% if sav_shell.is_internal %}
+<section class="two-col">
+    <article class="card chart-card">
+        <div class="section-head">
+            <p class="eyebrow">Charge 30 jours</p>
+            <h2>Historique journalier</h2>
+        </div>
+        <div class="chart-surface" data-chart="trend-30"></div>
+        <div class="chart-legend">
+            <span><span class="chart-dot chart-dot--created"></span> Tickets crees</span>
+            <span><span class="chart-dot chart-dot--resolved"></span> Tickets resolus</span>
+        </div>
+    </article>
+
+    <article class="card chart-card">
+        <div class="section-head">
+            <p class="eyebrow">Vision 12 mois</p>
+            <h2>Tendance mensuelle</h2>
+        </div>
+        <div class="chart-surface" data-chart="trend-12"></div>
+        <div class="chart-legend">
+            <span><span class="chart-dot chart-dot--created"></span> Tickets crees</span>
+            <span><span class="chart-dot chart-dot--resolved"></span> Tickets resolus</span>
+        </div>
+    </article>
+</section>
+{% endif %}
+
+<section class="three-col">
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Tickets recents</p>
+            <h2>Activite</h2>
+        </div>
+        {% for ticket in recent_tickets %}
+            <a class="list-row list-row--link" href="{% url 'ticket-detail' ticket.pk %}">
+                <div>
+                    <strong>{{ ticket.reference }}</strong>
+                    <p>{{ ticket.title }}</p>
+                </div>
+                <span class="badge badge--{{ ticket.status|badge_tone }}">{{ ticket.get_status_display }}</span>
+            </a>
+        {% empty %}
+            <p class="muted">Aucun ticket recent.</p>
+        {% endfor %}
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Alertes recents</p>
+            <h2>Predictif</h2>
+        </div>
+        {% for alert in recent_alerts %}
+            <div class="list-row">
+                <div>
+                    <strong>{{ alert.title }}</strong>
+                    <p>{{ alert.product.name }}</p>
+                </div>
+                <span class="badge badge--{{ alert.severity|badge_tone }}">{{ alert.get_severity_display }}</span>
+            </div>
+        {% empty %}
+            <p class="muted">Aucune alerte predictive recente.</p>
+        {% endfor %}
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Produits sensibles</p>
+            <h2>Garanties proches</h2>
+        </div>
+        {% for product in expiring_products %}
+            <a class="list-row list-row--link" href="{% url 'product-detail' product.pk %}">
+                <div>
+                    <strong>{{ product.name }}</strong>
+                    <p>{{ product.serial_number }}</p>
+                </div>
+                <span>{{ product.warranty_end }}</span>
+            </a>
+        {% empty %}
+            <p class="muted">Aucune garantie proche d'expiration.</p>
+        {% endfor %}
+    </article>
+</section>
+{{ geo_hotspots|json_script:"geo-hotspots-json" }}
+{{ trend_7_days|json_script:"trend-7-json" }}
+{{ trend_30_days|json_script:"trend-30-json" }}
+{{ trend_12_months|json_script:"trend-12-json" }}
+{% endblock %}

@@ -1,0 +1,125 @@
+{% extends "sav/base.html" %}
+{% load sav_extras %}
+
+{% block title %}{{ product.name }} | Afrilux SAV{% endblock %}
+
+{% block content %}
+<section class="section-head section-head--page">
+    <div>
+        <p class="eyebrow">{{ product.serial_number }}</p>
+        <h1>{{ product.name }}</h1>
+        <div class="chip-row">
+            <span class="badge badge--{{ product.status|badge_tone }}">{{ product.get_status_display }}</span>
+            <span class="badge badge--neutral">Sante {{ product.health_score }}/100</span>
+            <span class="badge badge--{% if product.iot_enabled %}success{% else %}warning{% endif %}">
+                {% if product.iot_enabled %}Capteurs actifs{% else %}Sans telemetrie{% endif %}
+            </span>
+        </div>
+    </div>
+    <div class="hero__actions">
+        {% if can_manage_product %}
+            <a class="button button--ghost" href="{% url 'product-update' product.pk %}">Modifier</a>
+            <a class="button button--danger" href="{% url 'product-delete' product.pk %}">Supprimer</a>
+        {% endif %}
+        {% if sav_shell.is_internal %}
+            <form method="post" action="{% url 'product-predictive-web' product.pk %}">
+                {% csrf_token %}
+                <button class="button button--primary" type="submit">Lancer l'analyse predictive</button>
+            </form>
+        {% endif %}
+    </div>
+</section>
+
+<section class="two-col">
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Fiche produit</p>
+            <h2>Contexte</h2>
+        </div>
+        <dl class="detail-grid">
+            <div><dt>Client</dt><dd>{{ product.client }}</dd></div>
+            <div><dt>Categorie equipement</dt><dd>{{ product.equipment_category|default:"-" }}</dd></div>
+            <div><dt>Type equipement</dt><dd>{{ product.get_equipment_type_display }}</dd></div>
+            <div><dt>Marque</dt><dd>{{ product.brand|default:"-" }}</dd></div>
+            <div><dt>Modele</dt><dd>{{ product.model_reference|default:"-" }}</dd></div>
+            <div><dt>Date installation</dt><dd>{{ product.installation_date|default:"Non definie" }}</dd></div>
+            <div><dt>Garantie</dt><dd>{{ product.warranty_end|default:"Non definie" }}</dd></div>
+            <div><dt>Installation</dt><dd>{{ product.installation_address|default:"Non precisee" }}</dd></div>
+            <div><dt>Localisation precise</dt><dd>{{ product.detailed_location|default:"Non precisee" }}</dd></div>
+            <div><dt>SKU</dt><dd>{{ product.sku|default:"-" }}</dd></div>
+            <div><dt>Contrat associe</dt><dd>{{ product.contract_reference|default:"-" }}</dd></div>
+            <div><dt>Compteur total</dt><dd>{{ product.counter_total }}</dd></div>
+            <div><dt>Compteur couleur</dt><dd>{{ product.counter_color }}</dd></div>
+            <div><dt>Compteur N&B</dt><dd>{{ product.counter_bw }}</dd></div>
+            {% if product.equipment_photo %}
+                <div class="detail-grid__full"><dt>Photo</dt><dd><a href="{{ product.equipment_photo.url }}" target="_blank" rel="noopener">Ouvrir la photo de l'equipement</a></dd></div>
+            {% endif %}
+            <div class="detail-grid__full"><dt>Notes</dt><dd>{{ product.notes|default:"Aucune note" }}</dd></div>
+        </dl>
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Alertes</p>
+            <h2>Predictif et garantie</h2>
+        </div>
+        {% for alert in predictive_alerts %}
+            <div class="list-row">
+                <div>
+                    <strong>{{ alert.title }}</strong>
+                    <p>{{ alert.description|truncatechars:110 }}</p>
+                </div>
+                <span class="badge badge--{{ alert.severity|badge_tone }}">{{ alert.get_severity_display }}</span>
+            </div>
+        {% empty %}
+            <p class="muted">Aucune alerte ouverte sur ce produit.</p>
+        {% endfor %}
+    </article>
+</section>
+
+<section class="two-col">
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Telemetrie</p>
+            <h2>Dernieres mesures</h2>
+        </div>
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                <tr><th>Mesure</th><th>Valeur</th><th>Source</th><th>Date</th></tr>
+                </thead>
+                <tbody>
+                {% for point in telemetry_points %}
+                    <tr>
+                        <td>{{ point.metric_name }}</td>
+                        <td>{{ point.value }} {{ point.unit }}</td>
+                        <td>{{ point.get_source_display }}</td>
+                        <td>{{ point.captured_at }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="4">Aucune telemetrie disponible.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Historique</p>
+            <h2>Tickets recents</h2>
+        </div>
+        {% for ticket in recent_tickets %}
+            <a class="list-row list-row--link" href="{% url 'ticket-detail' ticket.pk %}">
+                <div>
+                    <strong>{{ ticket.reference }}</strong>
+                    <p>{{ ticket.title }}</p>
+                </div>
+                <span class="badge badge--{{ ticket.status|badge_tone }}">{{ ticket.get_status_display }}</span>
+            </a>
+        {% empty %}
+            <p class="muted">Aucun ticket rattache.</p>
+        {% endfor %}
+    </article>
+</section>
+{% endblock %}

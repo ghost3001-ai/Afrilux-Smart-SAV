@@ -1,0 +1,98 @@
+{% extends "sav/base.html" %}
+{% load sav_extras %}
+
+{% block title %}Support | Afrilux SAV{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <div>
+        <p class="eyebrow">Support client</p>
+        <h1>Discutez avec le support avant meme d'ouvrir un dossier.</h1>
+        <p class="hero__lead">
+            Utilisez le chat SAV pour decrire l'incident, obtenir une premiere analyse et basculer en ticket avec vos preuves si besoin.
+        </p>
+        <div class="hero__actions">
+            <a class="button button--primary" href="{% url 'ticket-create' %}">Nouveau ticket</a>
+            <span class="badge badge--neutral">{{ open_ticket_count }} ticket(s) ouvert(s)</span>
+            {% if request.user.organization.support_email %}
+                <span class="badge badge--neutral">{{ request.user.organization.support_email }}</span>
+            {% endif %}
+        </div>
+    </div>
+    <div class="card support-summary">
+        <p class="eyebrow">Canaux rapides</p>
+        <div class="list-row">
+            <div>
+                <strong>Email SAV</strong>
+                <p>{{ request.user.organization.support_email|default:"Non configure" }}</p>
+            </div>
+        </div>
+        <div class="list-row">
+            <div>
+                <strong>Telephone / WhatsApp</strong>
+                <p>{{ request.user.organization.support_phone|default:"Non configure" }}</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="two-col">
+    <article
+        class="card support-chat"
+        data-support-chat
+        data-support-endpoint="{% url 'sav_api:support-assistant' %}"
+        data-ticket-create-url="{% url 'ticket-create' %}"
+    >
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Chat SAV</p>
+                <h2>Assistant support live</h2>
+            </div>
+            <span class="badge badge--success">Temps reel</span>
+        </div>
+        <div class="support-chat__timeline" data-support-thread>
+            <div class="support-bubble support-bubble--assistant">
+                <strong>Assistant Afrilux</strong>
+                <p>Decrivez votre panne, votre demande de remboursement ou votre besoin d'assistance. Je peux preparer un ticket en quelques secondes.</p>
+            </div>
+        </div>
+        <form class="support-chat__form" data-support-form>
+            <label class="field">
+                <span>Produit concerne</span>
+                {{ support_form.product }}
+            </label>
+            <label class="field field--full">
+                <span>{{ support_form.question.label }}</span>
+                {{ support_form.question }}
+            </label>
+            <div class="form-actions">
+                <button class="button button--primary" type="submit">Envoyer</button>
+                <small class="muted">Le chat utilise l'assistant support de l'API et peut proposer un brouillon de ticket.</small>
+            </div>
+        </form>
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Dossiers</p>
+                <h2>Tickets recents</h2>
+            </div>
+        </div>
+        {% for ticket in recent_tickets %}
+            <a class="list-row list-row--link" href="{% url 'ticket-detail' ticket.pk %}">
+                <div>
+                    <strong>{{ ticket.reference }}</strong>
+                    <p>{{ ticket.title }}</p>
+                </div>
+                <div class="list-row__stats">
+                    <span>{{ ticket.get_status_display }}</span>
+                    <span>{{ ticket.attachments.count }} preuve(s)</span>
+                </div>
+            </a>
+        {% empty %}
+            <p class="muted">Aucun ticket cree pour le moment. Le chat peut vous aider a preparer le premier.</p>
+        {% endfor %}
+    </article>
+</section>
+{% endblock %}

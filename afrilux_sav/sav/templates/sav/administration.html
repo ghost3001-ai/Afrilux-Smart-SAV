@@ -1,0 +1,186 @@
+{% extends "sav/base.html" %}
+{% load sav_extras %}
+
+{% block title %}Administration | Afrilux SAV{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <div>
+        <p class="eyebrow">Administration</p>
+        <h1>Centre de pilotage administrateur</h1>
+        <p class="hero__lead">
+            Supervisez les utilisateurs, les regles SLA, les categories d'equipement, les rapports archives et les journaux d'audit.
+        </p>
+        {% if organization %}
+            <p class="muted">Organisation geree: {{ organization.display_name }}</p>
+        {% endif %}
+    </div>
+    <div class="hero__actions">
+        <a class="button button--primary" href="/admin/">Ouvrir Django admin</a>
+        <a class="button button--ghost" href="{% url 'product-create' %}">Ajouter un produit</a>
+        <a class="button button--ghost" href="{% url 'reporting-page' %}">Voir les rapports</a>
+    </div>
+</section>
+
+<section class="admin-summary">
+    <article class="stat-card">
+        <span>Admins</span>
+        <strong>{{ users_summary.admins }}</strong>
+        <small>administrateurs actifs</small>
+    </article>
+    <article class="stat-card">
+        <span>Responsables SAV</span>
+        <strong>{{ users_summary.responsables }}</strong>
+        <small>supervision</small>
+    </article>
+    <article class="stat-card">
+        <span>Techniciens</span>
+        <strong>{{ users_summary.techniciens }}</strong>
+        <small>equipes terrain</small>
+    </article>
+    <article class="stat-card">
+        <span>Agents support</span>
+        <strong>{{ users_summary.supports }}</strong>
+        <small>hotline et support</small>
+    </article>
+    <article class="stat-card">
+        <span>Clients</span>
+        <strong>{{ users_summary.clients }}</strong>
+        <small>comptes suivis</small>
+    </article>
+</section>
+
+<section class="two-col">
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Utilisateurs internes</p>
+            <h2>Equipe SAV</h2>
+        </div>
+        {% for user in internal_users %}
+            <div class="list-row">
+                <div>
+                    <strong>{{ user }}</strong>
+                    <p>{{ user.get_role_display }}{% if user.professional_email %} · {{ user.professional_email }}{% endif %}</p>
+                </div>
+                <div class="list-row__stats">
+                    <span class="badge badge--{{ user.technician_status|badge_tone }}">{{ user.get_technician_status_display|default:"Actif" }}</span>
+                    <span>{% if user.is_active %}Actif{% else %}Inactif{% endif %}</span>
+                </div>
+            </div>
+        {% empty %}
+            <p class="muted">Aucun utilisateur interne configure.</p>
+        {% endfor %}
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Clients</p>
+            <h2>Portefeuille gere</h2>
+        </div>
+        {% for client in clients %}
+            <div class="list-row">
+                <div>
+                    <strong>{{ client.company_name|default:client }}</strong>
+                    <p>{{ client.email|default:client.username }}{% if client.tax_identifier %} · {{ client.tax_identifier }}{% endif %}</p>
+                </div>
+                <div class="list-row__stats">
+                    <span class="badge badge--{{ client.client_status|badge_tone }}">{{ client.get_client_status_display }}</span>
+                    <span>{% if client.is_verified %}Verifie{% else %}A verifier{% endif %}</span>
+                </div>
+            </div>
+        {% empty %}
+            <p class="muted">Aucun client enregistre.</p>
+        {% endfor %}
+    </article>
+</section>
+
+<section class="three-col">
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Regles SLA</p>
+            <h2>Delais par priorite</h2>
+        </div>
+        {% for rule in sla_rules %}
+            <div class="list-row">
+                <div>
+                    <strong>{{ rule.get_priority_display }}</strong>
+                    <p>{{ rule.response_deadline_minutes }} min reponse · {{ rule.resolution_deadline_hours }} h resolution</p>
+                </div>
+                <span class="badge badge--{% if rule.is_active %}success{% else %}neutral{% endif %}">{% if rule.is_active %}Actif{% else %}Inactif{% endif %}</span>
+            </div>
+        {% empty %}
+            <p class="muted">Aucune regle SLA configuree.</p>
+        {% endfor %}
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Categories</p>
+            <h2>Equipements</h2>
+        </div>
+        {% for category in equipment_categories %}
+            <div class="list-row">
+                <div>
+                    <strong>{{ category.name }}</strong>
+                    <p>{{ category.description|default:"Categorie standard" }}</p>
+                </div>
+                <span class="badge badge--{% if category.is_active %}success{% else %}neutral{% endif %}">{% if category.is_active %}Active{% else %}Inactive{% endif %}</span>
+            </div>
+        {% empty %}
+            <p class="muted">Aucune categorie d'equipement disponible.</p>
+        {% endfor %}
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Rapports archives</p>
+            <h2>Exports recents</h2>
+        </div>
+        {% for report in generated_reports %}
+            <div class="list-row">
+                <div>
+                    <strong>{{ report.get_report_type_display }}</strong>
+                    <p>{{ report.period_label }}</p>
+                </div>
+                <div class="list-row__stats">
+                    <span>{{ report.get_export_format_display }}</span>
+                    {% if report.archive_file %}<a href="{{ report.archive_file.url }}" target="_blank" rel="noopener">Ouvrir</a>{% endif %}
+                </div>
+            </div>
+        {% empty %}
+            <p class="muted">Aucun rapport archive pour le moment.</p>
+        {% endfor %}
+    </article>
+</section>
+
+<section class="card">
+    <div class="section-head">
+        <p class="eyebrow">Audit</p>
+        <h2>Dernieres actions sensibles</h2>
+    </div>
+    <div class="table-wrap">
+        <table class="table">
+            <thead>
+            <tr>
+                <th>Date</th>
+                <th>Acteur</th>
+                <th>Action</th>
+                <th>Cible</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for log in recent_audits %}
+                <tr>
+                    <td>{{ log.created_at|date:"d/m/Y H:i" }}</td>
+                    <td>{{ log.actor|default:"Systeme" }}</td>
+                    <td>{{ log.action }}</td>
+                    <td>{{ log.target_reference|default:log.target_model }}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="4">Aucun evenement d'audit recent.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

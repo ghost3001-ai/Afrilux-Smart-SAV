@@ -1,0 +1,63 @@
+{% extends "sav/base.html" %}
+
+{% block title %}Connexion | Afrilux SAV{% endblock %}
+
+{% block content %}
+<section class="hero hero--login">
+    <div class="hero__panel">
+        <p class="eyebrow">Portail Afrilux</p>
+        <h1>Superviser, diagnostiquer et anticiper chaque incident.</h1>
+        <p class="hero__lead">
+            Connectez-vous pour gerer les tickets, suivre les produits, exploiter les alertes predictives et piloter l'activite SAV en temps reel.
+        </p>
+        <ul class="hero__list">
+            <li>Tickets omnicanaux et historique centralise</li>
+            <li>Maintenance predictive et score de sante produit</li>
+            <li>Resolution agentique, knowledge base et audit complet</li>
+        </ul>
+        <div class="hero__summary hero__summary--feature">
+            <article class="hero__summary-item">
+                <span>Coordination</span>
+                <strong>Vue unifiee du SAV</strong>
+                <p>Support, terrain, produits et alertes restent alignes dans une meme interface.</p>
+            </article>
+            <article class="hero__summary-item">
+                <span>Pilotage</span>
+                <strong>Priorites sous controle</strong>
+                <p>Les files critiques, les SLA et les points de blocage remontent sans friction.</p>
+            </article>
+            <article class="hero__summary-item">
+                <span>Qualite</span>
+                <strong>Tracabilite exploitable</strong>
+                <p>Chaque action, commentaire et intervention alimente un historique propre et auditable.</p>
+            </article>
+        </div>
+    </div>
+    <div class="card auth-card">
+        <div class="section-head">
+            <p class="eyebrow">Connexion</p>
+            <h2>Acces securise</h2>
+        </div>
+        <form method="post" class="form-grid">
+            {% csrf_token %}
+            {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+            {% if form.non_field_errors %}
+                <div class="form-errors">{{ form.non_field_errors }}</div>
+            {% endif %}
+            {% for field in form %}
+                <label class="field">
+                    <span>{{ field.label }}</span>
+                    {{ field }}
+                    {% if field.errors %}
+                        <small class="field__error">{{ field.errors|striptags }}</small>
+                    {% endif %}
+                </label>
+            {% endfor %}
+            <button class="button button--primary" type="submit">Se connecter</button>
+        </form>
+        <p class="auth-card__footer muted">
+            Nouveau client ? <a href="{% url 'register' %}">Creer un compte</a>
+        </p>
+    </div>
+</section>
+{% endblock %}

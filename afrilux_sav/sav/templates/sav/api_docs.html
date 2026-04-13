@@ -1,0 +1,96 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AFRILUX API Docs</title>
+    <link rel="stylesheet" href="{% static 'sav/styles.css' %}">
+</head>
+<body>
+    <div class="ambient ambient--one"></div>
+    <div class="ambient ambient--two"></div>
+    <main class="page" style="max-width: 1120px; margin: 0 auto; padding: 32px 24px 72px;">
+        <section class="hero-card">
+            <span class="badge badge--accent">API AFRILUX</span>
+            <h1>Documentation rapide</h1>
+            <p>Cette page resume les points d'entree principaux exposes par le backend Django/DRF local.</p>
+        </section>
+
+        <section class="panel" style="margin-top: 24px;">
+            <h2>Authentification</h2>
+            <div class="table-card">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Endpoint</th>
+                            <th>Methode</th>
+                            <th>Usage</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><code>/api/token/</code></td><td>POST</td><td>Obtenir un couple JWT access/refresh</td></tr>
+                        <tr><td><code>/api/token/refresh/</code></td><td>POST</td><td>Renouveler l'access token</td></tr>
+                        <tr><td><code>/api/health/</code></td><td>GET</td><td>Healthcheck public pour supervision et deploiement</td></tr>
+                        <tr><td><code>/api/users/me/</code></td><td>GET</td><td>Profil courant</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="panel" style="margin-top: 24px;">
+            <h2>Endpoints metier principaux</h2>
+            <div class="table-card">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Endpoint</th>
+                            <th>Methode</th>
+                            <th>Usage</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><code>/api/dashboard/</code></td><td>GET</td><td>Tableau de bord consolide</td></tr>
+                        <tr><td><code>/api/tickets/</code></td><td>GET, POST</td><td>Liste et creation de tickets</td></tr>
+                        <tr><td><code>/api/tickets/&lt;id&gt;/</code></td><td>GET, PATCH</td><td>Detail et mise a jour d'un ticket</td></tr>
+                        <tr><td><code>/api/tickets/&lt;id&gt;/assign/</code></td><td>POST</td><td>Affecter un ticket</td></tr>
+                        <tr><td><code>/api/tickets/&lt;id&gt;/take_ownership/</code></td><td>POST</td><td>Prise en charge directe</td></tr>
+                        <tr><td><code>/api/tickets/&lt;id&gt;/confirm-resolution/</code></td><td>POST</td><td>Validation client / cloture</td></tr>
+                        <tr><td><code>/api/techniciens/&lt;id&gt;/planning/</code></td><td>GET</td><td>Planning technicien</td></tr>
+                        <tr><td><code>/api/rapports/journalier/</code></td><td>GET</td><td>Rapport journalier JSON</td></tr>
+                        <tr><td><code>/api/rapports/export/&lt;type&gt;/</code></td><td>GET</td><td>Export PDF / XLSX / CSV</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="panel" style="margin-top: 24px;">
+            <h2>Canaux publics et webhooks</h2>
+            <div class="table-card">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Endpoint</th>
+                            <th>Methode</th>
+                            <th>Usage</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><code>/api/public/organizations/</code></td><td>GET</td><td>Organisations visibles publiquement</td></tr>
+                        <tr><td><code>/api/public/register/</code></td><td>POST</td><td>Creation autonome d'un compte client</td></tr>
+                        <tr><td><code>/api/channels/email/inbound/</code></td><td>POST</td><td>Email entrant vers ticket</td></tr>
+                        <tr><td><code>/api/channels/twilio/inbound/</code></td><td>POST</td><td>SMS / WhatsApp entrant</td></tr>
+                        <tr><td><code>/api/webhook/email/</code></td><td>POST</td><td>Alias CDC du webhook email</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="panel" style="margin-top: 24px;">
+            <h2>Remarques</h2>
+            <p>Les memes ressources sont aussi disponibles sous <code>/api/v1/</code>.</p>
+            <p>Le portail web est accessible via <code>/login/</code>, <code>/dashboard/</code>, <code>/tickets/</code>, <code>/planning/</code> et <code>/administration/</code>.</p>
+        </section>
+    </main>
+</body>
+</html>

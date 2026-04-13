@@ -1,0 +1,51 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DJANGO_DB_NAME:-afrilux_sav}
+      POSTGRES_USER: ${DJANGO_DB_USER:-afrilux}
+      POSTGRES_PASSWORD: ${DJANGO_DB_PASSWORD:-afrilux}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DJANGO_DB_ENGINE: ${DJANGO_DB_ENGINE:-django.db.backends.postgresql}
+      DJANGO_DB_HOST: db
+      DJANGO_DB_PORT: 5432
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/1}
+    command: gunicorn afrilux_sav.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - .:/app
+      - media_data:/app/media
+      - backups_data:/app/backups
+
+volumes:
+  postgres_data:
+  redis_data:
+  media_data:
+  backups_data:
