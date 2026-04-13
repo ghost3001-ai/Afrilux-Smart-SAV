@@ -20,4 +20,4 @@ RUN chmod +x /app/entrypoint.sh /app/deploy/*.sh
 EXPOSE 8000
 
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["gunicorn", "afrilux_sav.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "120"]
+CMD ["/app/deploy/start-web.sh"]

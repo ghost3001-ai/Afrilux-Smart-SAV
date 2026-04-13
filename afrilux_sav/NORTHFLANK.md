@@ -89,8 +89,8 @@ python manage.py bootstrap_platform \
   --city=Douala \
   --country=Cameroun \
   --admin-username=aziz \
-  --admin-email=johnarthurclinton@gmail.com \
-  --admin-password='Charlotte2.0'
+  --admin-email=admin@afrilux.local \
+  --admin-password='ChangeMe123!'
 ```
 
 ## Points d'attention

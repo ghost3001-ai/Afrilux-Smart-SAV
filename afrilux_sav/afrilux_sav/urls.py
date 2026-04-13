@@ -35,8 +35,12 @@ urlpatterns = [
     path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
 ]
 
-if settings.DEBUG or settings.SERVE_STATIC_LOCAL or "runserver" in sys.argv:
+if settings.DEBUG or "runserver" in sys.argv:
     urlpatterns += [
         re_path(r"^static/(?P<path>.*)$", serve_staticfiles, {"insecure": True}),
+    ]
+
+if settings.DEBUG or settings.SERVE_STATIC_LOCAL or "runserver" in sys.argv:
+    urlpatterns += [
         re_path(r"^media/(?P<path>.*)$", serve_media, {"document_root": settings.MEDIA_ROOT}),
     ]

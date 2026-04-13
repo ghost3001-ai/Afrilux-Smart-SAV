@@ -15,6 +15,7 @@ import importlib.util
 import os
 from pathlib import Path
 import sys
+from urllib.parse import urlparse
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -48,6 +49,21 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return raw_value.strip().lower() in {"1", "true", "yes", "on", "oui"}
 
 
+def _env_list(name: str, default: str = "") -> list[str]:
+    return [
+        item.strip()
+        for item in os.getenv(name, default).split(",")
+        if item.strip()
+    ]
+
+
+def _hostname_from_url(value: str) -> str:
+    try:
+        return (urlparse(value).hostname or "").strip()
+    except ValueError:
+        return ""
+
+
 _load_local_env(BASE_DIR / ".env")
 
 
@@ -67,11 +83,15 @@ if USING_DEV_SECRET_KEY and not DEBUG and "test" not in sys.argv:
 
 # SECURITY WARNING: don't run with debug turned on in production!
 
-ALLOWED_HOSTS = [
-    host.strip()
-    for host in os.getenv("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,10.0.2.2,testserver").split(",")
-    if host.strip()
-]
+RENDER_EXTERNAL_HOSTNAME = os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip()
+RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip()
+SAV_PUBLIC_BASE_URL = os.getenv("SAV_PUBLIC_BASE_URL", "").strip() or RENDER_EXTERNAL_URL or "http://127.0.0.1:8000"
+
+ALLOWED_HOSTS = _env_list("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,10.0.2.2,testserver")
+for derived_host in {RENDER_EXTERNAL_HOSTNAME, _hostname_from_url(SAV_PUBLIC_BASE_URL)}:
+    if derived_host and derived_host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(derived_host)
+SERVE_STATIC_LOCAL = _env_bool("DJANGO_SERVE_STATIC_LOCAL", bool(os.getenv("RENDER")))
 
 
 # Application definition
@@ -97,6 +117,8 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+if SERVE_STATIC_LOCAL:
+    MIDDLEWARE.insert(1, "whitenoise.middleware.WhiteNoiseMiddleware")
 
 ROOT_URLCONF = "afrilux_sav.urls"
 
@@ -195,10 +217,23 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
 MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
-STATIC_ROOT = BASE_DIR / "staticfiles"
+MEDIA_ROOT = Path(os.getenv("DJANGO_MEDIA_ROOT", str(BASE_DIR / "media")))
+STATIC_ROOT = Path(os.getenv("DJANGO_STATIC_ROOT", str(BASE_DIR / "staticfiles")))
+BACKUP_ROOT = Path(os.getenv("SAV_BACKUP_DIR", str(BASE_DIR / "backups")))
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": (
+            "whitenoise.storage.CompressedManifestStaticFilesStorage"
+            if SERVE_STATIC_LOCAL
+            else "django.contrib.staticfiles.storage.StaticFilesStorage"
+        ),
+    },
+}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -233,8 +268,6 @@ TWILIO_STATUS_CALLBACK_URL = os.getenv("TWILIO_STATUS_CALLBACK_URL", "")
 FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID", "")
 FIREBASE_CREDENTIALS_FILE = os.getenv("FIREBASE_CREDENTIALS_FILE", "")
 
-SAV_PUBLIC_BASE_URL = os.getenv("SAV_PUBLIC_BASE_URL", "http://127.0.0.1:8000")
-SERVE_STATIC_LOCAL = _env_bool("DJANGO_SERVE_STATIC_LOCAL", False)
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
 if REDIS_URL:
     CACHES = {
@@ -292,11 +325,9 @@ SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
 CSRF_COOKIE_SECURE = _env_bool("CSRF_COOKIE_SECURE", False)
 CSRF_COOKIE_HTTPONLY = _env_bool("CSRF_COOKIE_HTTPONLY", False)
 CSRF_COOKIE_SAMESITE = os.getenv("CSRF_COOKIE_SAMESITE", "Lax")
-CSRF_TRUSTED_ORIGINS = [
-    origin.strip()
-    for origin in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",")
-    if origin.strip()
-]
+CSRF_TRUSTED_ORIGINS = _env_list("CSRF_TRUSTED_ORIGINS")
+if SAV_PUBLIC_BASE_URL.startswith("https://") and SAV_PUBLIC_BASE_URL not in CSRF_TRUSTED_ORIGINS:
+    CSRF_TRUSTED_ORIGINS.append(SAV_PUBLIC_BASE_URL)
 SECURE_SSL_REDIRECT = _env_bool("SECURE_SSL_REDIRECT", False)
 SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "0"))
 SECURE_HSTS_INCLUDE_SUBDOMAINS = _env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", False)

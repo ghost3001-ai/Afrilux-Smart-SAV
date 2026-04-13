@@ -67,7 +67,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         db_config = settings.DATABASES["default"]
         engine = str(db_config.get("ENGINE", "")).lower()
-        output_dir = Path(options["output_dir"] or (Path(settings.BASE_DIR) / "backups"))
+        output_dir = Path(options["output_dir"] or settings.BACKUP_ROOT)
         output_dir.mkdir(parents=True, exist_ok=True)
 
         if "sqlite" in engine:
