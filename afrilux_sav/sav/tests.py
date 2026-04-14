@@ -1025,6 +1025,22 @@ class SavPlatformTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "sav/administration.html")
 
+    def test_admin_role_automatically_gets_django_admin_staff_access(self):
+        admin_user = User.objects.create_user(
+            username="admin_auto_staff",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_ADMIN,
+        )
+
+        self.assertTrue(admin_user.is_staff)
+        self.assertFalse(admin_user.is_superuser)
+        self.assertTrue(self.client.login(username="admin_auto_staff", password="secret123"))
+
+        response = self.client.get("/admin/")
+
+        self.assertEqual(response.status_code, 200)
+
     def test_admin_can_open_product_create_page(self):
         admin_user = User.objects.create_user(
             username="admin_product",

@@ -168,6 +168,8 @@ class User(AbstractUser):
         return full_name or self.username
 
     def save(self, *args, **kwargs):
+        if self.role == self.ROLE_ADMIN and not self.is_staff:
+            self.is_staff = True
         if self.role == self.ROLE_CLIENT and self.organization_id and not self.company_name:
             self.company_name = self.organization.display_name
         super().save(*args, **kwargs)
