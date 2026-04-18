@@ -70,7 +70,7 @@ def _serialize_ticket(ticket):
         "reference": ticket.reference,
         "titre": ticket.title,
         "client": str(ticket.client),
-        "equipement": ticket.product.serial_number if ticket.product else "",
+        "equipement": ticket.product_label or (ticket.product.serial_number if ticket.product else ""),
         "statut": ticket.get_status_display(),
         "priorite": ticket.get_priority_display(),
         "deadline_sla": ticket.sla_deadline.isoformat() if ticket.sla_deadline else "",

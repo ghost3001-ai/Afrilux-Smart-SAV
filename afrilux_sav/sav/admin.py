@@ -195,7 +195,7 @@ class TicketAdmin(admin.ModelAdmin):
         "sla_deadline",
     )
     list_filter = ("organization", "business_domain", "status", "priority", "channel", "category")
-    search_fields = ("reference", "title", "description", "client__username", "product__serial_number", "organization__name")
+    search_fields = ("reference", "title", "description", "product_label", "client__username", "product__serial_number", "organization__name")
     inlines = [MessageInline, TicketAssignmentInline, InterventionInline, SupportSessionInline, AccountCreditInline, TicketFeedbackInline]
 
 

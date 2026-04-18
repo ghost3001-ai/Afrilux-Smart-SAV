@@ -19,6 +19,14 @@ def is_manager(user):
     )
 
 
+def is_read_only(user):
+    return bool(
+        user
+        and user.is_authenticated
+        and getattr(user, "role", "") in set(User.READ_ONLY_ROLES)
+    )
+
+
 class IsAuthenticatedSavUser(BasePermission):
     def has_permission(self, request, view):
         return bool(request.user and request.user.is_authenticated)
@@ -41,3 +49,12 @@ class ReadOnlyForClients(BasePermission):
         if request.method in SAFE_METHODS:
             return True
         return is_internal(request.user)
+
+
+class ReadOnlyForAuditors(BasePermission):
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        if request.method in SAFE_METHODS:
+            return True
+        return not is_read_only(request.user)

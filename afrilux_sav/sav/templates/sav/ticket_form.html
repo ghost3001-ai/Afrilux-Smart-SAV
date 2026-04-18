@@ -24,7 +24,7 @@
         <div class="wizard__steps">
             <div class="wizard__step is-active" data-wizard-step>
                 <strong>1. Contexte</strong>
-                <span>Client, equipement et transaction</span>
+                <span>Client, produit saisi et transaction</span>
             </div>
             <div class="wizard__step" data-wizard-step>
                 <strong>2. Incident</strong>
@@ -38,7 +38,7 @@
 
         <div class="wizard__panel is-active form-grid form-grid--two" data-wizard-panel>
             {% for field in form %}
-                {% if not field.is_hidden and field.name == 'client' or not field.is_hidden and field.name == 'product' or not field.is_hidden and field.name == 'related_transaction' or not field.is_hidden and field.name == 'title' %}
+                {% if not field.is_hidden and field.name == 'client' or not field.is_hidden and field.name == 'product_label' or not field.is_hidden and field.name == 'related_transaction' or not field.is_hidden and field.name == 'title' %}
                     <label class="field {% if field.name == 'title' %}field--full{% endif %}">
                         <span>{{ field.label }}</span>
                         {{ field }}

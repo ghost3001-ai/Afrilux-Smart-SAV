@@ -87,6 +87,7 @@ class TicketForm(forms.ModelForm):
         model = Ticket
         fields = [
             "client",
+            "product_label",
             "product",
             "related_transaction",
             "assigned_agent",
@@ -111,6 +112,13 @@ class TicketForm(forms.ModelForm):
         self.user = user
         self.fields["business_domain"].required = False
         self.fields["business_domain"].initial = self.instance.business_domain or Ticket.DOMAIN_OTHER
+        self.fields["product_label"].required = False
+        self.fields["product_label"].label = "Produit / equipement concerne"
+        self.fields["product_label"].help_text = "Saisissez librement le produit, le modele ou l'equipement signale."
+        if self.instance.pk and not self.initial.get("product_label") and self.instance.product_display_name:
+            self.initial["product_label"] = self.instance.product_display_name
+        self.fields["product"].required = False
+        self.fields["product"].widget = forms.HiddenInput()
         client_queryset = User.objects.filter(role=User.ROLE_CLIENT)
         agent_queryset = User.objects.filter(role__in=User.ASSIGNABLE_ROLES)
         transaction_queryset = FinancialTransaction.objects.select_related("client")

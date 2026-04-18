@@ -49,7 +49,7 @@ from .models import (
     User,
     WorkflowExecution,
 )
-from .permissions import IsAuthenticatedSavUser, IsInternalUser, IsManagerUser
+from .permissions import IsAuthenticatedSavUser, IsInternalUser, IsManagerUser, ReadOnlyForAuditors
 from .reporting import (
     REPORT_DAILY,
     REPORT_MONTHLY,
@@ -108,9 +108,9 @@ from .services import (
     dispatch_due_reports,
     ensure_assignment_intervention,
     generate_intervention_pdf,
-    has_backoffice_access,
-    is_auditor_user,
+    has_reporting_access,
     is_internal_user,
+    is_manager_user,
     log_audit_event,
     maybe_flag_ticket_as_fraud,
     run_automation_rules_for_ticket,
@@ -145,7 +145,7 @@ from .services import (
 
 
 class AuditedModelViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticatedSavUser]
+    permission_classes = [ReadOnlyForAuditors]
 
     def audit(self, action_name, instance, details=None):
         log_audit_event(
@@ -412,6 +412,8 @@ class TicketViewSet(AuditedModelViewSet):
         "client__username",
         "client__company_name",
         "organization__name",
+        "product_label",
+        "product__name",
         "product__serial_number",
     ]
     ordering_fields = ["created_at", "updated_at", "priority", "sla_deadline"]
@@ -419,8 +421,8 @@ class TicketViewSet(AuditedModelViewSet):
     def get_permissions(self):
         if self.action == "credit_account":
             return [IsManagerUser()]
-        if self.action == "confirm_resolution":
-            return [IsAuthenticatedSavUser()]
+        if self.action in {"confirm_resolution", "reopen"}:
+            return [ReadOnlyForAuditors()]
         if self.action == "agentic_resolution":
             return [IsInternalUser()]
         if self.action in {"take_ownership", "close"}:
@@ -429,6 +431,8 @@ class TicketViewSet(AuditedModelViewSet):
             return [IsManagerUser()]
         if self.action == "run_automation":
             return [IsInternalUser()]
+        if self.request.method == "POST":
+            return [ReadOnlyForAuditors()]
         if self.request.method in {"PUT", "PATCH"}:
             return [IsInternalUser()]
         if self.request.method == "DELETE":
@@ -735,7 +739,7 @@ class TicketFeedbackViewSet(AuditedModelViewSet):
 
     def get_permissions(self):
         if self.request.method in {"POST", "PATCH", "PUT", "DELETE"}:
-            return [IsAuthenticatedSavUser()]
+            return [ReadOnlyForAuditors()]
         return [IsAuthenticatedSavUser()]
 
     def get_queryset(self):
@@ -773,7 +777,7 @@ class MessageViewSet(AuditedModelViewSet):
     def get_permissions(self):
         if self.request.method == "DELETE":
             return [IsInternalUser()]
-        return [IsAuthenticatedSavUser()]
+        return [ReadOnlyForAuditors()]
 
     def get_queryset(self):
         queryset = Message.objects.select_related("ticket", "sender").all()
@@ -834,7 +838,7 @@ class TicketAttachmentViewSet(
     viewsets.GenericViewSet,
 ):
     serializer_class = TicketAttachmentSerializer
-    permission_classes = [IsAuthenticatedSavUser]
+    permission_classes = [ReadOnlyForAuditors]
     parser_classes = [parsers.MultiPartParser, parsers.FormParser]
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ["created_at", "updated_at", "kind"]
@@ -940,7 +944,7 @@ class InterventionMediaViewSet(
     viewsets.GenericViewSet,
 ):
     serializer_class = InterventionMediaSerializer
-    permission_classes = [IsAuthenticatedSavUser]
+    permission_classes = [ReadOnlyForAuditors]
     parser_classes = [parsers.MultiPartParser, parsers.FormParser]
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ["created_at", "kind"]
@@ -1202,11 +1206,13 @@ class NotificationViewSet(AuditedModelViewSet):
 
     def get_permissions(self):
         if self.action == "mark_read":
-            return [IsAuthenticatedSavUser()]
+            return [ReadOnlyForAuditors()]
         if self.action == "dispatch_pending":
             return [IsInternalUser()]
         if self.request.method == "POST":
             return [IsInternalUser()]
+        if self.request.method in {"PUT", "PATCH"}:
+            return [ReadOnlyForAuditors()]
         if self.request.method == "DELETE":
             return [IsInternalUser()]
         return [IsAuthenticatedSavUser()]
@@ -1282,7 +1288,7 @@ class NotificationViewSet(AuditedModelViewSet):
 
 class DeviceRegistrationViewSet(viewsets.GenericViewSet):
     serializer_class = DeviceRegistrationSerializer
-    permission_classes = [IsAuthenticatedSavUser]
+    permission_classes = [ReadOnlyForAuditors]
 
     def get_queryset(self):
         return DeviceRegistration.objects.filter(user=self.request.user)
@@ -1333,7 +1339,7 @@ class OfferRecommendationViewSet(AuditedModelViewSet):
 
     def get_permissions(self):
         if self.action in {"accept", "reject"}:
-            return [IsAuthenticatedSavUser()]
+            return [ReadOnlyForAuditors()]
         if self.request.method == "POST":
             return [IsInternalUser()]
         if self.request.method == "DELETE":
@@ -1518,7 +1524,7 @@ class DashboardView(APIView):
         feedbacks = scope_ticket_feedback_queryset(TicketFeedback.objects.all(), request.user)
         users = scope_user_queryset(User.objects.filter(role=User.ROLE_CLIENT), request.user)
         technicians = scope_user_queryset(
-            User.objects.filter(role=User.ROLE_TECHNICIAN, is_active=True),
+            User.objects.filter(role__in=User.TECHNICIAN_SPACE_ROLES, is_active=True),
             request.user,
         )
 
@@ -1616,8 +1622,8 @@ class BaseReportView(APIView):
     report_type = None
 
     def get(self, request):
-        if not (request.user.is_superuser or has_backoffice_access(request.user)):
-            raise PermissionDenied("Le reporting est reserve aux profils internes, responsables et auditeurs.")
+        if not has_reporting_access(request.user):
+            raise PermissionDenied("Le reporting est reserve aux profils de supervision, pilotage et lecture seule habilites.")
         anchor_date = _parse_anchor_date(request.query_params.get("date"))
         return Response(build_report(self.report_type, request.user, anchor_date=anchor_date))
 
@@ -1638,8 +1644,8 @@ class ReportExportView(APIView):
     permission_classes = [IsAuthenticatedSavUser]
 
     def get(self, request, report_type):
-        if not (request.user.is_superuser or has_backoffice_access(request.user)):
-            raise PermissionDenied("L'export de rapports est reserve aux profils internes, responsables et auditeurs.")
+        if not has_reporting_access(request.user):
+            raise PermissionDenied("L'export de rapports est reserve aux profils de supervision, pilotage et lecture seule habilites.")
 
         anchor_date = _parse_anchor_date(request.query_params.get("date"))
         export_format = str(request.query_params.get("format", "xlsx")).strip().lower()
@@ -1698,12 +1704,12 @@ class TechnicianPlanningView(APIView):
     permission_classes = [IsAuthenticatedSavUser]
 
     def get(self, request, pk):
-        if not (request.user.is_superuser or has_backoffice_access(request.user)):
-            raise PermissionDenied("Le planning technicien est reserve aux profils internes.")
+        if not is_manager_user(request.user):
+            raise PermissionDenied("Le planning technicien est reserve aux profils de supervision.")
 
         technician = get_object_or_404(
             scope_user_queryset(
-                User.objects.filter(role=User.ROLE_TECHNICIAN, is_active=True),
+                User.objects.filter(role__in=User.ASSIGNABLE_ROLES, is_active=True),
                 request.user,
             ),
             pk=pk,
@@ -1779,6 +1785,8 @@ class AnalyticsAskView(APIView):
     permission_classes = [IsAuthenticatedSavUser]
 
     def post(self, request):
+        if not has_reporting_access(request.user):
+            raise PermissionDenied("Les analytics sont reserves aux profils de supervision, pilotage et lecture seule habilites.")
         question = request.data.get("question", "").strip()
         if not question:
             return Response({"detail": "Le champ 'question' est obligatoire."}, status=status.HTTP_400_BAD_REQUEST)

@@ -71,6 +71,13 @@ class User(AbstractUser):
     ROLE_CLIENT = "client"
     ROLE_SUPPORT = "support"
     ROLE_TECHNICIAN = "technician"
+    ROLE_EXPERT = "expert"
+    ROLE_SUPERVISOR = "supervisor"
+    ROLE_QA = "qa"
+    ROLE_DISPATCHER = "dispatcher"
+    ROLE_FIELD_TECHNICIAN = "field_technician"
+    ROLE_VIP_SUPPORT = "vip_support"
+    ROLE_SYSTEM_BOT = "system_bot"
     ROLE_HEAD_SAV = "head_sav"
     ROLE_AUDITOR = "auditor"
     ROLE_ADMIN = "admin"
@@ -79,35 +86,76 @@ class User(AbstractUser):
 
     ROLE_CHOICES = (
         (ROLE_CLIENT, "Client"),
-        (ROLE_SUPPORT, "Agent support / Hotliner"),
-        (ROLE_TECHNICIAN, "Technicien"),
+        (ROLE_SUPPORT, "Agent support (Niveau 1 / Hotliner)"),
+        (ROLE_TECHNICIAN, "Agent technique (Niveau 2)"),
+        (ROLE_EXPERT, "Chef technicien / Expert (Niveau 3)"),
+        (ROLE_SUPERVISOR, "Superviseur / Team Leader"),
+        (ROLE_QA, "Qualite / QA SAV"),
+        (ROLE_DISPATCHER, "Planificateur / Dispatch"),
+        (ROLE_FIELD_TECHNICIAN, "Technicien terrain"),
+        (ROLE_VIP_SUPPORT, "Support VIP / Grands comptes"),
+        (ROLE_SYSTEM_BOT, "Systeme automatique (IA / Bot)"),
         (ROLE_HEAD_SAV, "Responsable SAV"),
         (ROLE_AUDITOR, "Auditeur / Direction"),
         (ROLE_ADMIN, "Administrateur"),
-        (ROLE_AGENT, "Agent SAV (legacy)"),
-        (ROLE_MANAGER, "Manager SAV (legacy)"),
+        (ROLE_AGENT, "Agent support (legacy)"),
+        (ROLE_MANAGER, "Responsable SAV (legacy)"),
     )
 
-    INTERNAL_ROLES = (
+    STANDARD_SUPPORT_ROLES = (
         ROLE_SUPPORT,
+        ROLE_AGENT,
+    )
+    SPECIAL_SUPPORT_ROLES = (
+        ROLE_VIP_SUPPORT,
+    )
+    FRONTLINE_ROLES = (
+        *STANDARD_SUPPORT_ROLES,
+        *SPECIAL_SUPPORT_ROLES,
+    )
+    TECHNICAL_ROLES = (
         ROLE_TECHNICIAN,
+        ROLE_EXPERT,
+        ROLE_FIELD_TECHNICIAN,
+    )
+    LEADERSHIP_ROLES = (
+        ROLE_SUPERVISOR,
+        ROLE_DISPATCHER,
         ROLE_HEAD_SAV,
         ROLE_ADMIN,
-        ROLE_AGENT,
         ROLE_MANAGER,
+    )
+    READ_ONLY_ROLES = (
+        ROLE_AUDITOR,
+        ROLE_QA,
+    )
+    BOT_ROLES = (
+        ROLE_SYSTEM_BOT,
+    )
+    INTERNAL_ROLES = (
+        *FRONTLINE_ROLES,
+        *TECHNICAL_ROLES,
+        *LEADERSHIP_ROLES,
+        *BOT_ROLES,
     )
     MANAGER_ROLES = (
-        ROLE_HEAD_SAV,
-        ROLE_ADMIN,
-        ROLE_MANAGER,
+        *LEADERSHIP_ROLES,
     )
     ASSIGNABLE_ROLES = (
-        ROLE_SUPPORT,
-        ROLE_TECHNICIAN,
-        ROLE_HEAD_SAV,
-        ROLE_ADMIN,
-        ROLE_AGENT,
-        ROLE_MANAGER,
+        *FRONTLINE_ROLES,
+        *TECHNICAL_ROLES,
+    )
+    TECHNICIAN_SPACE_ROLES = (
+        *FRONTLINE_ROLES,
+        *TECHNICAL_ROLES,
+    )
+    REPORTING_ROLES = (
+        *LEADERSHIP_ROLES,
+        *READ_ONLY_ROLES,
+    )
+    OVERSIGHT_ROLES = (
+        *LEADERSHIP_ROLES,
+        *READ_ONLY_ROLES,
     )
 
     organization = models.ForeignKey(
@@ -516,6 +564,7 @@ class Ticket(TimeStampedModel):
         related_name="tickets",
         limit_choices_to={"role": User.ROLE_CLIENT},
     )
+    product_label = models.CharField(max_length=255, blank=True)
     product = models.ForeignKey(
         Product,
         on_delete=models.SET_NULL,
@@ -566,6 +615,14 @@ class Ticket(TimeStampedModel):
     @property
     def is_overdue(self):
         return bool(self.is_open and self.sla_deadline and self.sla_deadline < timezone.now())
+
+    @property
+    def product_display_name(self):
+        if self.product_label:
+            return self.product_label
+        if self.product_id:
+            return self.product.name
+        return ""
 
     def save(self, *args, **kwargs):
         if self.client_id and self.client.organization_id:

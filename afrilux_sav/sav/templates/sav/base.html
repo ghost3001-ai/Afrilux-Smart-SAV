@@ -33,15 +33,17 @@
                 <nav class="nav">
                     <a href="{% url 'dashboard' %}">Dashboard</a>
                     <a href="{% if sav_shell.has_backoffice_access %}{% url 'ticket-list' %}{% else %}{% url 'support-page' %}{% endif %}">{% if sav_shell.has_backoffice_access %}Tickets{% else %}Support{% endif %} <span class="nav__badge">{{ sav_shell.open_tickets }}</span></a>
-                    {% if request.user.role == 'technician' or request.user.role == 'support' or request.user.role == 'agent' %}
-                        <a href="{% url 'technician-space' %}">Espace technicien</a>
+                    {% if sav_shell.has_technician_space_access %}
+                        <a href="{% url 'technician-space' %}">Espace operationnel</a>
                     {% endif %}
-                    {% if sav_shell.has_backoffice_access %}
+                    {% if sav_shell.has_management_access %}
                         <a href="{% url 'planning-page' %}">Planning</a>
                     {% endif %}
                     <a href="{% url 'product-list' %}">Produits</a>
                     {% if sav_shell.has_backoffice_access %}
                         <a href="{% url 'alert-list' %}">Alertes</a>
+                    {% endif %}
+                    {% if sav_shell.has_reporting_access %}
                         <a href="{% url 'reporting-page' %}">Reporting</a>
                         <a href="{% url 'analytics-page' %}">Analytics</a>
                     {% endif %}

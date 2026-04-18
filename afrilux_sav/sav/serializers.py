@@ -1041,7 +1041,7 @@ class TicketSerializer(serializers.ModelSerializer):
     client_name = serializers.SerializerMethodField()
     assigned_agent_name = serializers.SerializerMethodField()
     organization_name = serializers.CharField(source="organization.display_name", read_only=True)
-    product_name = serializers.CharField(source="product.name", read_only=True)
+    product_name = serializers.CharField(source="product_display_name", read_only=True)
     related_transaction_reference = serializers.CharField(source="related_transaction.external_reference", read_only=True)
     related_transaction_type = serializers.CharField(source="related_transaction.transaction_type", read_only=True)
     related_transaction_amount = serializers.CharField(source="related_transaction.amount", read_only=True)
@@ -1064,6 +1064,7 @@ class TicketSerializer(serializers.ModelSerializer):
             "organization_name",
             "client",
             "client_name",
+            "product_label",
             "product",
             "product_name",
             "related_transaction",

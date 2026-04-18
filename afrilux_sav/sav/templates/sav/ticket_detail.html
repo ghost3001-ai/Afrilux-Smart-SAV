@@ -82,6 +82,12 @@
             <p class="eyebrow">Produit</p>
             <h2>Equipement associe</h2>
         </div>
+        {% if ticket.product_label %}
+            <div class="mini-card">
+                <strong>Produit saisi</strong>
+                <p>{{ ticket.product_label }}</p>
+            </div>
+        {% endif %}
         {% if ticket.product %}
             <div class="product-panel">
                 <h3><a href="{% url 'product-detail' ticket.product.pk %}">{{ ticket.product.name }}</a></h3>
@@ -94,7 +100,7 @@
                     <span class="badge badge--neutral">Sante {{ ticket.product.health_score }}/100</span>
                 </div>
             </div>
-        {% else %}
+        {% elif not ticket.product_label %}
             <p class="muted">Aucun produit rattache.</p>
         {% endif %}
     </article>
@@ -165,17 +171,21 @@
                 <p class="muted">Aucun message enregistre.</p>
             {% endfor %}
         </div>
-        <form method="post" action="{% url 'ticket-message-create' ticket.pk %}" class="form-grid">
-            {% csrf_token %}
-            {% for field in message_form %}
-                <label class="field {% if field.name == 'content' %}field--full{% endif %}">
-                    {% if not field.is_hidden %}<span>{{ field.label }}</span>{% endif %}
-                    {{ field }}
-                    {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
-                </label>
-            {% endfor %}
-            <button class="button button--primary" type="submit">Ajouter le message</button>
-        </form>
+        {% if can_participate %}
+            <form method="post" action="{% url 'ticket-message-create' ticket.pk %}" class="form-grid">
+                {% csrf_token %}
+                {% for field in message_form %}
+                    <label class="field {% if field.name == 'content' %}field--full{% endif %}">
+                        {% if not field.is_hidden %}<span>{{ field.label }}</span>{% endif %}
+                        {{ field }}
+                        {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
+                    </label>
+                {% endfor %}
+                <button class="button button--primary" type="submit">Ajouter le message</button>
+            </form>
+        {% else %}
+            <p class="muted">Profil lecture seule: consultation uniquement.</p>
+        {% endif %}
     </article>
 
     <article class="card">
@@ -194,18 +204,20 @@
         {% empty %}
             <p class="muted">Aucune preuve ou capture rattachee.</p>
         {% endfor %}
-        <hr class="divider">
-        <form method="post" action="{% url 'ticket-attachment-create' ticket.pk %}" enctype="multipart/form-data" class="form-grid">
-            {% csrf_token %}
-            {% for field in attachment_form %}
-                <label class="field {% if field.name == 'file' %}field--full{% endif %}">
-                    <span>{{ field.label }}</span>
-                    {{ field }}
-                    {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
-                </label>
-            {% endfor %}
-            <button class="button button--primary" type="submit">Ajouter une preuve</button>
-        </form>
+        {% if can_participate %}
+            <hr class="divider">
+            <form method="post" action="{% url 'ticket-attachment-create' ticket.pk %}" enctype="multipart/form-data" class="form-grid">
+                {% csrf_token %}
+                {% for field in attachment_form %}
+                    <label class="field {% if field.name == 'file' %}field--full{% endif %}">
+                        <span>{{ field.label }}</span>
+                        {{ field }}
+                        {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
+                    </label>
+                {% endfor %}
+                <button class="button button--primary" type="submit">Ajouter une preuve</button>
+            </form>
+        {% endif %}
     </article>
 
     <article class="card">

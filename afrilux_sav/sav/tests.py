@@ -61,14 +61,59 @@ class SavPlatformTests(TestCase):
             email="manager@test.local",
             password="secret123",
             organization=self.organization,
-            role=User.ROLE_MANAGER,
+            role=User.ROLE_HEAD_SAV,
             is_staff=True,
+        )
+        self.auditor = User.objects.create_user(
+            username="auditor",
+            email="auditor@test.local",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_AUDITOR,
+        )
+        self.qa_user = User.objects.create_user(
+            username="qa",
+            email="qa@test.local",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_QA,
+        )
+        self.dispatcher = User.objects.create_user(
+            username="dispatcher",
+            email="dispatcher@test.local",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_DISPATCHER,
         )
         self.agent = User.objects.create_user(
             username="agent",
             password="secret123",
             organization=self.organization,
-            role=User.ROLE_AGENT,
+            role=User.ROLE_SUPPORT,
+        )
+        self.technician = User.objects.create_user(
+            username="technician",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_TECHNICIAN,
+        )
+        self.expert = User.objects.create_user(
+            username="expert",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_EXPERT,
+        )
+        self.field_technician = User.objects.create_user(
+            username="fieldtech",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_FIELD_TECHNICIAN,
+        )
+        self.vip_support = User.objects.create_user(
+            username="vipsupport",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_VIP_SUPPORT,
         )
         self.client_user = User.objects.create_user(
             username="client",
@@ -82,14 +127,14 @@ class SavPlatformTests(TestCase):
             username="manager_b",
             password="secret123",
             organization=self.other_organization,
-            role=User.ROLE_MANAGER,
+            role=User.ROLE_HEAD_SAV,
             is_staff=True,
         )
         self.other_agent = User.objects.create_user(
             username="agent_b",
             password="secret123",
             organization=self.other_organization,
-            role=User.ROLE_AGENT,
+            role=User.ROLE_SUPPORT,
         )
         self.other_client = User.objects.create_user(
             username="client_b",
@@ -405,6 +450,20 @@ class SavPlatformTests(TestCase):
         self.assertEqual(response.data["matched_intent"], "top_agents")
         self.assertTrue(response.data["data"]["top_agents"])
 
+    def test_analytics_ask_is_forbidden_for_client_profiles(self):
+        self.api.force_authenticate(user=self.client_user)
+
+        response = self.api.post(reverse("sav_api:analytics-ask"), {"question": "Combien de tickets critiques avons-nous ?"})
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_analytics_ask_is_forbidden_for_support_profiles(self):
+        self.api.force_authenticate(user=self.agent)
+
+        response = self.api.post(reverse("sav_api:analytics-ask"), {"question": "Combien de tickets critiques avons-nous ?"})
+
+        self.assertEqual(response.status_code, 403)
+
     def test_twilio_inbound_webhook_creates_message(self):
         self.client_user.phone = "+237690000000"
         self.client_user.save(update_fields=["phone"])
@@ -634,13 +693,13 @@ class SavPlatformTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "sav/dashboard.html")
 
-    def test_dashboard_does_not_count_non_technician_internal_users_as_technicians(self):
+    def test_dashboard_counts_only_operational_profiles_in_status_breakdown(self):
         response = self.api.get(reverse("sav_api:dashboard"))
 
         self.assertEqual(response.status_code, 200)
         technician_rows = {row["status"]: row["total"] for row in response.data["technician_status_breakdown"]}
-        self.assertEqual(sum(technician_rows.values()), 0)
-        self.assertEqual(technician_rows["on_site"], 0)
+        self.assertEqual(sum(technician_rows.values()), 5)
+        self.assertEqual(technician_rows["available"], 5)
 
     def test_api_docs_page_renders(self):
         response = self.client.get(reverse("api-docs"))
@@ -658,6 +717,21 @@ class SavPlatformTests(TestCase):
         response = self.client.get(reverse("analytics-page"))
 
         self.assertRedirects(response, f"{reverse('login')}?next={reverse('analytics-page')}")
+
+    def test_analytics_page_is_forbidden_for_client_profiles(self):
+        self.client.force_login(self.client_user)
+
+        response = self.client.get(reverse("analytics-page"))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_reporting_page_renders_for_qa_profiles(self):
+        self.client.force_login(self.qa_user)
+
+        response = self.client.get(reverse("reporting-page"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "sav/reporting.html")
 
     def test_manager_scope_excludes_other_organization_tickets(self):
         Ticket.objects.create(
@@ -830,6 +904,68 @@ class SavPlatformTests(TestCase):
         self.assertEqual(ticket.status, Ticket.STATUS_CLOSED)
         self.assertIsNotNone(ticket.closed_at)
 
+    def test_auditor_cannot_create_ticket_via_api(self):
+        self.api.force_authenticate(user=self.auditor)
+
+        response = self.api.post(
+            reverse("sav_api:ticket-list"),
+            {
+                "client": self.client_user.id,
+                "product_label": "Climatiseur split 18000 BTU",
+                "title": "Creation interdite audit",
+                "description": "Le profil auditeur ne doit pas creer de ticket.",
+                "category": Ticket.CATEGORY_BREAKDOWN,
+                "channel": Ticket.CHANNEL_WEB,
+                "priority": Ticket.PRIORITY_NORMAL,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_qa_cannot_create_ticket_via_api(self):
+        self.api.force_authenticate(user=self.qa_user)
+
+        response = self.api.post(
+            reverse("sav_api:ticket-list"),
+            {
+                "client": self.client_user.id,
+                "product_label": "Baie reseau datacenter",
+                "title": "Creation interdite QA",
+                "description": "Le profil QA ne doit pas creer de ticket.",
+                "category": Ticket.CATEGORY_BREAKDOWN,
+                "channel": Ticket.CHANNEL_WEB,
+                "priority": Ticket.PRIORITY_NORMAL,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_auditor_cannot_reply_on_ticket_via_web(self):
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            title="Ticket lecture seule",
+            description="L'auditeur ne doit pas intervenir.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            status=Ticket.STATUS_NEW,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+        self.client.force_login(self.auditor)
+
+        response = self.client.post(
+            reverse("ticket-message-create", args=[ticket.pk]),
+            {
+                "message_type": Message.TYPE_PUBLIC,
+                "channel": Message.CHANNEL_PORTAL,
+                "content": "Tentative auditeur",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(Message.objects.filter(ticket=ticket, content="Tentative auditeur").exists())
+
     def test_client_cannot_patch_ticket_directly(self):
         ticket = Ticket.objects.create(
             client=self.client_user,
@@ -956,7 +1092,7 @@ class SavPlatformTests(TestCase):
         response = self.client.post(
             reverse("ticket-create"),
             {
-                "product": self.product.pk,
+                "product_label": "Split mural 12000 BTU",
                 "title": "Demande portail web",
                 "description": "Le client cree un ticket depuis le portail.",
                 "category": Ticket.CATEGORY_BREAKDOWN,
@@ -966,7 +1102,13 @@ class SavPlatformTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(Ticket.objects.filter(title="Demande portail web", client=self.client_user).exists())
+        self.assertTrue(
+            Ticket.objects.filter(
+                title="Demande portail web",
+                client=self.client_user,
+                product_label="Split mural 12000 BTU",
+            ).exists()
+        )
 
     def test_client_can_create_ticket_via_web_portal_with_attachment(self):
         self.client.force_login(self.client_user)
@@ -975,7 +1117,7 @@ class SavPlatformTests(TestCase):
         response = self.client.post(
             reverse("ticket-create"),
             {
-                "product": self.product.pk,
+                "product_label": "Imprimante reseau bureau direction",
                 "title": "Ticket avec preuve initiale",
                 "description": "Le client cree un ticket avec une capture des la creation.",
                 "category": Ticket.CATEGORY_BREAKDOWN,
@@ -987,6 +1129,7 @@ class SavPlatformTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         created_ticket = Ticket.objects.get(title="Ticket avec preuve initiale")
+        self.assertEqual(created_ticket.product_label, "Imprimante reseau bureau direction")
         self.assertTrue(TicketAttachment.objects.filter(ticket=created_ticket, uploaded_by=self.client_user).exists())
 
     def test_support_page_renders_for_client(self):
@@ -997,6 +1140,38 @@ class SavPlatformTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "sav/support.html")
 
+    def test_field_technician_can_access_operational_workspace(self):
+        self.client.force_login(self.field_technician)
+
+        response = self.client.get(reverse("technician-space"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "sav/technician_space.html")
+
+    def test_internal_user_can_create_client_from_register_page(self):
+        self.client.force_login(self.manager)
+
+        response = self.client.post(
+            reverse("register"),
+            {
+                "organization": self.organization.id,
+                "first_name": "Rita",
+                "last_name": "Nouveau",
+                "email": "rita.nouveau@example.com",
+                "phone": "+237699000111",
+                "company_name": "Rita SARL",
+                "client_type": "enterprise",
+                "sector": "Distribution",
+                "tax_identifier": "RC-7788",
+                "address": "Douala",
+                "password1": "ClientPass123!",
+                "password2": "ClientPass123!",
+            },
+        )
+
+        self.assertRedirects(response, reverse("dashboard"))
+        self.assertTrue(User.objects.filter(email="rita.nouveau@example.com", role=User.ROLE_CLIENT).exists())
+
     def test_planning_page_renders_for_manager(self):
         self.client.force_login(self.manager)
 
@@ -1005,10 +1180,13 @@ class SavPlatformTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "sav/planning.html")
 
-    def test_technician_planning_api_rejects_non_technician_internal_users(self):
-        response = self.api.get(reverse("sav_api:technician-planning", args=[self.agent.pk]))
+    def test_dispatcher_can_access_planning_api_for_operational_profiles(self):
+        self.api.force_authenticate(user=self.dispatcher)
 
-        self.assertEqual(response.status_code, 404)
+        response = self.api.get(reverse("sav_api:technician-planning", args=[self.technician.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["technician_id"], self.technician.pk)
 
     def test_administration_page_renders_for_admin(self):
         admin_user = User.objects.create_user(

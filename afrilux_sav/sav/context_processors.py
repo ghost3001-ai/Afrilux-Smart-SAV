@@ -1,5 +1,14 @@
 from .models import Notification, Ticket
-from .services import OPEN_TICKET_STATUSES, has_backoffice_access, is_internal_user, scope_notification_queryset, scope_ticket_queryset
+from .services import (
+    OPEN_TICKET_STATUSES,
+    has_backoffice_access,
+    has_reporting_access,
+    has_technician_space_access,
+    is_internal_user,
+    is_manager_user,
+    scope_notification_queryset,
+    scope_ticket_queryset,
+)
 
 
 def sav_shell(request):
@@ -10,6 +19,9 @@ def sav_shell(request):
                 "is_authenticated": False,
                 "is_internal": False,
                 "has_backoffice_access": False,
+                "has_reporting_access": False,
+                "has_management_access": False,
+                "has_technician_space_access": False,
                 "unread_notifications": 0,
                 "open_tickets": 0,
                 "organization_name": "",
@@ -28,6 +40,9 @@ def sav_shell(request):
             "is_authenticated": True,
             "is_internal": is_internal_user(user),
             "has_backoffice_access": has_backoffice_access(user) or getattr(user, "is_superuser", False),
+            "has_reporting_access": has_reporting_access(user),
+            "has_management_access": is_manager_user(user),
+            "has_technician_space_access": has_technician_space_access(user),
             "unread_notifications": notifications.exclude(status=Notification.STATUS_READ).count(),
             "open_tickets": tickets.filter(status__in=OPEN_TICKET_STATUSES).count(),
             "organization_name": user.organization.display_name if getattr(user, "organization_id", None) else "",

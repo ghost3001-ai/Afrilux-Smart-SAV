@@ -61,8 +61,11 @@ from .services import (
     ensure_assignment_intervention,
     generate_intervention_pdf,
     has_backoffice_access,
+    has_reporting_access,
+    has_technician_space_access,
     is_internal_user,
     is_manager_user,
+    is_read_only_user,
     log_audit_event,
     maybe_flag_ticket_as_fraud,
     scope_audit_log_queryset,
@@ -100,7 +103,7 @@ def _dashboard_snapshot(user):
     notifications = scope_notification_queryset(Notification.objects.select_related("ticket"), user)
     messages = Message.objects.filter(ticket__in=tickets, sentiment_score__isnull=False)
     technicians = scope_user_queryset(
-        User.objects.filter(role=User.ROLE_TECHNICIAN, is_active=True),
+        User.objects.filter(role__in=User.TECHNICIAN_SPACE_ROLES, is_active=True),
         user,
     )
 
@@ -196,6 +199,16 @@ class BackofficeRequiredMixin(UserPassesTestMixin):
         return has_backoffice_access(self.request.user) or getattr(self.request.user, "is_superuser", False)
 
 
+class ReportingRequiredMixin(UserPassesTestMixin):
+    def test_func(self):
+        return has_reporting_access(self.request.user)
+
+
+class TechnicianWorkspaceRequiredMixin(UserPassesTestMixin):
+    def test_func(self):
+        return has_technician_space_access(self.request.user)
+
+
 class HomeRedirectView(View):
     def get(self, request, *args, **kwargs):
         if request.user.is_authenticated:
@@ -208,13 +221,16 @@ class ClientRegisterView(FormView):
     form_class = ClientRegistrationForm
     success_url = reverse_lazy("support-page")
 
-    def dispatch(self, request, *args, **kwargs):
-        if request.user.is_authenticated:
-            return redirect("dashboard")
-        return super().dispatch(request, *args, **kwargs)
-
     def form_valid(self, form):
         user = form.save()
+        if self.request.user.is_authenticated:
+            django_messages.success(
+                self.request,
+                f"Compte client {user.email or user.username} cree avec succes.",
+            )
+            target = "administration-page" if self.request.user.is_superuser or self.request.user.role == User.ROLE_ADMIN else "dashboard"
+            return redirect(target)
+
         login(self.request, user, backend="sav.auth_backends.EmailOrUsernameBackend")
         django_messages.success(
             self.request,
@@ -253,7 +269,7 @@ class DashboardPageView(LoginRequiredMixin, TemplateView):
         return context
 
 
-class ReportingPageView(LoginRequiredMixin, BackofficeRequiredMixin, TemplateView):
+class ReportingPageView(LoginRequiredMixin, ReportingRequiredMixin, TemplateView):
     template_name = "sav/reporting.html"
 
     def get_context_data(self, **kwargs):
@@ -285,7 +301,7 @@ class TechnicianPlanningPageView(LoginRequiredMixin, ManagerRequiredMixin, Templ
         week_start = selected_date - timedelta(days=selected_date.weekday())
         week_end = week_start + timedelta(days=7)
         technicians = scope_user_queryset(
-            User.objects.filter(role=User.ROLE_TECHNICIAN, is_active=True),
+            User.objects.filter(role__in=User.ASSIGNABLE_ROLES, is_active=True),
             self.request.user,
         ).order_by("first_name", "last_name", "username")
         tickets = scope_ticket_queryset(
@@ -342,7 +358,7 @@ class AdministrationPageView(LoginRequiredMixin, AdminRequiredMixin, TemplateVie
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         users = scope_user_queryset(User.objects.all(), self.request.user)
-        internal_users = users.filter(role__in=User.INTERNAL_ROLES).order_by("role", "first_name", "last_name", "username")
+        internal_users = users.filter(role__in=User.INTERNAL_ROLES + User.READ_ONLY_ROLES).order_by("role", "first_name", "last_name", "username")
         clients = users.filter(role=User.ROLE_CLIENT).order_by("company_name", "username")
         organization = getattr(self.request.user, "organization", None)
         context.update(
@@ -366,8 +382,16 @@ class AdministrationPageView(LoginRequiredMixin, AdminRequiredMixin, TemplateVie
                 "users_summary": {
                     "admins": internal_users.filter(role=User.ROLE_ADMIN).count(),
                     "responsables": internal_users.filter(role=User.ROLE_HEAD_SAV).count(),
-                    "techniciens": internal_users.filter(role=User.ROLE_TECHNICIAN).count(),
-                    "supports": internal_users.filter(role__in=[User.ROLE_SUPPORT, User.ROLE_AGENT]).count(),
+                    "superviseurs": internal_users.filter(role=User.ROLE_SUPERVISOR).count(),
+                    "dispatchers": internal_users.filter(role=User.ROLE_DISPATCHER).count(),
+                    "supports": internal_users.filter(role__in=User.STANDARD_SUPPORT_ROLES).count(),
+                    "vip_support": internal_users.filter(role__in=User.SPECIAL_SUPPORT_ROLES).count(),
+                    "techniciens": internal_users.filter(role__in=User.TECHNICAL_ROLES).count(),
+                    "experts": internal_users.filter(role=User.ROLE_EXPERT).count(),
+                    "terrain": internal_users.filter(role=User.ROLE_FIELD_TECHNICIAN).count(),
+                    "qa": internal_users.filter(role=User.ROLE_QA).count(),
+                    "auditeurs": internal_users.filter(role=User.ROLE_AUDITOR).count(),
+                    "bots": internal_users.filter(role=User.ROLE_SYSTEM_BOT).count(),
                     "clients": clients.count(),
                 },
             }
@@ -375,7 +399,7 @@ class AdministrationPageView(LoginRequiredMixin, AdminRequiredMixin, TemplateVie
         return context
 
 
-class TechnicianSpaceView(LoginRequiredMixin, InternalRequiredMixin, TemplateView):
+class TechnicianSpaceView(LoginRequiredMixin, TechnicianWorkspaceRequiredMixin, TemplateView):
     template_name = "sav/technician_space.html"
 
     def get_context_data(self, **kwargs):
@@ -434,7 +458,7 @@ class SupportPageView(LoginRequiredMixin, TemplateView):
     template_name = "sav/support.html"
 
     def dispatch(self, request, *args, **kwargs):
-        if is_internal_user(request.user):
+        if has_backoffice_access(request.user):
             return redirect("ticket-list")
         return super().dispatch(request, *args, **kwargs)
 
@@ -477,6 +501,8 @@ class TicketListView(LoginRequiredMixin, ListView):
                 | Q(title__icontains=query)
                 | Q(description__icontains=query)
                 | Q(client__username__icontains=query)
+                | Q(product_label__icontains=query)
+                | Q(product__name__icontains=query)
                 | Q(product__serial_number__icontains=query)
             )
         if status_filter:
@@ -513,6 +539,12 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
     form_class = TicketCreateForm
     template_name = "sav/ticket_form.html"
 
+    def dispatch(self, request, *args, **kwargs):
+        if is_read_only_user(request.user):
+            django_messages.error(request, "Le profil lecture seule est limite a la consultation.")
+            return redirect("ticket-list")
+        return super().dispatch(request, *args, **kwargs)
+
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
         kwargs["user"] = self.request.user
@@ -520,10 +552,23 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
 
     def get_initial(self):
         initial = super().get_initial()
-        for field_name in ["title", "description", "category", "priority", "product"]:
+        for field_name in ["title", "description", "category", "priority", "product_label"]:
             value = self.request.GET.get(field_name, "").strip()
             if value:
                 initial[field_name] = value
+        product_value = self.request.GET.get("product", "").strip()
+        if product_value:
+            if not initial.get("product_label"):
+                scoped_products = scope_product_queryset(Product.objects.all(), self.request.user)
+                if product_value.isdigit():
+                    product = scoped_products.filter(pk=product_value).first()
+                    if product:
+                        initial["product"] = product.pk
+                        initial["product_label"] = product.name
+                    else:
+                        initial["product_label"] = product_value
+                else:
+                    initial["product_label"] = product_value
         return initial
 
     def form_valid(self, form):
@@ -615,6 +660,7 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         ticket = self.object
+        can_participate = not is_read_only_user(self.request.user)
         context["message_form"] = MessageForm(user=self.request.user)
         context["attachment_form"] = TicketAttachmentForm()
         context["product_alerts"] = (
@@ -636,13 +682,14 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         context["visible_messages"] = scope_message_queryset(ticket.messages.all(), self.request.user)
         context["attachments"] = scope_attachment_queryset(ticket.attachments.all(), self.request.user)
         context["account_credits"] = ticket.account_credits.order_by("-executed_at")
+        context["can_participate"] = can_participate
         context["can_edit"] = is_internal_user(self.request.user)
         context["can_credit_account"] = is_manager_user(self.request.user)
         context["can_confirm_resolution"] = (
             ticket.status == Ticket.STATUS_RESOLVED
             and (self.request.user.role == User.ROLE_CLIENT and ticket.client_id == self.request.user.id)
         )
-        context["can_reopen"] = ticket.status in {Ticket.STATUS_RESOLVED, Ticket.STATUS_CLOSED}
+        context["can_reopen"] = can_participate and ticket.status in {Ticket.STATUS_RESOLVED, Ticket.STATUS_CLOSED}
         context["client_contacts"] = ticket.client.contacts.order_by("-is_primary", "first_name", "last_name")[:8]
         context["assignment_history"] = ticket.assignment_history.select_related("technician", "assigned_by").all()[:12]
         context["intervention_form"] = InterventionForm(
@@ -666,6 +713,9 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
 class TicketConfirmResolutionView(LoginRequiredMixin, View):
     def post(self, request, pk):
         ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
+        if is_read_only_user(request.user):
+            django_messages.error(request, "Le profil lecture seule est limite a la consultation.")
+            return redirect("ticket-detail", pk=pk)
         if request.user.role == User.ROLE_CLIENT and ticket.client_id != request.user.id:
             django_messages.error(request, "Vous ne pouvez valider que vos propres tickets.")
             return redirect("ticket-detail", pk=pk)
@@ -695,6 +745,9 @@ class TicketConfirmResolutionView(LoginRequiredMixin, View):
 class TicketReopenView(LoginRequiredMixin, View):
     def post(self, request, pk):
         ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
+        if is_read_only_user(request.user):
+            django_messages.error(request, "Le profil lecture seule est limite a la consultation.")
+            return redirect("ticket-detail", pk=pk)
         if ticket.status not in {Ticket.STATUS_RESOLVED, Ticket.STATUS_CLOSED}:
             django_messages.error(request, "Seuls les tickets resolus ou fermes peuvent etre rouverts.")
             return redirect("ticket-detail", pk=pk)
@@ -727,6 +780,9 @@ class TicketReopenView(LoginRequiredMixin, View):
 class TicketMessageCreateView(LoginRequiredMixin, View):
     def post(self, request, pk):
         ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
+        if is_read_only_user(request.user):
+            django_messages.error(request, "Le profil lecture seule est limite a la consultation.")
+            return redirect("ticket-detail", pk=pk)
         form = MessageForm(request.POST, user=request.user)
         if not form.is_valid():
             django_messages.error(request, "Impossible d'ajouter le message. Verifiez les champs.")
@@ -768,6 +824,9 @@ class TicketAgenticResolutionView(LoginRequiredMixin, InternalRequiredMixin, Vie
 class TicketAttachmentCreateView(LoginRequiredMixin, View):
     def post(self, request, pk):
         ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
+        if is_read_only_user(request.user):
+            django_messages.error(request, "Le profil lecture seule est limite a la consultation.")
+            return redirect("ticket-detail", pk=pk)
         form = TicketAttachmentForm(request.POST, request.FILES)
         if not form.is_valid():
             django_messages.error(request, "Impossible d'ajouter la piece jointe.")
@@ -1080,7 +1139,7 @@ class NotificationMarkReadView(LoginRequiredMixin, View):
         return redirect("notifications")
 
 
-class AnalyticsPageView(LoginRequiredMixin, FormView):
+class AnalyticsPageView(LoginRequiredMixin, ReportingRequiredMixin, FormView):
     template_name = "sav/analytics.html"
     form_class = AnalyticsQuestionForm
 

@@ -1,15 +1,15 @@
 {% extends "sav/base.html" %}
 {% load sav_extras %}
 
-{% block title %}Planning Techniciens | Afrilux SAV{% endblock %}
+{% block title %}Planning Equipes | Afrilux SAV{% endblock %}
 
 {% block content %}
 <section class="hero">
     <div>
-        <p class="eyebrow">Planning techniciens</p>
+        <p class="eyebrow">Planning des equipes</p>
         <h1>Semaine du {{ week_start|date:"d/m/Y" }} au {{ week_end|date:"d/m/Y" }}</h1>
         <p class="hero__lead">
-            Affectez les tickets ouverts par glisser-deposer et suivez le calendrier hebdomadaire des interventions par technicien.
+            Affectez les tickets ouverts par glisser-deposer et suivez le calendrier hebdomadaire des interventions par agent operationnel.
         </p>
     </div>
     <div class="hero__actions">
@@ -95,7 +95,7 @@
                 </div>
             </article>
         {% empty %}
-            <p class="muted">Aucun technicien actif dans cette organisation.</p>
+            <p class="muted">Aucun agent operationnel actif dans cette organisation.</p>
         {% endfor %}
     </div>
 </section>

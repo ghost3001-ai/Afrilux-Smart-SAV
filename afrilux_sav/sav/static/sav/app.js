@@ -252,11 +252,18 @@ function initializeSupportChat() {
       return "";
     }
     const params = new URLSearchParams();
-    ["title", "description", "category", "priority", "product"].forEach((key) => {
+    ["title", "description", "category", "priority", "product", "product_label"].forEach((key) => {
       if (draftTicket[key]) {
         params.set(key, draftTicket[key]);
       }
     });
+    if (productField && productField.value) {
+      params.set("product", productField.value);
+      const selectedLabel = productField.options[productField.selectedIndex]?.text || "";
+      if (selectedLabel && !params.get("product_label")) {
+        params.set("product_label", selectedLabel);
+      }
+    }
     return `
       <div class="support-bubble__actions">
         <a class="button button--primary" href="${ticketCreateUrl}?${params.toString()}">Creer le ticket</a>

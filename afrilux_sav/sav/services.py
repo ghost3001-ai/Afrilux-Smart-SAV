@@ -158,12 +158,40 @@ def is_platform_internal_user(user):
     return bool(is_internal_user(user) and not getattr(user, "organization_id", None))
 
 
+def is_read_only_user(user):
+    return bool(user and user.is_authenticated and getattr(user, "role", "") in set(User.READ_ONLY_ROLES))
+
+
 def is_auditor_user(user):
     return bool(user and user.is_authenticated and getattr(user, "role", "") == User.ROLE_AUDITOR)
 
 
+def has_technician_space_access(user):
+    return bool(
+        user
+        and user.is_authenticated
+        and (user.is_superuser or getattr(user, "role", "") in set(User.TECHNICIAN_SPACE_ROLES))
+    )
+
+
+def has_reporting_access(user):
+    return bool(
+        user
+        and user.is_authenticated
+        and (user.is_superuser or getattr(user, "role", "") in set(User.REPORTING_ROLES))
+    )
+
+
+def has_oversight_access(user):
+    return bool(
+        user
+        and user.is_authenticated
+        and (user.is_superuser or getattr(user, "role", "") in set(User.OVERSIGHT_ROLES))
+    )
+
+
 def has_backoffice_access(user):
-    return bool(is_internal_user(user) or is_auditor_user(user))
+    return bool(is_internal_user(user) or is_read_only_user(user))
 
 
 def scope_by_access(queryset, user, own_relation, organization_relation="organization"):
@@ -191,7 +219,7 @@ def scope_user_queryset(queryset, user):
         return queryset.none()
     if user.is_superuser:
         return queryset
-    if getattr(user, "role", "") in set(User.MANAGER_ROLES) or is_auditor_user(user):
+    if has_oversight_access(user):
         if user.organization_id:
             return queryset.filter(organization=user.organization)
         return queryset
@@ -795,7 +823,7 @@ def _ticket_context(ticket):
         "status": ticket.status,
         "warranty_eligible": bool(ticket.product and ticket.product.is_under_warranty),
         "product": {
-            "name": ticket.product.name if ticket.product else None,
+            "name": ticket.product_display_name or None,
             "serial_number": ticket.product.serial_number if ticket.product else None,
             "health_score": ticket.product.health_score if ticket.product else None,
         },
@@ -982,7 +1010,7 @@ def parse_reporting_recipients(organization):
     users = User.objects.filter(
         organization=organization,
         is_active=True,
-    ).filter(Q(role__in=User.MANAGER_ROLES) | Q(role=User.ROLE_AUDITOR))
+    ).filter(Q(role__in=User.REPORTING_ROLES) | Q(is_superuser=True))
     for user in users:
         email = (user.professional_email or user.email or "").strip().lower()
         if email:
@@ -2494,7 +2522,7 @@ def dispatch_due_reports(*, organization=None, now=None, dry_run=False, report_t
     for org in organizations:
         actor = (
             User.objects.filter(organization=org, is_active=True)
-            .filter(Q(role__in=User.MANAGER_ROLES + (User.ROLE_AUDITOR, User.ROLE_SUPPORT, User.ROLE_TECHNICIAN)) | Q(is_superuser=True))
+            .filter(Q(role__in=User.REPORTING_ROLES + User.TECHNICIAN_SPACE_ROLES) | Q(is_superuser=True))
             .order_by("role", "id")
             .first()
         )

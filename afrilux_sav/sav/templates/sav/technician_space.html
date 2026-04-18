@@ -1,12 +1,12 @@
 {% extends "sav/base.html" %}
 {% load sav_extras %}
 
-{% block title %}Espace Technicien | Afrilux SAV{% endblock %}
+{% block title %}Espace Operationnel | Afrilux SAV{% endblock %}
 
 {% block content %}
 <section class="hero">
     <div>
-        <p class="eyebrow">Tableau de bord technicien</p>
+        <p class="eyebrow">Tableau de bord operationnel</p>
         <h1>{{ technician.get_full_name|default:technician.username }}</h1>
         <p class="hero__lead">
             Suivez vos tickets assignes, les echeances SLA, les interventions du jour et votre historique des 30 derniers jours.

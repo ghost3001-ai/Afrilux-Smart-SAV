@@ -63,7 +63,7 @@
             <p>{{ ticket.description|truncatechars:140 }}</p>
             <div class="ticket-card__meta">
                 <span>{{ ticket.get_category_display }}</span>
-                <span>{% if ticket.product %}{{ ticket.product.serial_number }}{% else %}Sans produit{% endif %}</span>
+                <span>{% if ticket.product %}{{ ticket.product.serial_number }}{% elif ticket.product_label %}{{ ticket.product_label }}{% else %}Sans produit{% endif %}</span>
             </div>
         </article>
     {% empty %}
