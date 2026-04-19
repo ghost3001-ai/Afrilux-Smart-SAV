@@ -1082,6 +1082,14 @@ class SavPlatformTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, "/dashboard/")
 
+    def test_logout_redirects_to_login_page(self):
+        self.client.force_login(self.client_user)
+
+        response = self.client.post(reverse("logout"))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, "/login/")
+
     def test_analytics_redirects_to_custom_login_url(self):
         response = self.client.get(reverse("analytics-page"))
 

@@ -179,7 +179,8 @@ a {
     flex-wrap: wrap;
 }
 
-.nav a {
+.nav a,
+.nav__link-button {
     display: inline-flex;
     align-items: center;
     gap: 8px;
@@ -187,16 +188,25 @@ a {
     border-radius: 999px;
     border: 1px solid transparent;
     color: var(--muted);
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
     font-weight: 600;
     transition: background 0.2s ease, transform 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
 .nav a:hover,
-.nav a:focus-visible {
+.nav a:focus-visible,
+.nav__link-button:hover,
+.nav__link-button:focus-visible {
     background: var(--surface);
     border-color: var(--stroke);
     color: var(--text);
     transform: translateY(-1px);
+}
+
+.nav__logout-form {
+    margin: 0;
 }
 
 .nav button:hover {

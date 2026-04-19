@@ -53,7 +53,10 @@
                     <a href="{% url 'knowledge-list' %}">Knowledge</a>
                     <a href="{% url 'notifications' %}">Notifications <span class="nav__badge">{{ sav_shell.unread_notifications }}</span></a>
                     <button class="button button--ghost button--compact" type="button" data-theme-toggle>Theme</button>
-                    <a href="{% url 'logout' %}">Deconnexion</a>
+                    <form method="post" action="{% url 'logout' %}" class="nav__logout-form">
+                        {% csrf_token %}
+                        <button class="nav__link-button" type="submit">Deconnexion</button>
+                    </form>
                 </nav>
             {% endif %}
         </header>

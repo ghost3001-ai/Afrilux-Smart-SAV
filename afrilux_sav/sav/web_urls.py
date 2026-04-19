@@ -50,7 +50,7 @@ urlpatterns = [
         name="login",
     ),
     path("register/", ClientRegisterView.as_view(), name="register"),
-    path("logout/", LogoutView.as_view(), name="logout"),
+    path("logout/", LogoutView.as_view(next_page="login"), name="logout"),
     path("dashboard/", DashboardPageView.as_view(), name="dashboard"),
     path("technician-space/", TechnicianSpaceView.as_view(), name="technician-space"),
     path("planning/", TechnicianPlanningPageView.as_view(), name="planning-page"),
