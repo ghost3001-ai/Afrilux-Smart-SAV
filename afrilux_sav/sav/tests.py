@@ -1128,6 +1128,71 @@ class SavPlatformTests(TestCase):
         self.assertEqual(form.fields["client"].initial, self.client_user)
         self.assertFalse(form.fields["client"].required)
 
+    def test_ticket_create_form_uses_inline_client_fields_for_internal_user(self):
+        form = TicketCreateForm(user=self.manager)
+
+        self.assertEqual(form.fields["client_mode"].initial, TicketCreateForm.CLIENT_MODE_EXISTING)
+        self.assertNotIsInstance(form.fields["client_mode"].widget, HiddenInput)
+        self.assertNotIsInstance(form.fields["client"].widget, HiddenInput)
+        self.assertFalse(form.fields["client"].required)
+        self.assertNotIsInstance(form.fields["client_name"].widget, HiddenInput)
+        self.assertNotIsInstance(form.fields["client_email"].widget, HiddenInput)
+        self.assertNotIsInstance(form.fields["client_password1"].widget, HiddenInput)
+        self.assertNotIsInstance(form.fields["client_password2"].widget, HiddenInput)
+
+    def test_internal_user_can_create_ticket_for_existing_client(self):
+        self.client.force_login(self.manager)
+
+        response = self.client.post(
+            reverse("ticket-create"),
+            {
+                "client_mode": TicketCreateForm.CLIENT_MODE_EXISTING,
+                "client": self.client_user.pk,
+                "product_label": "Serveur ondule",
+                "title": "Ticket pour client existant",
+                "description": "Creation de ticket sans recrer le client.",
+                "category": Ticket.CATEGORY_MAINTENANCE,
+                "channel": Ticket.CHANNEL_PHONE,
+                "status": Ticket.STATUS_NEW,
+                "priority": Ticket.PRIORITY_NORMAL,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        created_ticket = Ticket.objects.get(title="Ticket pour client existant")
+        self.assertEqual(created_ticket.client, self.client_user)
+
+    def test_internal_user_can_create_ticket_and_client_in_one_flow(self):
+        self.client.force_login(self.manager)
+
+        response = self.client.post(
+            reverse("ticket-create"),
+            {
+                "client_mode": TicketCreateForm.CLIENT_MODE_NEW,
+                "client_name": "Mireille Ndjana",
+                "client_email": "mireille.ndjana@example.com",
+                "client_password1": "ClientPass123!",
+                "client_password2": "ClientPass123!",
+                "product_label": "Groupe electrogene 40kVA",
+                "title": "Creation combinee ticket client",
+                "description": "Le ticket cree aussi le compte client.",
+                "category": Ticket.CATEGORY_BREAKDOWN,
+                "channel": Ticket.CHANNEL_PHONE,
+                "status": Ticket.STATUS_NEW,
+                "priority": Ticket.PRIORITY_HIGH,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        created_client = User.objects.get(email="mireille.ndjana@example.com")
+        self.assertEqual(created_client.role, User.ROLE_CLIENT)
+        self.assertEqual(created_client.organization, self.organization)
+        self.assertTrue(created_client.check_password("ClientPass123!"))
+
+        created_ticket = Ticket.objects.get(title="Creation combinee ticket client")
+        self.assertEqual(created_ticket.client, created_client)
+        self.assertEqual(created_ticket.product_label, "Groupe electrogene 40kVA")
+
     def test_client_can_create_ticket_via_web_portal_with_attachment(self):
         self.client.force_login(self.client_user)
         uploaded = SimpleUploadedFile("capture.png", b"fake-image-content", content_type="image/png")

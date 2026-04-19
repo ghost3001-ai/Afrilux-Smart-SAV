@@ -11,7 +11,7 @@
 </section>
 
 <section class="card form-card">
-    <form method="post" enctype="multipart/form-data" class="wizard" data-ticket-wizard>
+    <form method="post" enctype="multipart/form-data" class="wizard" data-ticket-wizard data-ticket-client-mode>
         {% csrf_token %}
         {% if form.non_field_errors %}
             <div class="form-errors form-errors--full">{{ form.non_field_errors }}</div>
@@ -24,7 +24,7 @@
         <div class="wizard__steps">
             <div class="wizard__step is-active" data-wizard-step>
                 <strong>1. Contexte</strong>
-                <span>Client, produit saisi et transaction</span>
+                <span>Client existant ou nouveau, acces et transaction</span>
             </div>
             <div class="wizard__step" data-wizard-step>
                 <strong>2. Incident</strong>
@@ -36,18 +36,23 @@
             </div>
         </div>
 
-        <div class="wizard__panel is-active form-grid form-grid--two" data-wizard-panel>
-            {% for field in form %}
-                {% if not field.is_hidden and field.name == 'client' or not field.is_hidden and field.name == 'product_label' or not field.is_hidden and field.name == 'related_transaction' or not field.is_hidden and field.name == 'title' %}
-                    <label class="field {% if field.name == 'title' %}field--full{% endif %}">
-                        <span>{{ field.label }}</span>
-                        {{ field }}
-                        {% if field.help_text %}<small class="field__help">{{ field.help_text }}</small>{% endif %}
-                        {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
-                    </label>
-                {% endif %}
-            {% endfor %}
-        </div>
+        {% with current_client_mode=form.data.client_mode|default:'existing' %}
+            <div class="wizard__panel is-active form-grid form-grid--two" data-wizard-panel>
+                {% for field in form %}
+                    {% if not field.is_hidden and field.name == 'client_mode' or not field.is_hidden and field.name == 'client' or not field.is_hidden and field.name == 'client_name' or not field.is_hidden and field.name == 'client_email' or not field.is_hidden and field.name == 'client_password1' or not field.is_hidden and field.name == 'client_password2' or not field.is_hidden and field.name == 'product_label' or not field.is_hidden and field.name == 'related_transaction' or not field.is_hidden and field.name == 'title' %}
+                        <label
+                            class="field {% if field.name == 'title' or field.name == 'product_label' or field.name == 'client_mode' %}field--full{% endif %}{% if field.name == 'client' or field.name == 'related_transaction' %}{% if current_client_mode == 'new' %} field--hidden{% endif %}{% elif field.name == 'client_name' or field.name == 'client_email' or field.name == 'client_password1' or field.name == 'client_password2' %}{% if current_client_mode != 'new' %} field--hidden{% endif %}{% endif %}"
+                            {% if field.name == 'client' or field.name == 'related_transaction' %}data-client-mode-group="existing"{% elif field.name == 'client_name' or field.name == 'client_email' or field.name == 'client_password1' or field.name == 'client_password2' %}data-client-mode-group="new"{% endif %}
+                        >
+                            <span>{{ field.label }}</span>
+                            {{ field }}
+                            {% if field.help_text %}<small class="field__help">{{ field.help_text }}</small>{% endif %}
+                            {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
+                        </label>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        {% endwith %}
 
         <div class="wizard__panel form-grid form-grid--two" data-wizard-panel>
             {% for field in form %}

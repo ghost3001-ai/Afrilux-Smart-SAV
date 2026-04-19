@@ -78,7 +78,7 @@ function initializeTicketWizard() {
   const validateCurrentStep = () => {
     const currentPanel = panels[activeIndex];
     const fields = Array.from(currentPanel.querySelectorAll("input, select, textarea")).filter(
-      (field) => field.type !== "hidden" && field.willValidate,
+      (field) => field.type !== "hidden" && field.willValidate && !field.closest(".field--hidden"),
     );
     return fields.every((field) => field.reportValidity());
   };
@@ -94,6 +94,49 @@ function initializeTicketWizard() {
     activeIndex = Math.max(activeIndex - 1, 0);
     sync();
   });
+  sync();
+}
+
+function initializeTicketClientMode() {
+  const root = document.querySelector("[data-ticket-client-mode]");
+  if (!root) {
+    return;
+  }
+
+  const modeField = root.querySelector("[name='client_mode']");
+  if (!modeField) {
+    return;
+  }
+
+  const groups = Array.from(root.querySelectorAll("[data-client-mode-group]"));
+  const existingClientField = root.querySelector("[name='client']");
+  const newClientFieldNames = ["client_name", "client_email", "client_password1", "client_password2"];
+
+  const sync = () => {
+    const activeMode = modeField.value || "existing";
+
+    groups.forEach((group) => {
+      const isActive = group.dataset.clientModeGroup === activeMode;
+      group.classList.toggle("field--hidden", !isActive);
+
+      Array.from(group.querySelectorAll("input, select, textarea")).forEach((field) => {
+        field.disabled = !isActive;
+      });
+    });
+
+    if (existingClientField) {
+      existingClientField.required = activeMode === "existing";
+    }
+
+    newClientFieldNames.forEach((fieldName) => {
+      const field = root.querySelector(`[name='${fieldName}']`);
+      if (field) {
+        field.required = activeMode === "new";
+      }
+    });
+  };
+
+  modeField.addEventListener("change", sync);
   sync();
 }
 
@@ -348,6 +391,7 @@ function initializeSupportChat() {
 document.addEventListener("DOMContentLoaded", () => {
   fadeFlashes();
   initializeThemeToggle();
+  initializeTicketClientMode();
   initializeTicketWizard();
   initializeDashboardCharts();
   initializePlanningBoard();

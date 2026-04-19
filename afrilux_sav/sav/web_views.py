@@ -575,6 +575,12 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
         if self.request.user.role == User.ROLE_CLIENT:
             form.instance.client = self.request.user
             form.instance.status = Ticket.STATUS_NEW
+        else:
+            try:
+                form.instance.client = form.resolve_ticket_client()
+            except ValueError as exc:
+                form.add_error("client_email", str(exc))
+                return self.form_invalid(form)
 
         response = super().form_valid(form)
 
