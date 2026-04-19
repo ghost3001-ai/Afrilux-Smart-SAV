@@ -55,8 +55,8 @@ python3 manage.py purge_demo_data --execute
 python3 manage.py bootstrap_platform \
   --organization-name="AFRILUX SMART SOLUTIONS" \
   --organization-slug=afrilux-smart \
-  --support-email=sav@afrilux.local \
-  --support-phone=+237698762455 \
+  --support-email=siege@afriluxsa.local \
+  --support-phone=+237691674993 \
   --city=Douala \
   --country=Cameroun \
   --admin-username=aziz \
@@ -108,9 +108,15 @@ Base applicative:
 - `DJANGO_SECRET_KEY`
 - `DJANGO_DEBUG`
 - `DJANGO_SERVE_STATIC_LOCAL`
+- `DJANGO_MEDIA_ROOT`
+- `DJANGO_STATIC_ROOT`
 - `DJANGO_ALLOWED_HOSTS`
 - `CSRF_TRUSTED_ORIGINS`
 - `SAV_PUBLIC_BASE_URL`
+- `SAV_BACKUP_DIR`
+- `DJANGO_RUN_SCHEDULER_IN_WEB`
+- `SCHEDULER_INTERVAL_SECONDS`
+- `SCHEDULER_SKIP_BACKUP`
 
 Base PostgreSQL:
 
@@ -230,11 +236,26 @@ L'app mobile couvre:
 - action manager `crediter le compte` depuis le detail ticket
 - creation autonome d'un compte client depuis l'application mobile
 
+APK Android:
+
+```bash
+cd afrilux_sav_mobile
+# optionnel: cp android/key.properties.example android/key.properties
+# puis renseigner votre vrai keystore si vous voulez une signature release definitive
+flutter build apk --release
+```
+
+Artefact genere:
+
+- `afrilux_sav_mobile/build/app/outputs/flutter-apk/app-release.apk`
+
 ## Guide d'utilisation
 
 ### 0. Demarrer avec PostgreSQL, Redis et Docker
 
 Les livrables de deploiement sont fournis dans [Dockerfile](/home/ghost/Afrilux_Smart/projet/Service%20Apres%20Vente/afrilux_sav/Dockerfile), [docker-compose.yml](/home/ghost/Afrilux_Smart/projet/Service%20Apres%20Vente/afrilux_sav/docker-compose.yml), [entrypoint.sh](/home/ghost/Afrilux_Smart/projet/Service%20Apres%20Vente/afrilux_sav/entrypoint.sh) et [requirements.txt](/home/ghost/Afrilux_Smart/projet/Service%20Apres%20Vente/afrilux_sav/requirements.txt).
+
+Pour Render, utilisez la blueprint [render.yaml](/home/ghost/Afrilux_Smart/projet/Service%20Apres%20Vente/render.yaml) et le guide [RENDER.md](/home/ghost/Afrilux_Smart/projet/Service%20Apres%20Vente/afrilux_sav/RENDER.md).
 
 ```bash
 cd afrilux_sav
@@ -269,13 +290,13 @@ python3 manage.py purge_demo_data --execute
 python3 manage.py bootstrap_platform \
   --organization-name="AFRILUX SMART SOLUTIONS" \
   --organization-slug=afrilux-smart \
-  --support-email=sav@afrilux.local \
+  --support-email=siege@afriluxsa.com \
   --support-phone=+237600000000 \
   --city=Douala \
   --country=Cameroun \
-  --admin-username=admin_afrilux \
-  --admin-email=admin@afrilux.local \
-  --admin-password='ChangeMe123!'
+  --admin-username=aziz \
+  --admin-email=johnarthurclinton@gmail.com \
+  --admin-password='Charlotte2.0'
 python3 manage.py runserver
 ```
 

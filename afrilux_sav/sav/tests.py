@@ -6,12 +6,14 @@ from unittest.mock import patch
 
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.forms import HiddenInput
 from django.test import TestCase
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from .forms import TicketCreateForm
 from .models import (
     AccountCredit,
     AIActionLog,
@@ -1109,6 +1111,14 @@ class SavPlatformTests(TestCase):
                 product_label="Split mural 12000 BTU",
             ).exists()
         )
+
+    def test_ticket_create_form_shows_client_field_for_client_user(self):
+        form = TicketCreateForm(user=self.client_user)
+
+        self.assertNotIsInstance(form.fields["client"].widget, HiddenInput)
+        self.assertQuerySetEqual(form.fields["client"].queryset, [self.client_user], transform=lambda user: user)
+        self.assertEqual(form.fields["client"].initial, self.client_user)
+        self.assertFalse(form.fields["client"].required)
 
     def test_client_can_create_ticket_via_web_portal_with_attachment(self):
         self.client.force_login(self.client_user)

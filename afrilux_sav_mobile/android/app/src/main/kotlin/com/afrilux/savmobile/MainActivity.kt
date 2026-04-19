@@ -1,4 +1,4 @@
-package com.example.afrilux_sav_mobile
+package com.afrilux.savmobile
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -131,9 +131,11 @@ class TicketForm(forms.ModelForm):
         self.fields["related_transaction"].queryset = transaction_queryset.order_by("-occurred_at", "-created_at")
 
         if user and user.is_authenticated and user.role == User.ROLE_CLIENT:
+            self.fields["client"].queryset = client_queryset.filter(pk=user.pk)
             self.fields["client"].initial = user
-            self.fields["client"].widget = forms.HiddenInput()
             self.fields["client"].required = False
+            self.fields["client"].empty_label = None
+            self.fields["client"].help_text = "Votre compte client est preselectionne pour ce ticket."
             self.fields["assigned_agent"].widget = forms.HiddenInput()
             self.fields["assigned_agent"].required = False
             self.fields["status"].initial = Ticket.STATUS_NEW

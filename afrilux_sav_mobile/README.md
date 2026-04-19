@@ -86,6 +86,23 @@ flutter run \
   --dart-define=FIREBASE_IOS_BUNDLE_ID=com.example.afrilux_sav_mobile
 ```
 
+## Generer l'APK Android
+
+```bash
+flutter pub get
+# optionnel: cp android/key.properties.example android/key.properties
+# puis renseigner votre vrai keystore si vous voulez une signature release definitive
+flutter build apk --release
+```
+
+APK produit:
+
+- `build/app/outputs/flutter-apk/app-release.apk`
+
+Le package Android est maintenant `com.afrilux.savmobile`.
+
+Si `android/key.properties` est absent, le build `release` retombe sur la signature debug pour produire un APK installable de test. Pour une publication Play Store, renseignez votre vrai keystore dans `android/key.properties`.
+
 ## Verification
 
 ```bash
