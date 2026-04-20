@@ -173,19 +173,6 @@ class TicketForm(forms.ModelForm):
 
 
 class TicketCreateForm(TicketForm):
-    CLIENT_MODE_EXISTING = "existing"
-    CLIENT_MODE_NEW = "new"
-    CLIENT_MODE_CHOICES = (
-        (CLIENT_MODE_EXISTING, "Client existant"),
-        (CLIENT_MODE_NEW, "Nouveau client"),
-    )
-
-    client_mode = forms.ChoiceField(
-        required=False,
-        label="Mode client",
-        choices=CLIENT_MODE_CHOICES,
-        initial=CLIENT_MODE_EXISTING,
-    )
     client_name = forms.CharField(
         required=False,
         label="Nom du client",
@@ -220,14 +207,14 @@ class TicketCreateForm(TicketForm):
         super().__init__(*args, **kwargs)
         if self._uses_inline_client_creation():
             self.fields["client"].required = False
-            self.fields["client_mode"].help_text = "Choisissez un client existant ou creez-en un nouveau pendant le ticket."
-            self.fields["client"].help_text = "Selectionnez un client deja present dans votre organisation."
-            self.fields["related_transaction"].help_text = "Optionnel: disponible uniquement pour un client existant."
+            self.fields["client"].widget = forms.HiddenInput()
+            self.fields["related_transaction"].widget = forms.HiddenInput()
+            self.fields["related_transaction"].required = False
             self.fields["client_name"].help_text = "Le compte client sera cree automatiquement a la validation du ticket."
             self.fields["client_email"].help_text = "Cet email servira d'identifiant de connexion du client."
             self.fields["client_password1"].help_text = "Definissez le mot de passe initial du compte client."
         else:
-            for field_name in ["client_mode", "client_name", "client_email", "client_password1", "client_password2"]:
+            for field_name in ["client_name", "client_email", "client_password1", "client_password2"]:
                 self.fields[field_name].widget = forms.HiddenInput()
                 self.fields[field_name].required = False
 
@@ -237,33 +224,12 @@ class TicketCreateForm(TicketForm):
     def _inline_client_organization(self):
         return getattr(self.user, "organization", None)
 
-    def _selected_client_mode(self, cleaned_data=None):
-        source = cleaned_data if cleaned_data is not None else self.cleaned_data
-        mode = (source.get("client_mode") or self.CLIENT_MODE_EXISTING).strip().lower()
-        if mode not in {self.CLIENT_MODE_EXISTING, self.CLIENT_MODE_NEW}:
-            return ""
-        return mode
-
     def clean_client_email(self):
         return (self.cleaned_data.get("client_email") or "").strip().lower()
 
     def clean(self):
         cleaned_data = super().clean()
         if not self._uses_inline_client_creation():
-            return cleaned_data
-
-        mode = self._selected_client_mode(cleaned_data)
-        if not mode:
-            self.add_error("client_mode", "Choisissez un mode client valide.")
-            return cleaned_data
-
-        if mode == self.CLIENT_MODE_EXISTING:
-            if not cleaned_data.get("client"):
-                self.add_error("client", "Selectionnez un client existant.")
-            cleaned_data["client_name"] = ""
-            cleaned_data["client_email"] = ""
-            cleaned_data["client_password1"] = ""
-            cleaned_data["client_password2"] = ""
             return cleaned_data
 
         cleaned_data["client"] = None
@@ -312,10 +278,6 @@ class TicketCreateForm(TicketForm):
             return self._inline_client_account
         if not self.is_valid():
             raise ValueError("Le formulaire de ticket n'est pas valide.")
-
-        if self._selected_client_mode(self.cleaned_data) == self.CLIENT_MODE_EXISTING:
-            self._inline_client_account = self.cleaned_data.get("client")
-            return self._inline_client_account
 
         first_name, last_name = _split_full_name(self.cleaned_data.get("client_name", ""))
         client, _created = provision_client_account(

@@ -1131,26 +1131,24 @@ class SavPlatformTests(TestCase):
     def test_ticket_create_form_uses_inline_client_fields_for_internal_user(self):
         form = TicketCreateForm(user=self.manager)
 
-        self.assertEqual(form.fields["client_mode"].initial, TicketCreateForm.CLIENT_MODE_EXISTING)
-        self.assertNotIsInstance(form.fields["client_mode"].widget, HiddenInput)
-        self.assertNotIsInstance(form.fields["client"].widget, HiddenInput)
+        self.assertIsInstance(form.fields["client"].widget, HiddenInput)
         self.assertFalse(form.fields["client"].required)
+        self.assertIsInstance(form.fields["related_transaction"].widget, HiddenInput)
+        self.assertFalse(form.fields["related_transaction"].required)
         self.assertNotIsInstance(form.fields["client_name"].widget, HiddenInput)
         self.assertNotIsInstance(form.fields["client_email"].widget, HiddenInput)
         self.assertNotIsInstance(form.fields["client_password1"].widget, HiddenInput)
         self.assertNotIsInstance(form.fields["client_password2"].widget, HiddenInput)
 
-    def test_internal_user_can_create_ticket_for_existing_client(self):
+    def test_internal_user_must_enter_new_client_identity_when_creating_ticket(self):
         self.client.force_login(self.manager)
 
         response = self.client.post(
             reverse("ticket-create"),
             {
-                "client_mode": TicketCreateForm.CLIENT_MODE_EXISTING,
-                "client": self.client_user.pk,
                 "product_label": "Serveur ondule",
-                "title": "Ticket pour client existant",
-                "description": "Creation de ticket sans recrer le client.",
+                "title": "Ticket sans client saisi",
+                "description": "Creation de ticket sans informations client.",
                 "category": Ticket.CATEGORY_MAINTENANCE,
                 "channel": Ticket.CHANNEL_PHONE,
                 "status": Ticket.STATUS_NEW,
@@ -1158,9 +1156,11 @@ class SavPlatformTests(TestCase):
             },
         )
 
-        self.assertEqual(response.status_code, 302)
-        created_ticket = Ticket.objects.get(title="Ticket pour client existant")
-        self.assertEqual(created_ticket.client, self.client_user)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Le nom du client est obligatoire.")
+        self.assertContains(response, "L'email du client est obligatoire.")
+        self.assertContains(response, "Le mot de passe client est obligatoire.")
+        self.assertFalse(Ticket.objects.filter(title="Ticket sans client saisi").exists())
 
     def test_internal_user_can_create_ticket_and_client_in_one_flow(self):
         self.client.force_login(self.manager)
@@ -1168,7 +1168,6 @@ class SavPlatformTests(TestCase):
         response = self.client.post(
             reverse("ticket-create"),
             {
-                "client_mode": TicketCreateForm.CLIENT_MODE_NEW,
                 "client_name": "Mireille Ndjana",
                 "client_email": "mireille.ndjana@example.com",
                 "client_password1": "ClientPass123!",
