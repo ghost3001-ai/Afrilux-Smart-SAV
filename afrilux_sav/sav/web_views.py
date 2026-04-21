@@ -59,6 +59,7 @@ from .services import (
     compute_ticket_volume_series,
     credit_account_for_ticket,
     ensure_assignment_intervention,
+    escalate_ticket,
     generate_intervention_pdf,
     has_backoffice_access,
     has_reporting_access,
@@ -691,6 +692,7 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         context["can_participate"] = can_participate
         context["can_edit"] = is_internal_user(self.request.user)
         context["can_credit_account"] = is_manager_user(self.request.user)
+        context["can_escalate"] = is_internal_user(self.request.user) and ticket.status in OPEN_TICKET_STATUSES
         context["can_confirm_resolution"] = (
             ticket.status == Ticket.STATUS_RESOLVED
             and (self.request.user.role == User.ROLE_CLIENT and ticket.client_id == self.request.user.id)
@@ -780,6 +782,36 @@ class TicketReopenView(LoginRequiredMixin, View):
         log_audit_event(request.user, "ticket_reopened_web", ticket, {"via": "portal"})
         notify_ticket_status_change(ticket, previous_status, actor=request.user)
         django_messages.success(request, "Le ticket a ete rouvert.")
+        return redirect("ticket-detail", pk=pk)
+
+
+class TicketEscalateView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
+        if not is_internal_user(request.user) or is_read_only_user(request.user):
+            django_messages.error(request, "Seuls les profils internes peuvent escalader un ticket.")
+            return redirect("ticket-detail", pk=pk)
+
+        previous_status = ticket.status
+        try:
+            result = escalate_ticket(ticket, actor=request.user, note="Escalade demandee depuis le portail.")
+        except ValueError as exc:
+            django_messages.error(request, str(exc))
+            return redirect("ticket-detail", pk=pk)
+
+        if ticket.status != previous_status:
+            notify_ticket_status_change(ticket, previous_status, actor=request.user)
+
+        if result.get("assigned_agent"):
+            django_messages.success(
+                request,
+                f"Le ticket a ete escalade vers {result['assigned_agent']} avec priorite {ticket.get_priority_display().lower()}.",
+            )
+        else:
+            django_messages.success(
+                request,
+                f"Le ticket a ete escalade avec priorite {ticket.get_priority_display().lower()}.",
+            )
         return redirect("ticket-detail", pk=pk)
 
 

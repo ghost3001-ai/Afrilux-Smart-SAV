@@ -29,6 +29,7 @@ from .web_views import (
     TicketCreditAccountView,
     TicketCreateView,
     TicketDetailView,
+    TicketEscalateView,
     TicketInterventionCreateView,
     TicketInterventionPdfView,
     TicketListView,
@@ -65,6 +66,7 @@ urlpatterns = [
     path("tickets/<int:pk>/attachments/", TicketAttachmentCreateView.as_view(), name="ticket-attachment-create"),
     path("tickets/<int:pk>/confirm-resolution/", TicketConfirmResolutionView.as_view(), name="ticket-confirm-resolution"),
     path("tickets/<int:pk>/reopen/", TicketReopenView.as_view(), name="ticket-reopen-web"),
+    path("tickets/<int:pk>/escalate/", TicketEscalateView.as_view(), name="ticket-escalate-web"),
     path("tickets/<int:pk>/interventions/", TicketInterventionCreateView.as_view(), name="ticket-intervention-create"),
     path(
         "tickets/<int:ticket_pk>/interventions/<int:intervention_pk>/pdf/",

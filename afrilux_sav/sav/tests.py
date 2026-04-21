@@ -886,6 +886,80 @@ class SavPlatformTests(TestCase):
         self.assertEqual(ticket.status, Ticket.STATUS_NEW)
         self.assertIsNone(ticket.resolved_at)
 
+    def test_internal_user_can_escalate_ticket_via_api(self):
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            assigned_agent=self.agent,
+            title="Ticket a escalader",
+            description="Le support de niveau 1 demande une escalation.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            status=Ticket.STATUS_IN_PROGRESS,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+        TicketAssignment.objects.create(
+            ticket=ticket,
+            technician=self.agent,
+            assigned_by=self.manager,
+            status=TicketAssignment.STATUS_ACTIVE,
+        )
+        self.api.force_authenticate(user=self.manager)
+
+        response = self.api.post(reverse("sav_api:ticket-escalate", args=[ticket.pk]), {}, format="json")
+        ticket.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ticket.priority, Ticket.PRIORITY_HIGH)
+        self.assertEqual(ticket.status, Ticket.STATUS_ASSIGNED)
+        self.assertEqual(ticket.assigned_agent, self.technician)
+        self.assertTrue(
+            TicketAssignment.objects.filter(
+                ticket=ticket,
+                technician=self.agent,
+                status=TicketAssignment.STATUS_ESCALATED,
+            ).exists()
+        )
+        self.assertTrue(
+            TicketAssignment.objects.filter(
+                ticket=ticket,
+                technician=self.technician,
+                status=TicketAssignment.STATUS_ACTIVE,
+            ).exists()
+        )
+
+    def test_internal_user_can_escalate_ticket_via_web(self):
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            assigned_agent=self.agent,
+            title="Ticket portail a escalader",
+            description="Escalade depuis la fiche ticket.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            status=Ticket.STATUS_IN_PROGRESS,
+            priority=Ticket.PRIORITY_LOW,
+        )
+        TicketAssignment.objects.create(
+            ticket=ticket,
+            technician=self.agent,
+            assigned_by=self.manager,
+            status=TicketAssignment.STATUS_ACTIVE,
+        )
+        self.client.force_login(self.manager)
+
+        response = self.client.post(reverse("ticket-escalate-web", args=[ticket.pk]))
+        ticket.refresh_from_db()
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(ticket.priority, Ticket.PRIORITY_NORMAL)
+        self.assertEqual(ticket.assigned_agent, self.technician)
+        self.assertTrue(
+            TicketAssignment.objects.filter(
+                ticket=ticket,
+                technician=self.agent,
+                status=TicketAssignment.STATUS_ESCALATED,
+            ).exists()
+        )
+
     def test_client_can_confirm_resolution(self):
         ticket = Ticket.objects.create(
             client=self.client_user,

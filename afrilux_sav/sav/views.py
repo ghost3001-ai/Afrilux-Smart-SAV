@@ -107,6 +107,7 @@ from .services import (
     credit_account_for_ticket,
     dispatch_due_reports,
     ensure_assignment_intervention,
+    escalate_ticket,
     generate_intervention_pdf,
     has_reporting_access,
     is_internal_user,
@@ -580,6 +581,26 @@ class TicketViewSet(AuditedModelViewSet):
         self.audit("ticket_assigned", ticket, {"assigned_agent": technician.id})
         notify_ticket_status_change(ticket, previous_status, actor=request.user)
         return Response(self.get_serializer(ticket).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsInternalUser])
+    def escalate(self, request, pk=None):
+        ticket = self.get_object()
+        previous_status = ticket.status
+        try:
+            result = escalate_ticket(
+                ticket,
+                actor=request.user,
+                note=str(request.data.get("note", "")).strip(),
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if ticket.status != previous_status:
+            notify_ticket_status_change(ticket, previous_status, actor=request.user)
+
+        payload = self.get_serializer(ticket).data
+        payload["escalation"] = result
+        return Response(payload)
 
     @action(detail=True, methods=["post"])
     def reopen(self, request, pk=None):

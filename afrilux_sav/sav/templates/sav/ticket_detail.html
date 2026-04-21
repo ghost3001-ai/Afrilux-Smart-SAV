@@ -33,6 +33,12 @@
                 <button class="button button--ghost" type="submit">Rouvrir</button>
             </form>
         {% endif %}
+        {% if can_escalate %}
+            <form method="post" action="{% url 'ticket-escalate-web' ticket.pk %}">
+                {% csrf_token %}
+                <button class="button button--ghost" type="submit">Escalader</button>
+            </form>
+        {% endif %}
         {% if sav_shell.is_internal %}
             <form method="post" action="{% url 'ticket-agentic-web' ticket.pk %}">
                 {% csrf_token %}

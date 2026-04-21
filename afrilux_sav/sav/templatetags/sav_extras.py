@@ -21,6 +21,7 @@ def badge_tone(value):
         "new": "accent",
         "open": "accent",
         "waiting": "warning",
+        "escalated": "warning",
         "completed": "success",
         "sent": "accent",
         "read": "success",

@@ -56,6 +56,13 @@ OPEN_TICKET_STATUSES = [
     Ticket.STATUS_WAITING,
 ]
 
+ESCALATION_PRIORITY_SEQUENCE = [
+    Ticket.PRIORITY_LOW,
+    Ticket.PRIORITY_NORMAL,
+    Ticket.PRIORITY_HIGH,
+    Ticket.PRIORITY_CRITICAL,
+]
+
 NEGATIVE_WORDS = [
     "decu",
     "frustre",
@@ -394,6 +401,72 @@ def manager_queryset_for_organization(organization=None):
     if scoped_queryset.exists():
         return scoped_queryset
     return queryset.filter(Q(organization__isnull=True) | Q(is_superuser=True))
+
+
+def _select_least_loaded_agent_for_roles(*, roles, organization=None, exclude_user_ids=None):
+    exclude_user_ids = [user_id for user_id in (exclude_user_ids or []) if user_id]
+    queryset = User.objects.filter(is_active=True, role__in=roles)
+    if organization is not None:
+        scoped_queryset = queryset.filter(organization=organization)
+        if scoped_queryset.exists():
+            queryset = scoped_queryset
+        else:
+            queryset = queryset.filter(organization__isnull=True)
+    if exclude_user_ids:
+        queryset = queryset.exclude(pk__in=exclude_user_ids)
+    return (
+        queryset
+        .annotate(
+            open_ticket_count=Count(
+                "assigned_tickets",
+                filter=Q(assigned_tickets__status__in=OPEN_TICKET_STATUSES),
+            )
+        )
+        .order_by("open_ticket_count", "id")
+        .first()
+    )
+
+
+def next_ticket_priority(priority):
+    priority = (priority or Ticket.PRIORITY_NORMAL).strip().lower()
+    try:
+        current_index = ESCALATION_PRIORITY_SEQUENCE.index(priority)
+    except ValueError:
+        return Ticket.PRIORITY_HIGH
+    if current_index >= len(ESCALATION_PRIORITY_SEQUENCE) - 1:
+        return ESCALATION_PRIORITY_SEQUENCE[-1]
+    return ESCALATION_PRIORITY_SEQUENCE[current_index + 1]
+
+
+def select_escalation_agent(ticket):
+    current_agent = getattr(ticket, "assigned_agent", None)
+    current_role = getattr(current_agent, "role", "")
+    exclude_ids = [getattr(current_agent, "id", None)]
+
+    if current_role in set(User.FRONTLINE_ROLES) or not current_role:
+        preferred_roles = [User.ROLE_TECHNICIAN, User.ROLE_FIELD_TECHNICIAN, User.ROLE_EXPERT]
+    elif current_role in {User.ROLE_TECHNICIAN, User.ROLE_FIELD_TECHNICIAN}:
+        preferred_roles = [User.ROLE_EXPERT]
+    else:
+        preferred_roles = [User.ROLE_EXPERT]
+
+    selected = _select_least_loaded_agent_for_roles(
+        roles=preferred_roles,
+        organization=ticket.organization,
+        exclude_user_ids=exclude_ids,
+    )
+    if selected:
+        return selected
+
+    if current_agent and current_role == User.ROLE_EXPERT:
+        return current_agent
+
+    fallback_roles = [role for role in User.ASSIGNABLE_ROLES if role not in preferred_roles]
+    return _select_least_loaded_agent_for_roles(
+        roles=fallback_roles or list(User.ASSIGNABLE_ROLES),
+        organization=ticket.organization,
+        exclude_user_ids=exclude_ids,
+    )
 
 
 def create_notification(recipient, subject, message, channel=Notification.CHANNEL_IN_APP, event_type="info", ticket=None):
@@ -1170,6 +1243,102 @@ def sync_ticket_assignment(ticket, *, assigned_by=None, note="", release_status=
         created = True
 
     return current_assignment, created, released_ids
+
+
+def escalate_ticket(ticket, *, actor=None, note=""):
+    if ticket.status not in OPEN_TICKET_STATUSES:
+        raise ValueError("Seuls les tickets ouverts peuvent etre escalades.")
+
+    previous_priority = ticket.priority
+    previous_status = ticket.status
+    previous_assigned_agent = ticket.assigned_agent
+    escalation_target = select_escalation_agent(ticket)
+    escalation_note = (note or "Escalade du ticket pour prise en charge de niveau superieur.").strip()[:500]
+
+    ticket.priority = next_ticket_priority(ticket.priority)
+    if escalation_target is not None:
+        ticket.assigned_agent = escalation_target
+        if previous_assigned_agent is None or previous_assigned_agent.id != escalation_target.id:
+            ticket.status = Ticket.STATUS_ASSIGNED
+    ticket.sla_deadline = compute_ticket_sla_deadline(ticket.priority, organization=ticket.organization)
+    ticket.save(update_fields=["priority", "assigned_agent", "status", "sla_deadline", "updated_at"])
+
+    assignment = None
+    created_assignment = False
+    released_ids = []
+    if previous_assigned_agent is not None and previous_assigned_agent.id != ticket.assigned_agent_id:
+        assignment, created_assignment, released_ids = sync_ticket_assignment(
+            ticket,
+            assigned_by=actor,
+            note=escalation_note,
+            release_status=TicketAssignment.STATUS_ESCALATED,
+        )
+    if ticket.assigned_agent_id:
+        intervention_result = ensure_assignment_intervention(ticket, actor=actor, note=escalation_note)
+        assignment = assignment or intervention_result.get("assignment")
+        created_assignment = created_assignment or intervention_result.get("created_assignment", False)
+
+    Message.objects.create(
+        ticket=ticket,
+        sender=actor if getattr(actor, "is_authenticated", False) else ticket.assigned_agent or ticket.client,
+        message_type=Message.TYPE_INTERNAL,
+        channel=Message.CHANNEL_PORTAL,
+        direction=Message.DIRECTION_INTERNAL,
+        content=(
+            "Le ticket a ete escalade."
+            f" Priorite: {previous_priority} -> {ticket.priority}."
+            f"{' Nouveau referent: ' + str(ticket.assigned_agent) + '.' if ticket.assigned_agent else ''}"
+        ),
+        sentiment_score=calculate_sentiment("Le ticket a ete escalade."),
+    )
+
+    recipients = list(manager_queryset_for_organization(ticket.organization))
+    if ticket.assigned_agent_id:
+        recipients.append(ticket.assigned_agent)
+    if previous_assigned_agent is not None:
+        recipients.append(previous_assigned_agent)
+    deduped_recipients = {recipient.id: recipient for recipient in recipients if getattr(recipient, "id", None)}
+    for recipient in deduped_recipients.values():
+        create_external_channel_notifications(
+            recipient=recipient,
+            ticket=ticket,
+            event_type="ticket_escalated",
+            subject=f"Ticket escalade {ticket.reference}",
+            message=(
+                f"Le ticket '{ticket.title}' a ete escalade avec une priorite {ticket.get_priority_display().lower()}."
+                f"{' Nouveau referent: ' + str(ticket.assigned_agent) + '.' if ticket.assigned_agent else ''}"
+            ),
+        )
+
+    log_audit_event(
+        actor,
+        "ticket_escalated",
+        ticket,
+        {
+            "previous_priority": previous_priority,
+            "new_priority": ticket.priority,
+            "previous_status": previous_status,
+            "new_status": ticket.status,
+            "previous_assigned_agent": getattr(previous_assigned_agent, "id", None),
+            "assigned_agent": ticket.assigned_agent_id,
+            "released_assignment_ids": released_ids,
+            "created_assignment": created_assignment,
+        },
+    )
+
+    return {
+        "ticket_id": ticket.id,
+        "reference": ticket.reference,
+        "previous_priority": previous_priority,
+        "priority": ticket.priority,
+        "previous_status": previous_status,
+        "status": ticket.status,
+        "previous_assigned_agent": str(previous_assigned_agent) if previous_assigned_agent else None,
+        "assigned_agent": str(ticket.assigned_agent) if ticket.assigned_agent else None,
+        "released_assignment_ids": released_ids,
+        "created_assignment": created_assignment,
+        "assignment_id": getattr(assignment, "id", None),
+    }
 
 
 def ensure_assignment_intervention(ticket, *, actor=None, note=""):
