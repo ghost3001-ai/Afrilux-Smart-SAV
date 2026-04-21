@@ -87,6 +87,13 @@ class SavPlatformTests(TestCase):
             organization=self.organization,
             role=User.ROLE_DISPATCHER,
         )
+        self.supervisor = User.objects.create_user(
+            username="supervisor",
+            email="supervisor@test.local",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_SUPERVISOR,
+        )
         self.agent = User.objects.create_user(
             username="agent",
             password="secret123",
@@ -886,7 +893,7 @@ class SavPlatformTests(TestCase):
         self.assertEqual(ticket.status, Ticket.STATUS_NEW)
         self.assertIsNone(ticket.resolved_at)
 
-    def test_internal_user_can_escalate_ticket_via_api(self):
+    def test_internal_user_can_escalate_ticket_to_supervisor_via_api(self):
         ticket = Ticket.objects.create(
             client=self.client_user,
             product=self.product,
@@ -905,13 +912,17 @@ class SavPlatformTests(TestCase):
         )
         self.api.force_authenticate(user=self.manager)
 
-        response = self.api.post(reverse("sav_api:ticket-escalate", args=[ticket.pk]), {}, format="json")
+        response = self.api.post(
+            reverse("sav_api:ticket-escalate", args=[ticket.pk]),
+            {"target": "supervisor"},
+            format="json",
+        )
         ticket.refresh_from_db()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(ticket.priority, Ticket.PRIORITY_HIGH)
         self.assertEqual(ticket.status, Ticket.STATUS_ASSIGNED)
-        self.assertEqual(ticket.assigned_agent, self.technician)
+        self.assertEqual(ticket.assigned_agent, self.supervisor)
         self.assertTrue(
             TicketAssignment.objects.filter(
                 ticket=ticket,
@@ -922,12 +933,79 @@ class SavPlatformTests(TestCase):
         self.assertTrue(
             TicketAssignment.objects.filter(
                 ticket=ticket,
-                technician=self.technician,
+                technician=self.supervisor,
                 status=TicketAssignment.STATUS_ACTIVE,
             ).exists()
         )
 
-    def test_internal_user_can_escalate_ticket_via_web(self):
+    def test_internal_user_can_escalate_ticket_to_head_sav_via_api(self):
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            assigned_agent=self.agent,
+            title="Ticket vers responsable SAV",
+            description="Escalade vers le head SAV.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            status=Ticket.STATUS_IN_PROGRESS,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+        TicketAssignment.objects.create(
+            ticket=ticket,
+            technician=self.agent,
+            assigned_by=self.manager,
+            status=TicketAssignment.STATUS_ACTIVE,
+        )
+        self.api.force_authenticate(user=self.manager)
+
+        response = self.api.post(
+            reverse("sav_api:ticket-escalate", args=[ticket.pk]),
+            {"target": "head_sav"},
+            format="json",
+        )
+        ticket.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ticket.priority, Ticket.PRIORITY_HIGH)
+        self.assertEqual(ticket.assigned_agent, self.manager)
+        self.assertTrue(
+            TicketAssignment.objects.filter(
+                ticket=ticket,
+                technician=self.agent,
+                status=TicketAssignment.STATUS_ESCALATED,
+            ).exists()
+        )
+
+    def test_internal_user_can_escalate_ticket_to_expert_then_head_sav_via_api(self):
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            assigned_agent=self.agent,
+            title="Ticket vers expert",
+            description="Escalade prioritaire vers expert.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            status=Ticket.STATUS_IN_PROGRESS,
+            priority=Ticket.PRIORITY_LOW,
+        )
+        TicketAssignment.objects.create(
+            ticket=ticket,
+            technician=self.agent,
+            assigned_by=self.manager,
+            status=TicketAssignment.STATUS_ACTIVE,
+        )
+        self.api.force_authenticate(user=self.manager)
+
+        response = self.api.post(
+            reverse("sav_api:ticket-escalate", args=[ticket.pk]),
+            {"target": "expert_then_head_sav"},
+            format="json",
+        )
+        ticket.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ticket.priority, Ticket.PRIORITY_NORMAL)
+        self.assertEqual(ticket.assigned_agent, self.expert)
+
+    def test_internal_user_can_escalate_ticket_via_web_with_expert_fallback_to_head_sav(self):
         ticket = Ticket.objects.create(
             client=self.client_user,
             product=self.product,
@@ -944,14 +1022,22 @@ class SavPlatformTests(TestCase):
             assigned_by=self.manager,
             status=TicketAssignment.STATUS_ACTIVE,
         )
+        self.expert.is_active = False
+        self.expert.save(update_fields=["is_active"])
         self.client.force_login(self.manager)
 
-        response = self.client.post(reverse("ticket-escalate-web", args=[ticket.pk]))
+        response = self.client.post(
+            reverse("ticket-escalate-web", args=[ticket.pk]),
+            {
+                "target": "expert_then_head_sav",
+                "note": "Escalade web avec secours head SAV.",
+            },
+        )
         ticket.refresh_from_db()
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(ticket.priority, Ticket.PRIORITY_NORMAL)
-        self.assertEqual(ticket.assigned_agent, self.technician)
+        self.assertEqual(ticket.assigned_agent, self.manager)
         self.assertTrue(
             TicketAssignment.objects.filter(
                 ticket=ticket,

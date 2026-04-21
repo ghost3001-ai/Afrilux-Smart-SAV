@@ -134,6 +134,8 @@ class TicketForm(forms.ModelForm):
             client_queryset = client_queryset.filter(organization=user.organization)
             agent_queryset = agent_queryset.filter(organization=user.organization)
             transaction_queryset = transaction_queryset.filter(organization=user.organization)
+        if self.instance.pk and self.instance.assigned_agent_id:
+            agent_queryset = (agent_queryset | User.objects.filter(pk=self.instance.assigned_agent_id)).distinct()
         self.fields["client"].queryset = client_queryset.order_by("username")
         self.fields["assigned_agent"].queryset = agent_queryset.order_by("username")
         self.fields["related_transaction"].queryset = transaction_queryset.order_by("-occurred_at", "-created_at")
@@ -393,6 +395,29 @@ class MessageForm(forms.ModelForm):
         else:
             self.fields["message_type"].help_text = "Choisissez 'Note interne' pour un commentaire reserve a l'equipe SAV."
             self.fields["channel"].help_text = "Choisissez le canal externe si cette reponse doit etre diffusee hors portail."
+
+
+class TicketEscalationForm(forms.Form):
+    TARGET_SUPERVISOR = "supervisor"
+    TARGET_HEAD_SAV = "head_sav"
+    TARGET_EXPERT_THEN_HEAD_SAV = "expert_then_head_sav"
+
+    TARGET_CHOICES = (
+        (TARGET_SUPERVISOR, "1. Vers superviseur"),
+        (TARGET_HEAD_SAV, "2. Vers responsable SAV"),
+        (TARGET_EXPERT_THEN_HEAD_SAV, "3. Expert puis responsable SAV"),
+    )
+
+    target = forms.ChoiceField(
+        label="Cible d'escalade",
+        choices=TARGET_CHOICES,
+        initial=TARGET_EXPERT_THEN_HEAD_SAV,
+    )
+    note = forms.CharField(
+        required=False,
+        label="Note d'escalade",
+        widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Optionnel: motif ou contexte de l'escalade."}),
+    )
 
 
 class TicketAttachmentForm(forms.ModelForm):

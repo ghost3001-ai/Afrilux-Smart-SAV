@@ -63,6 +63,10 @@ ESCALATION_PRIORITY_SEQUENCE = [
     Ticket.PRIORITY_CRITICAL,
 ]
 
+ESCALATION_TARGET_SUPERVISOR = "supervisor"
+ESCALATION_TARGET_HEAD_SAV = "head_sav"
+ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV = "expert_then_head_sav"
+
 NEGATIVE_WORDS = [
     "decu",
     "frustre",
@@ -438,32 +442,35 @@ def next_ticket_priority(priority):
     return ESCALATION_PRIORITY_SEQUENCE[current_index + 1]
 
 
-def select_escalation_agent(ticket):
+def select_escalation_agent(ticket, *, target=ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV):
     current_agent = getattr(ticket, "assigned_agent", None)
-    current_role = getattr(current_agent, "role", "")
     exclude_ids = [getattr(current_agent, "id", None)]
+    normalized_target = (target or ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV).strip().lower()
 
-    if current_role in set(User.FRONTLINE_ROLES) or not current_role:
-        preferred_roles = [User.ROLE_TECHNICIAN, User.ROLE_FIELD_TECHNICIAN, User.ROLE_EXPERT]
-    elif current_role in {User.ROLE_TECHNICIAN, User.ROLE_FIELD_TECHNICIAN}:
-        preferred_roles = [User.ROLE_EXPERT]
-    else:
-        preferred_roles = [User.ROLE_EXPERT]
+    if normalized_target == ESCALATION_TARGET_SUPERVISOR:
+        return _select_least_loaded_agent_for_roles(
+            roles=[User.ROLE_SUPERVISOR],
+            organization=ticket.organization,
+            exclude_user_ids=exclude_ids,
+        )
 
-    selected = _select_least_loaded_agent_for_roles(
-        roles=preferred_roles,
+    if normalized_target == ESCALATION_TARGET_HEAD_SAV:
+        return _select_least_loaded_agent_for_roles(
+            roles=[User.ROLE_HEAD_SAV],
+            organization=ticket.organization,
+            exclude_user_ids=exclude_ids,
+        )
+
+    expert = _select_least_loaded_agent_for_roles(
+        roles=[User.ROLE_EXPERT],
         organization=ticket.organization,
         exclude_user_ids=exclude_ids,
     )
-    if selected:
-        return selected
+    if expert:
+        return expert
 
-    if current_agent and current_role == User.ROLE_EXPERT:
-        return current_agent
-
-    fallback_roles = [role for role in User.ASSIGNABLE_ROLES if role not in preferred_roles]
     return _select_least_loaded_agent_for_roles(
-        roles=fallback_roles or list(User.ASSIGNABLE_ROLES),
+        roles=[User.ROLE_HEAD_SAV],
         organization=ticket.organization,
         exclude_user_ids=exclude_ids,
     )
@@ -1245,21 +1252,28 @@ def sync_ticket_assignment(ticket, *, assigned_by=None, note="", release_status=
     return current_assignment, created, released_ids
 
 
-def escalate_ticket(ticket, *, actor=None, note=""):
+def escalate_ticket(ticket, *, actor=None, note="", target=ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV):
     if ticket.status not in OPEN_TICKET_STATUSES:
         raise ValueError("Seuls les tickets ouverts peuvent etre escalades.")
 
     previous_priority = ticket.priority
     previous_status = ticket.status
     previous_assigned_agent = ticket.assigned_agent
-    escalation_target = select_escalation_agent(ticket)
+    normalized_target = (target or ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV).strip().lower()
+    escalation_target = select_escalation_agent(ticket, target=normalized_target)
     escalation_note = (note or "Escalade du ticket pour prise en charge de niveau superieur.").strip()[:500]
 
+    if escalation_target is None:
+        if normalized_target == ESCALATION_TARGET_SUPERVISOR:
+            raise ValueError("Aucun superviseur disponible pour recevoir cette escalade.")
+        if normalized_target == ESCALATION_TARGET_HEAD_SAV:
+            raise ValueError("Aucun responsable SAV disponible pour recevoir cette escalade.")
+        raise ValueError("Aucun expert ni responsable SAV disponible pour recevoir cette escalade.")
+
     ticket.priority = next_ticket_priority(ticket.priority)
-    if escalation_target is not None:
-        ticket.assigned_agent = escalation_target
-        if previous_assigned_agent is None or previous_assigned_agent.id != escalation_target.id:
-            ticket.status = Ticket.STATUS_ASSIGNED
+    ticket.assigned_agent = escalation_target
+    if previous_assigned_agent is None or previous_assigned_agent.id != escalation_target.id:
+        ticket.status = Ticket.STATUS_ASSIGNED
     ticket.sla_deadline = compute_ticket_sla_deadline(ticket.priority, organization=ticket.organization)
     ticket.save(update_fields=["priority", "assigned_agent", "status", "sla_deadline", "updated_at"])
 
@@ -1321,6 +1335,7 @@ def escalate_ticket(ticket, *, actor=None, note=""):
             "new_status": ticket.status,
             "previous_assigned_agent": getattr(previous_assigned_agent, "id", None),
             "assigned_agent": ticket.assigned_agent_id,
+            "target": normalized_target,
             "released_assignment_ids": released_ids,
             "created_assignment": created_assignment,
         },
@@ -1335,6 +1350,7 @@ def escalate_ticket(ticket, *, actor=None, note=""):
         "status": ticket.status,
         "previous_assigned_agent": str(previous_assigned_agent) if previous_assigned_agent else None,
         "assigned_agent": str(ticket.assigned_agent) if ticket.assigned_agent else None,
+        "target": normalized_target,
         "released_assignment_ids": released_ids,
         "created_assignment": created_assignment,
         "assignment_id": getattr(assignment, "id", None),

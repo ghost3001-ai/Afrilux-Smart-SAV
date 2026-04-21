@@ -20,6 +20,7 @@ from .forms import (
     MessageForm,
     ProductForm,
     SupportAssistantQuestionForm,
+    TicketEscalationForm,
     TicketAttachmentForm,
     TicketCreateForm,
     TicketForm,
@@ -693,6 +694,7 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         context["can_edit"] = is_internal_user(self.request.user)
         context["can_credit_account"] = is_manager_user(self.request.user)
         context["can_escalate"] = is_internal_user(self.request.user) and ticket.status in OPEN_TICKET_STATUSES
+        context["escalation_form"] = TicketEscalationForm()
         context["can_confirm_resolution"] = (
             ticket.status == Ticket.STATUS_RESOLVED
             and (self.request.user.role == User.ROLE_CLIENT and ticket.client_id == self.request.user.id)
@@ -792,9 +794,19 @@ class TicketEscalateView(LoginRequiredMixin, View):
             django_messages.error(request, "Seuls les profils internes peuvent escalader un ticket.")
             return redirect("ticket-detail", pk=pk)
 
+        form = TicketEscalationForm(request.POST)
+        if not form.is_valid():
+            django_messages.error(request, "Choisissez une cible d'escalade valide.")
+            return redirect("ticket-detail", pk=pk)
+
         previous_status = ticket.status
         try:
-            result = escalate_ticket(ticket, actor=request.user, note="Escalade demandee depuis le portail.")
+            result = escalate_ticket(
+                ticket,
+                actor=request.user,
+                note=form.cleaned_data.get("note", ""),
+                target=form.cleaned_data["target"],
+            )
         except ValueError as exc:
             django_messages.error(request, str(exc))
             return redirect("ticket-detail", pk=pk)

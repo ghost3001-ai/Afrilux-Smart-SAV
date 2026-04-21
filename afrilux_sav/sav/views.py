@@ -591,6 +591,7 @@ class TicketViewSet(AuditedModelViewSet):
                 ticket,
                 actor=request.user,
                 note=str(request.data.get("note", "")).strip(),
+                target=str(request.data.get("target", "")).strip(),
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
