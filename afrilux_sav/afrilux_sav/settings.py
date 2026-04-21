@@ -64,6 +64,16 @@ def _hostname_from_url(value: str) -> str:
         return ""
 
 
+def _argon2_hasher_available() -> bool:
+    if importlib.util.find_spec("argon2") is None:
+        return False
+    try:
+        importlib.import_module("argon2.low_level")
+    except Exception:  # noqa: BLE001
+        return False
+    return True
+
+
 _load_local_env(BASE_DIR / ".env")
 
 
@@ -200,7 +210,7 @@ PASSWORD_HASHERS = [
     "django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher",
     "django.contrib.auth.hashers.BCryptSHA256PasswordHasher",
 ]
-if importlib.util.find_spec("argon2") is not None:
+if _argon2_hasher_available():
     PASSWORD_HASHERS.insert(0, "django.contrib.auth.hashers.Argon2PasswordHasher")
 
 

@@ -57,6 +57,7 @@
             </div>
         </div>
         <form class="support-chat__form" data-support-form>
+            {% csrf_token %}
             <label class="field">
                 <span>Produit concerne</span>
                 {{ support_form.product }}

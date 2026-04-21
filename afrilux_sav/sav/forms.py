@@ -173,6 +173,24 @@ class TicketForm(forms.ModelForm):
 
 
 class TicketCreateForm(TicketForm):
+    CLIENT_MODE_EXISTING = "existing"
+    CLIENT_MODE_NEW = "new"
+    CLIENT_MODE_CHOICES = (
+        (CLIENT_MODE_EXISTING, "Client existant"),
+        (CLIENT_MODE_NEW, "Nouveau client"),
+    )
+
+    client_mode = forms.ChoiceField(
+        required=False,
+        label="Mode client",
+        choices=CLIENT_MODE_CHOICES,
+        initial=CLIENT_MODE_EXISTING,
+    )
+    existing_client_email = forms.EmailField(
+        required=False,
+        label="Email du client existant",
+        widget=forms.EmailInput(attrs={"placeholder": "client.existant@example.com"}),
+    )
     client_name = forms.CharField(
         required=False,
         label="Nom du client",
@@ -210,11 +228,13 @@ class TicketCreateForm(TicketForm):
             self.fields["client"].widget = forms.HiddenInput()
             self.fields["related_transaction"].widget = forms.HiddenInput()
             self.fields["related_transaction"].required = False
+            self.fields["client_mode"].help_text = "Choisissez un client existant par email ou creez-en un nouveau."
+            self.fields["existing_client_email"].help_text = "Le ticket sera rattache automatiquement au client retrouve."
             self.fields["client_name"].help_text = "Le compte client sera cree automatiquement a la validation du ticket."
             self.fields["client_email"].help_text = "Cet email servira d'identifiant de connexion du client."
             self.fields["client_password1"].help_text = "Definissez le mot de passe initial du compte client."
         else:
-            for field_name in ["client_name", "client_email", "client_password1", "client_password2"]:
+            for field_name in ["client_mode", "existing_client_email", "client_name", "client_email", "client_password1", "client_password2"]:
                 self.fields[field_name].widget = forms.HiddenInput()
                 self.fields[field_name].required = False
 
@@ -224,6 +244,31 @@ class TicketCreateForm(TicketForm):
     def _inline_client_organization(self):
         return getattr(self.user, "organization", None)
 
+    def _selected_client_mode(self, cleaned_data=None):
+        source = cleaned_data if cleaned_data is not None else self.cleaned_data
+        mode = (source.get("client_mode") or self.CLIENT_MODE_EXISTING).strip().lower()
+        if mode not in {self.CLIENT_MODE_EXISTING, self.CLIENT_MODE_NEW}:
+            return ""
+        return mode
+
+    def _lookup_existing_client(self, email):
+        normalized_email = (email or "").strip().lower()
+        organization = self._inline_client_organization()
+        existing = User.objects.filter(email__iexact=normalized_email).order_by("id").first()
+
+        if not existing:
+            raise ValidationError("Aucun client existant ne correspond a cet email. Choisissez 'Nouveau client' pour le creer.")
+        if existing.role != User.ROLE_CLIENT:
+            raise ValidationError("Cet email est deja utilise par un compte interne.")
+        if existing.organization_id and organization and existing.organization_id != organization.id:
+            if existing.organization.slug != "contacts-entrants":
+                raise ValidationError("Cet email est deja rattache a une autre organisation.")
+
+        return existing
+
+    def clean_existing_client_email(self):
+        return (self.cleaned_data.get("existing_client_email") or "").strip().lower()
+
     def clean_client_email(self):
         return (self.cleaned_data.get("client_email") or "").strip().lower()
 
@@ -232,9 +277,30 @@ class TicketCreateForm(TicketForm):
         if not self._uses_inline_client_creation():
             return cleaned_data
 
+        mode = self._selected_client_mode(cleaned_data)
+        if not mode:
+            self.add_error("client_mode", "Choisissez un mode client valide.")
+            return cleaned_data
+
         cleaned_data["client"] = None
         cleaned_data["product"] = None
         cleaned_data["related_transaction"] = None
+
+        if mode == self.CLIENT_MODE_EXISTING:
+            existing_client_email = (cleaned_data.get("existing_client_email") or "").strip().lower()
+            if not existing_client_email:
+                self.add_error("existing_client_email", "L'email du client existant est obligatoire.")
+            else:
+                try:
+                    cleaned_data["client"] = self._lookup_existing_client(existing_client_email)
+                except ValidationError as exc:
+                    self.add_error("existing_client_email", exc)
+
+            cleaned_data["client_name"] = ""
+            cleaned_data["client_email"] = ""
+            cleaned_data["client_password1"] = ""
+            cleaned_data["client_password2"] = ""
+            return cleaned_data
 
         client_name = (cleaned_data.get("client_name") or "").strip()
         client_email = (cleaned_data.get("client_email") or "").strip().lower()
@@ -267,7 +333,7 @@ class TicketCreateForm(TicketForm):
                     if existing.organization.slug != "contacts-entrants":
                         self.add_error("client_email", "Cet email est deja rattache a une autre organisation.")
                 elif existing.has_usable_password():
-                    self.add_error("client_email", "Un compte client existe deja avec cet email.")
+                    self.add_error("client_email", "Un compte client existe deja avec cet email. Utilisez le mode 'Client existant'.")
 
         return cleaned_data
 
@@ -278,6 +344,17 @@ class TicketCreateForm(TicketForm):
             return self._inline_client_account
         if not self.is_valid():
             raise ValueError("Le formulaire de ticket n'est pas valide.")
+
+        if self._selected_client_mode(self.cleaned_data) == self.CLIENT_MODE_EXISTING:
+            client = self.cleaned_data.get("client")
+            if client is None:
+                raise ValueError("Aucun client existant n'a ete trouve.")
+            organization = self._inline_client_organization()
+            if organization and client.organization_id != organization.id:
+                client.organization = organization
+                client.save(update_fields=["organization"])
+            self._inline_client_account = client
+            return client
 
         first_name, last_name = _split_full_name(self.cleaned_data.get("client_name", ""))
         client, _created = provision_client_account(

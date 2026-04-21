@@ -97,6 +97,49 @@ function initializeTicketWizard() {
   sync();
 }
 
+function initializeTicketClientMode() {
+  const root = document.querySelector("[data-ticket-client-mode]");
+  if (!root) {
+    return;
+  }
+
+  const modeField = root.querySelector("[name='client_mode']");
+  if (!modeField) {
+    return;
+  }
+
+  const groups = Array.from(root.querySelectorAll("[data-client-mode-group]"));
+  const existingClientField = root.querySelector("[name='existing_client_email']");
+  const newClientFieldNames = ["client_name", "client_email", "client_password1", "client_password2"];
+
+  const sync = () => {
+    const activeMode = modeField.value || "existing";
+
+    groups.forEach((group) => {
+      const isActive = group.dataset.clientModeGroup === activeMode;
+      group.classList.toggle("field--hidden", !isActive);
+
+      Array.from(group.querySelectorAll("input, select, textarea")).forEach((field) => {
+        field.disabled = !isActive;
+      });
+    });
+
+    if (existingClientField) {
+      existingClientField.required = activeMode === "existing";
+    }
+
+    newClientFieldNames.forEach((fieldName) => {
+      const field = root.querySelector(`[name='${fieldName}']`);
+      if (field) {
+        field.required = activeMode === "new";
+      }
+    });
+  };
+
+  modeField.addEventListener("change", sync);
+  sync();
+}
+
 function buildLineChart(target, dataset) {
   if (!target || !Array.isArray(dataset) || !dataset.length) {
     return;
@@ -230,6 +273,7 @@ function initializeSupportChat() {
   const thread = root.querySelector("[data-support-thread]");
   const questionField = form.querySelector("textarea, input[name='question']");
   const productField = form.querySelector("select[name='product']");
+  const csrfField = form.querySelector("input[name='csrfmiddlewaretoken']");
   const endpoint = root.dataset.supportEndpoint;
   const ticketCreateUrl = root.dataset.ticketCreateUrl;
   const storageKey = "afrilux-support-chat";
@@ -303,18 +347,30 @@ function initializeSupportChat() {
     thread.scrollTop = thread.scrollHeight;
 
     try {
+      const csrfToken = getCookie("csrftoken") || csrfField?.value || "";
       const response = await fetch(endpoint, {
         method: "POST",
+        credentials: "same-origin",
         headers: {
           "Content-Type": "application/json",
-          "X-CSRFToken": getCookie("csrftoken"),
+          "X-CSRFToken": csrfToken,
         },
         body: JSON.stringify({
           question,
           product: productField && productField.value ? productField.value : null,
         }),
       });
-      const payload = await response.json();
+      const rawPayload = await response.text();
+      let payload = {};
+      try {
+        payload = rawPayload ? JSON.parse(rawPayload) : {};
+      } catch (_error) {
+        payload = {
+          detail: response.status === 403
+            ? "La session de securite a expire. Rechargez la page puis reessayez."
+            : "Le serveur a renvoye une reponse invalide.",
+        };
+      }
       pending.remove();
 
       if (!response.ok) {
@@ -348,6 +404,7 @@ function initializeSupportChat() {
 document.addEventListener("DOMContentLoaded", () => {
   fadeFlashes();
   initializeThemeToggle();
+  initializeTicketClientMode();
   initializeTicketWizard();
   initializeDashboardCharts();
   initializePlanningBoard();

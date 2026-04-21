@@ -7,7 +7,7 @@ from unittest.mock import patch
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.forms import HiddenInput
-from django.test import TestCase
+from django.test import Client, TestCase
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -1131,6 +1131,9 @@ class SavPlatformTests(TestCase):
     def test_ticket_create_form_uses_inline_client_fields_for_internal_user(self):
         form = TicketCreateForm(user=self.manager)
 
+        self.assertEqual(form.fields["client_mode"].initial, TicketCreateForm.CLIENT_MODE_EXISTING)
+        self.assertNotIsInstance(form.fields["client_mode"].widget, HiddenInput)
+        self.assertNotIsInstance(form.fields["existing_client_email"].widget, HiddenInput)
         self.assertIsInstance(form.fields["client"].widget, HiddenInput)
         self.assertFalse(form.fields["client"].required)
         self.assertIsInstance(form.fields["related_transaction"].widget, HiddenInput)
@@ -1140,15 +1143,16 @@ class SavPlatformTests(TestCase):
         self.assertNotIsInstance(form.fields["client_password1"].widget, HiddenInput)
         self.assertNotIsInstance(form.fields["client_password2"].widget, HiddenInput)
 
-    def test_internal_user_must_enter_new_client_identity_when_creating_ticket(self):
+    def test_internal_user_must_enter_existing_client_email_when_using_existing_mode(self):
         self.client.force_login(self.manager)
 
         response = self.client.post(
             reverse("ticket-create"),
             {
+                "client_mode": TicketCreateForm.CLIENT_MODE_EXISTING,
                 "product_label": "Serveur ondule",
-                "title": "Ticket sans client saisi",
-                "description": "Creation de ticket sans informations client.",
+                "title": "Ticket sans email client",
+                "description": "Creation de ticket sans recherche email.",
                 "category": Ticket.CATEGORY_MAINTENANCE,
                 "channel": Ticket.CHANNEL_PHONE,
                 "status": Ticket.STATUS_NEW,
@@ -1157,10 +1161,55 @@ class SavPlatformTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Le nom du client est obligatoire.")
-        self.assertContains(response, "L'email du client est obligatoire.")
-        self.assertContains(response, "Le mot de passe client est obligatoire.")
-        self.assertFalse(Ticket.objects.filter(title="Ticket sans client saisi").exists())
+        self.assertEqual(
+            response.context["form"].errors["existing_client_email"],
+            ["L'email du client existant est obligatoire."],
+        )
+        self.assertFalse(Ticket.objects.filter(title="Ticket sans email client").exists())
+
+    def test_internal_user_can_attach_ticket_to_existing_client_by_email(self):
+        self.client.force_login(self.manager)
+
+        response = self.client.post(
+            reverse("ticket-create"),
+            {
+                "client_mode": TicketCreateForm.CLIENT_MODE_EXISTING,
+                "existing_client_email": self.client_user.email,
+                "product_label": "Serveur ondule",
+                "title": "Ticket pour client existant",
+                "description": "Creation de ticket avec rattachement auto par email.",
+                "category": Ticket.CATEGORY_MAINTENANCE,
+                "channel": Ticket.CHANNEL_PHONE,
+                "status": Ticket.STATUS_NEW,
+                "priority": Ticket.PRIORITY_NORMAL,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        created_ticket = Ticket.objects.get(title="Ticket pour client existant")
+        self.assertEqual(created_ticket.client, self.client_user)
+
+    def test_internal_user_gets_error_when_existing_client_email_is_unknown(self):
+        self.client.force_login(self.manager)
+
+        response = self.client.post(
+            reverse("ticket-create"),
+            {
+                "client_mode": TicketCreateForm.CLIENT_MODE_EXISTING,
+                "existing_client_email": "inconnu@example.com",
+                "product_label": "Serveur ondule",
+                "title": "Ticket client inconnu",
+                "description": "Aucun compte client ne correspond a cet email.",
+                "category": Ticket.CATEGORY_MAINTENANCE,
+                "channel": Ticket.CHANNEL_PHONE,
+                "status": Ticket.STATUS_NEW,
+                "priority": Ticket.PRIORITY_NORMAL,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Aucun client existant ne correspond a cet email.")
+        self.assertFalse(Ticket.objects.filter(title="Ticket client inconnu").exists())
 
     def test_internal_user_can_create_ticket_and_client_in_one_flow(self):
         self.client.force_login(self.manager)
@@ -1168,6 +1217,7 @@ class SavPlatformTests(TestCase):
         response = self.client.post(
             reverse("ticket-create"),
             {
+                "client_mode": TicketCreateForm.CLIENT_MODE_NEW,
                 "client_name": "Mireille Ndjana",
                 "client_email": "mireille.ndjana@example.com",
                 "client_password1": "ClientPass123!",
@@ -1191,6 +1241,34 @@ class SavPlatformTests(TestCase):
         created_ticket = Ticket.objects.get(title="Creation combinee ticket client")
         self.assertEqual(created_ticket.client, created_client)
         self.assertEqual(created_ticket.product_label, "Groupe electrogene 40kVA")
+
+    def test_internal_user_is_prompted_to_use_existing_mode_when_email_already_exists(self):
+        self.client.force_login(self.manager)
+
+        response = self.client.post(
+            reverse("ticket-create"),
+            {
+                "client_mode": TicketCreateForm.CLIENT_MODE_NEW,
+                "client_name": "Client Deja La",
+                "client_email": self.client_user.email,
+                "client_password1": "ClientPass123!",
+                "client_password2": "ClientPass123!",
+                "product_label": "Compresseur",
+                "title": "Tentative doublon client",
+                "description": "Le compte client existe deja.",
+                "category": Ticket.CATEGORY_BREAKDOWN,
+                "channel": Ticket.CHANNEL_PHONE,
+                "status": Ticket.STATUS_NEW,
+                "priority": Ticket.PRIORITY_NORMAL,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.context["form"].errors["client_email"],
+            ["Un compte client existe deja avec cet email. Utilisez le mode 'Client existant'."],
+        )
+        self.assertFalse(Ticket.objects.filter(title="Tentative doublon client").exists())
 
     def test_client_can_create_ticket_via_web_portal_with_attachment(self):
         self.client.force_login(self.client_user)
@@ -1221,6 +1299,31 @@ class SavPlatformTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "sav/support.html")
+        self.assertContains(response, 'name="csrfmiddlewaretoken"', html=False)
+
+    def test_support_assistant_accepts_csrf_protected_portal_request(self):
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.client_user)
+
+        page_response = csrf_client.get(reverse("support-page"))
+
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn("csrftoken", page_response.cookies)
+
+        response = csrf_client.post(
+            reverse("sav_api:support-assistant"),
+            data=json.dumps(
+                {
+                    "question": "Ma climatisation ne refroidit plus correctement.",
+                    "product": self.product.id,
+                }
+            ),
+            content_type="application/json",
+            HTTP_X_CSRFTOKEN=page_response.cookies["csrftoken"].value,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("answer", response.json())
 
     def test_field_technician_can_access_operational_workspace(self):
         self.client.force_login(self.field_technician)
