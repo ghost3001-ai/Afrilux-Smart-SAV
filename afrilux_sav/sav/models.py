@@ -72,6 +72,10 @@ class User(AbstractUser):
     ROLE_SUPPORT = "support"
     ROLE_TECHNICIAN = "technician"
     ROLE_EXPERT = "expert"
+    ROLE_CFAO_MANAGER = "cfao_manager"
+    ROLE_CFAO_WORKS = "cfao_works"
+    ROLE_HVAC_MANAGER = "hvac_manager"
+    ROLE_SOFTWARE_OWNER = "software_owner"
     ROLE_SUPERVISOR = "supervisor"
     ROLE_QA = "qa"
     ROLE_DISPATCHER = "dispatcher"
@@ -89,6 +93,10 @@ class User(AbstractUser):
         (ROLE_SUPPORT, "Agent support (Niveau 1 / Hotliner)"),
         (ROLE_TECHNICIAN, "Agent technique (Niveau 2)"),
         (ROLE_EXPERT, "Chef technicien / Expert (Niveau 3)"),
+        (ROLE_CFAO_MANAGER, "Responsable CFAO / GTC & dessin technique"),
+        (ROLE_CFAO_WORKS, "Conducteur de travaux CFAO"),
+        (ROLE_HVAC_MANAGER, "Responsable froid & climatisation"),
+        (ROLE_SOFTWARE_OWNER, "Gestionnaire principal du logiciel"),
         (ROLE_SUPERVISOR, "Superviseur / Team Leader"),
         (ROLE_QA, "Qualite / QA SAV"),
         (ROLE_DISPATCHER, "Planificateur / Dispatch"),
@@ -118,6 +126,12 @@ class User(AbstractUser):
         ROLE_EXPERT,
         ROLE_FIELD_TECHNICIAN,
     )
+    SPECIALIST_ROLES = (
+        ROLE_CFAO_MANAGER,
+        ROLE_CFAO_WORKS,
+        ROLE_HVAC_MANAGER,
+        ROLE_SOFTWARE_OWNER,
+    )
     LEADERSHIP_ROLES = (
         ROLE_SUPERVISOR,
         ROLE_DISPATCHER,
@@ -135,6 +149,7 @@ class User(AbstractUser):
     INTERNAL_ROLES = (
         *FRONTLINE_ROLES,
         *TECHNICAL_ROLES,
+        *SPECIALIST_ROLES,
         *LEADERSHIP_ROLES,
         *BOT_ROLES,
     )
@@ -144,18 +159,18 @@ class User(AbstractUser):
     ASSIGNABLE_ROLES = (
         *FRONTLINE_ROLES,
         *TECHNICAL_ROLES,
+        *SPECIALIST_ROLES,
     )
-    TECHNICIAN_SPACE_ROLES = (
-        *FRONTLINE_ROLES,
-        *TECHNICAL_ROLES,
-    )
+    TECHNICIAN_SPACE_ROLES = ASSIGNABLE_ROLES
     REPORTING_ROLES = (
         *LEADERSHIP_ROLES,
         *READ_ONLY_ROLES,
+        *SPECIALIST_ROLES,
     )
     OVERSIGHT_ROLES = (
         *LEADERSHIP_ROLES,
         *READ_ONLY_ROLES,
+        *SPECIALIST_ROLES,
     )
 
     organization = models.ForeignKey(

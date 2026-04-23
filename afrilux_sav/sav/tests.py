@@ -1046,6 +1046,245 @@ class SavPlatformTests(TestCase):
             ).exists()
         )
 
+    def test_ticket_detail_shows_extended_escalation_targets(self):
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            assigned_agent=self.agent,
+            title="Ticket avec escalades etendues",
+            description="Verifier les nouvelles cibles d'escalade.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            status=Ticket.STATUS_IN_PROGRESS,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+        self.client.force_login(self.manager)
+
+        response = self.client.get(reverse("ticket-detail", args=[ticket.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Vers responsable CFAO")
+        self.assertContains(response, "Vers conducteur de travaux CFAO")
+        self.assertContains(response, "Vers responsable froid &amp; climatisation")
+        self.assertContains(response, "Vers gestionnaire principal du logiciel")
+
+    def test_internal_user_can_escalate_ticket_to_cfao_manager_via_api(self):
+        cfao_manager = User.objects.create_user(
+            username="cfao_manager",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_CFAO_MANAGER,
+        )
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            assigned_agent=self.agent,
+            title="Ticket vers CFAO",
+            description="Escalade vers le responsable CFAO.",
+            category=Ticket.CATEGORY_INSTALLATION,
+            status=Ticket.STATUS_IN_PROGRESS,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+        TicketAssignment.objects.create(
+            ticket=ticket,
+            technician=self.agent,
+            assigned_by=self.manager,
+            status=TicketAssignment.STATUS_ACTIVE,
+        )
+        self.api.force_authenticate(user=self.manager)
+
+        response = self.api.post(
+            reverse("sav_api:ticket-escalate", args=[ticket.pk]),
+            {"target": "cfao_manager"},
+            format="json",
+        )
+        ticket.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ticket.assigned_agent, cfao_manager)
+
+    def test_internal_user_can_escalate_ticket_to_cfao_works_via_api(self):
+        cfao_works = User.objects.create_user(
+            username="cfao_works",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_CFAO_WORKS,
+        )
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            assigned_agent=self.agent,
+            title="Ticket vers travaux CFAO",
+            description="Escalade vers le conducteur de travaux.",
+            category=Ticket.CATEGORY_INSTALLATION,
+            status=Ticket.STATUS_IN_PROGRESS,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+        TicketAssignment.objects.create(
+            ticket=ticket,
+            technician=self.agent,
+            assigned_by=self.manager,
+            status=TicketAssignment.STATUS_ACTIVE,
+        )
+        self.api.force_authenticate(user=self.manager)
+
+        response = self.api.post(
+            reverse("sav_api:ticket-escalate", args=[ticket.pk]),
+            {"target": "cfao_works"},
+            format="json",
+        )
+        ticket.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ticket.assigned_agent, cfao_works)
+
+    def test_internal_user_can_escalate_ticket_to_hvac_manager_via_api(self):
+        hvac_manager = User.objects.create_user(
+            username="hvac_manager",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_HVAC_MANAGER,
+        )
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            assigned_agent=self.agent,
+            title="Ticket vers froid et climatisation",
+            description="Escalade vers le specialiste CVC.",
+            business_domain=Ticket.DOMAIN_COOLING,
+            category=Ticket.CATEGORY_BREAKDOWN,
+            status=Ticket.STATUS_IN_PROGRESS,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+        TicketAssignment.objects.create(
+            ticket=ticket,
+            technician=self.agent,
+            assigned_by=self.manager,
+            status=TicketAssignment.STATUS_ACTIVE,
+        )
+        self.api.force_authenticate(user=self.manager)
+
+        response = self.api.post(
+            reverse("sav_api:ticket-escalate", args=[ticket.pk]),
+            {"target": "hvac_manager"},
+            format="json",
+        )
+        ticket.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ticket.assigned_agent, hvac_manager)
+
+    def test_internal_user_can_escalate_ticket_to_software_owner_via_api(self):
+        software_owner = User.objects.create_user(
+            username="software_owner",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_SOFTWARE_OWNER,
+        )
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            assigned_agent=self.agent,
+            title="Ticket vers gestionnaire logiciel",
+            description="Escalade vers le referent applicatif.",
+            business_domain=Ticket.DOMAIN_IT,
+            category=Ticket.CATEGORY_BUG,
+            status=Ticket.STATUS_IN_PROGRESS,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+        TicketAssignment.objects.create(
+            ticket=ticket,
+            technician=self.agent,
+            assigned_by=self.manager,
+            status=TicketAssignment.STATUS_ACTIVE,
+        )
+        self.api.force_authenticate(user=self.manager)
+
+        response = self.api.post(
+            reverse("sav_api:ticket-escalate", args=[ticket.pk]),
+            {"target": "software_owner"},
+            format="json",
+        )
+        ticket.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ticket.assigned_agent, software_owner)
+
+    def test_expert_then_head_sav_prefers_hvac_manager_for_cooling_ticket(self):
+        hvac_manager = User.objects.create_user(
+            username="hvac_fallback",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_HVAC_MANAGER,
+        )
+        self.expert.is_active = False
+        self.expert.save(update_fields=["is_active"])
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            assigned_agent=self.agent,
+            title="Fallback froid",
+            description="Escalade cooling sans expert disponible.",
+            business_domain=Ticket.DOMAIN_COOLING,
+            category=Ticket.CATEGORY_BREAKDOWN,
+            status=Ticket.STATUS_IN_PROGRESS,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+        TicketAssignment.objects.create(
+            ticket=ticket,
+            technician=self.agent,
+            assigned_by=self.manager,
+            status=TicketAssignment.STATUS_ACTIVE,
+        )
+        self.api.force_authenticate(user=self.manager)
+
+        response = self.api.post(
+            reverse("sav_api:ticket-escalate", args=[ticket.pk]),
+            {"target": "expert_then_head_sav"},
+            format="json",
+        )
+        ticket.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ticket.assigned_agent, hvac_manager)
+
+    def test_expert_then_head_sav_prefers_software_owner_for_bug_ticket(self):
+        software_owner = User.objects.create_user(
+            username="software_fallback",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_SOFTWARE_OWNER,
+        )
+        self.expert.is_active = False
+        self.expert.save(update_fields=["is_active"])
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            assigned_agent=self.agent,
+            title="Fallback applicatif",
+            description="Escalade bug sans expert disponible.",
+            business_domain=Ticket.DOMAIN_IT,
+            category=Ticket.CATEGORY_BUG,
+            status=Ticket.STATUS_IN_PROGRESS,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+        TicketAssignment.objects.create(
+            ticket=ticket,
+            technician=self.agent,
+            assigned_by=self.manager,
+            status=TicketAssignment.STATUS_ACTIVE,
+        )
+        self.api.force_authenticate(user=self.manager)
+
+        response = self.api.post(
+            reverse("sav_api:ticket-escalate", args=[ticket.pk]),
+            {"target": "expert_then_head_sav"},
+            format="json",
+        )
+        ticket.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ticket.assigned_agent, software_owner)
+
     def test_client_can_confirm_resolution(self):
         ticket = Ticket.objects.create(
             client=self.client_user,

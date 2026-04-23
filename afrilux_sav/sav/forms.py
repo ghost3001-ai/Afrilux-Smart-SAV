@@ -4,7 +4,16 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 
 from .models import EquipmentCategory, FinancialTransaction, Intervention, InterventionMedia, Message, Organization, Product, Ticket, TicketAttachment, User
-from .services import provision_client_account
+from .services import (
+    ESCALATION_TARGET_CFAO_MANAGER,
+    ESCALATION_TARGET_CFAO_WORKS,
+    ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV,
+    ESCALATION_TARGET_HEAD_SAV,
+    ESCALATION_TARGET_HVAC_MANAGER,
+    ESCALATION_TARGET_SOFTWARE_OWNER,
+    ESCALATION_TARGET_SUPERVISOR,
+    provision_client_account,
+)
 
 MAX_TICKET_ATTACHMENT_BYTES = 10 * 1024 * 1024
 
@@ -398,14 +407,22 @@ class MessageForm(forms.ModelForm):
 
 
 class TicketEscalationForm(forms.Form):
-    TARGET_SUPERVISOR = "supervisor"
-    TARGET_HEAD_SAV = "head_sav"
-    TARGET_EXPERT_THEN_HEAD_SAV = "expert_then_head_sav"
+    TARGET_SUPERVISOR = ESCALATION_TARGET_SUPERVISOR
+    TARGET_HEAD_SAV = ESCALATION_TARGET_HEAD_SAV
+    TARGET_EXPERT_THEN_HEAD_SAV = ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV
+    TARGET_CFAO_MANAGER = ESCALATION_TARGET_CFAO_MANAGER
+    TARGET_CFAO_WORKS = ESCALATION_TARGET_CFAO_WORKS
+    TARGET_HVAC_MANAGER = ESCALATION_TARGET_HVAC_MANAGER
+    TARGET_SOFTWARE_OWNER = ESCALATION_TARGET_SOFTWARE_OWNER
 
     TARGET_CHOICES = (
         (TARGET_SUPERVISOR, "1. Vers superviseur"),
         (TARGET_HEAD_SAV, "2. Vers responsable SAV"),
         (TARGET_EXPERT_THEN_HEAD_SAV, "3. Expert puis responsable SAV"),
+        (TARGET_CFAO_MANAGER, "4. Vers responsable CFAO"),
+        (TARGET_CFAO_WORKS, "5. Vers conducteur de travaux CFAO"),
+        (TARGET_HVAC_MANAGER, "6. Vers responsable froid & climatisation"),
+        (TARGET_SOFTWARE_OWNER, "7. Vers gestionnaire principal du logiciel"),
     )
 
     target = forms.ChoiceField(

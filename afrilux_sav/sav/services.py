@@ -66,6 +66,10 @@ ESCALATION_PRIORITY_SEQUENCE = [
 ESCALATION_TARGET_SUPERVISOR = "supervisor"
 ESCALATION_TARGET_HEAD_SAV = "head_sav"
 ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV = "expert_then_head_sav"
+ESCALATION_TARGET_CFAO_MANAGER = "cfao_manager"
+ESCALATION_TARGET_CFAO_WORKS = "cfao_works"
+ESCALATION_TARGET_HVAC_MANAGER = "hvac_manager"
+ESCALATION_TARGET_SOFTWARE_OWNER = "software_owner"
 
 NEGATIVE_WORDS = [
     "decu",
@@ -461,19 +465,51 @@ def select_escalation_agent(ticket, *, target=ESCALATION_TARGET_EXPERT_THEN_HEAD
             exclude_user_ids=exclude_ids,
         )
 
-    expert = _select_least_loaded_agent_for_roles(
-        roles=[User.ROLE_EXPERT],
-        organization=ticket.organization,
-        exclude_user_ids=exclude_ids,
-    )
-    if expert:
-        return expert
+    if normalized_target == ESCALATION_TARGET_CFAO_MANAGER:
+        return _select_least_loaded_agent_for_roles(
+            roles=[User.ROLE_CFAO_MANAGER],
+            organization=ticket.organization,
+            exclude_user_ids=exclude_ids,
+        )
 
-    return _select_least_loaded_agent_for_roles(
-        roles=[User.ROLE_HEAD_SAV],
-        organization=ticket.organization,
-        exclude_user_ids=exclude_ids,
-    )
+    if normalized_target == ESCALATION_TARGET_CFAO_WORKS:
+        return _select_least_loaded_agent_for_roles(
+            roles=[User.ROLE_CFAO_WORKS],
+            organization=ticket.organization,
+            exclude_user_ids=exclude_ids,
+        )
+
+    if normalized_target == ESCALATION_TARGET_HVAC_MANAGER:
+        return _select_least_loaded_agent_for_roles(
+            roles=[User.ROLE_HVAC_MANAGER],
+            organization=ticket.organization,
+            exclude_user_ids=exclude_ids,
+        )
+
+    if normalized_target == ESCALATION_TARGET_SOFTWARE_OWNER:
+        return _select_least_loaded_agent_for_roles(
+            roles=[User.ROLE_SOFTWARE_OWNER],
+            organization=ticket.organization,
+            exclude_user_ids=exclude_ids,
+        )
+
+    role_resolution_order = [[User.ROLE_EXPERT]]
+    if ticket.business_domain == Ticket.DOMAIN_COOLING:
+        role_resolution_order.append([User.ROLE_HVAC_MANAGER])
+    if ticket.business_domain == Ticket.DOMAIN_IT or ticket.category in {Ticket.CATEGORY_BUG, Ticket.CATEGORY_ACCOUNT}:
+        role_resolution_order.append([User.ROLE_SOFTWARE_OWNER])
+    role_resolution_order.append([User.ROLE_HEAD_SAV])
+
+    for roles in role_resolution_order:
+        escalation_agent = _select_least_loaded_agent_for_roles(
+            roles=roles,
+            organization=ticket.organization,
+            exclude_user_ids=exclude_ids,
+        )
+        if escalation_agent:
+            return escalation_agent
+
+    return None
 
 
 def create_notification(recipient, subject, message, channel=Notification.CHANNEL_IN_APP, event_type="info", ticket=None):
@@ -1268,6 +1304,14 @@ def escalate_ticket(ticket, *, actor=None, note="", target=ESCALATION_TARGET_EXP
             raise ValueError("Aucun superviseur disponible pour recevoir cette escalade.")
         if normalized_target == ESCALATION_TARGET_HEAD_SAV:
             raise ValueError("Aucun responsable SAV disponible pour recevoir cette escalade.")
+        if normalized_target == ESCALATION_TARGET_CFAO_MANAGER:
+            raise ValueError("Aucun responsable CFAO disponible pour recevoir cette escalade.")
+        if normalized_target == ESCALATION_TARGET_CFAO_WORKS:
+            raise ValueError("Aucun conducteur de travaux CFAO disponible pour recevoir cette escalade.")
+        if normalized_target == ESCALATION_TARGET_HVAC_MANAGER:
+            raise ValueError("Aucun responsable froid & climatisation disponible pour recevoir cette escalade.")
+        if normalized_target == ESCALATION_TARGET_SOFTWARE_OWNER:
+            raise ValueError("Aucun gestionnaire principal du logiciel disponible pour recevoir cette escalade.")
         raise ValueError("Aucun expert ni responsable SAV disponible pour recevoir cette escalade.")
 
     ticket.priority = next_ticket_priority(ticket.priority)
