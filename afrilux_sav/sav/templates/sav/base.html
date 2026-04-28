@@ -22,7 +22,7 @@
     <div class="ambient ambient--two"></div>
     <div class="layout">
         <header class="topbar">
-            <a class="brand" href="{% if request.user.is_authenticated %}{% url 'dashboard' %}{% else %}{% url 'login' %}{% endif %}">
+            <a class="brand" href="{% if request.user.is_authenticated %}{% url 'workspace' %}{% else %}{% url 'login' %}{% endif %}">
                 <span class="brand__mark">{{ sav_shell.organization_initials|default:"AF" }}</span>
                 <span>
                     <strong>{% if sav_shell.organization_name %}{{ sav_shell.organization_name }}{% else %}Afrilux SAV{% endif %}</strong>
@@ -31,7 +31,10 @@
             </a>
             {% if request.user.is_authenticated %}
                 <nav class="nav">
-                    <a href="{% url 'dashboard' %}">Dashboard</a>
+                    <a href="{{ sav_shell.workspace_url }}">{{ sav_shell.workspace_label }}</a>
+                    {% if sav_shell.workspace_name != 'dashboard' and sav_shell.has_management_access %}
+                        <a href="{% url 'dashboard' %}">Dashboard</a>
+                    {% endif %}
                     <a href="{% if sav_shell.has_backoffice_access %}{% url 'ticket-list' %}{% else %}{% url 'support-page' %}{% endif %}">{% if sav_shell.has_backoffice_access %}Tickets{% else %}Support{% endif %} <span class="nav__badge">{{ sav_shell.open_tickets }}</span></a>
                     {% if sav_shell.has_technician_space_access %}
                         <a href="{% url 'technician-space' %}">Espace operationnel</a>

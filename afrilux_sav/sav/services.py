@@ -51,8 +51,17 @@ LLM_CLIENT = OpenAIResponsesClient()
 
 OPEN_TICKET_STATUSES = [
     Ticket.STATUS_NEW,
+    Ticket.STATUS_QUALIFICATION,
+    Ticket.STATUS_PENDING_CUSTOMER,
     Ticket.STATUS_ASSIGNED,
     Ticket.STATUS_IN_PROGRESS,
+    Ticket.STATUS_IN_PROGRESS_N1,
+    Ticket.STATUS_IN_PROGRESS_N2,
+    Ticket.STATUS_EXPERTISE,
+    Ticket.STATUS_INTERVENTION_PLANNED,
+    Ticket.STATUS_INTERVENTION_DONE,
+    Ticket.STATUS_QA_CONTROL,
+    Ticket.STATUS_PENDING_CLIENT_CONFIRMATION,
     Ticket.STATUS_WAITING,
 ]
 
@@ -74,6 +83,14 @@ ESCALATION_ALLOWED_TARGETS = {
     ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV,
     ESCALATION_TARGET_CFAO_MANAGER,
     ESCALATION_TARGET_CFAO_WORKS,
+}
+
+TICKET_CREATOR_ROLES = {
+    User.ROLE_CLIENT,
+    User.ROLE_SUPPORT,
+    User.ROLE_AGENT,
+    User.ROLE_VIP_SUPPORT,
+    User.ROLE_SYSTEM_BOT,
 }
 
 NEGATIVE_WORDS = [
@@ -166,6 +183,18 @@ def is_manager_user(user):
     )
 
 
+def can_create_ticket(user):
+    return bool(
+        user
+        and user.is_authenticated
+        and (
+            user.is_superuser
+            or getattr(user, "role", "") in TICKET_CREATOR_ROLES
+            or getattr(user, "role", "") in {User.ROLE_HEAD_SAV, User.ROLE_ADMIN, User.ROLE_MANAGER}
+        )
+    )
+
+
 def is_internal_user(user):
     return bool(
         user
@@ -212,6 +241,41 @@ def has_oversight_access(user):
 
 def has_backoffice_access(user):
     return bool(is_internal_user(user) or is_read_only_user(user))
+
+
+def role_workspace_name(user):
+    if not user or not user.is_authenticated:
+        return "login"
+    if user.role == User.ROLE_CLIENT:
+        return "support-page"
+    if user.role in {User.ROLE_SUPPORT, User.ROLE_AGENT, User.ROLE_VIP_SUPPORT}:
+        return "ticket-list"
+    if user.role in {User.ROLE_TECHNICIAN, User.ROLE_EXPERT}:
+        return "technician-space"
+    if user.role == User.ROLE_DISPATCHER:
+        return "planning-page"
+    if user.role in {User.ROLE_QA, User.ROLE_AUDITOR}:
+        return "reporting-page"
+    if user.role in {User.ROLE_CFAO_MANAGER, User.ROLE_CFAO_WORKS, User.ROLE_HVAC_MANAGER, User.ROLE_SOFTWARE_OWNER}:
+        return "ticket-list"
+    if user.role in {User.ROLE_SUPERVISOR, User.ROLE_HEAD_SAV, User.ROLE_ADMIN, User.ROLE_MANAGER}:
+        return "dashboard"
+    return "dashboard"
+
+
+def role_default_processing_status(user):
+    if not user or not user.is_authenticated:
+        return Ticket.STATUS_NEW
+    role = getattr(user, "role", "")
+    if role in {User.ROLE_SUPPORT, User.ROLE_AGENT, User.ROLE_VIP_SUPPORT}:
+        return Ticket.STATUS_IN_PROGRESS_N1
+    if role == User.ROLE_TECHNICIAN:
+        return Ticket.STATUS_IN_PROGRESS_N2
+    if role == User.ROLE_EXPERT:
+        return Ticket.STATUS_EXPERTISE
+    if role == User.ROLE_DISPATCHER:
+        return Ticket.STATUS_QUALIFICATION
+    return Ticket.STATUS_IN_PROGRESS
 
 
 def scope_by_access(queryset, user, own_relation, organization_relation="organization"):
@@ -331,10 +395,8 @@ def scope_predictive_alert_queryset(queryset, user):
 def scope_notification_queryset(queryset, user):
     if not user or not user.is_authenticated:
         return queryset.none()
-    if has_backoffice_access(user):
-        if user.is_superuser or not user.organization_id:
-            return queryset
-        return queryset.filter(Q(organization=user.organization) | Q(recipient=user))
+    if user.is_superuser:
+        return queryset
     return queryset.filter(recipient=user)
 
 
@@ -1340,7 +1402,14 @@ def escalate_ticket(ticket, *, actor=None, note="", target=ESCALATION_TARGET_EXP
     ticket.priority = next_ticket_priority(ticket.priority)
     ticket.assigned_agent = escalation_target
     if previous_assigned_agent is None or previous_assigned_agent.id != escalation_target.id:
-        ticket.status = Ticket.STATUS_ASSIGNED
+        if escalation_target.role == User.ROLE_EXPERT:
+            ticket.status = Ticket.STATUS_EXPERTISE
+        elif escalation_target.role == User.ROLE_CFAO_WORKS:
+            ticket.status = Ticket.STATUS_INTERVENTION_PLANNED
+        elif escalation_target.role in {User.ROLE_HEAD_SAV, User.ROLE_SUPERVISOR, User.ROLE_CFAO_MANAGER}:
+            ticket.status = Ticket.STATUS_ASSIGNED
+        else:
+            ticket.status = Ticket.STATUS_ASSIGNED
     ticket.sla_deadline = compute_ticket_sla_deadline(ticket.priority, organization=ticket.organization)
     ticket.save(update_fields=["priority", "assigned_agent", "status", "sla_deadline", "updated_at"])
 

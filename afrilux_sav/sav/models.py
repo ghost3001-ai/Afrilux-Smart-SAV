@@ -510,8 +510,17 @@ class Product(TimeStampedModel):
 
 class Ticket(TimeStampedModel):
     STATUS_NEW = "new"
+    STATUS_QUALIFICATION = "qualification"
+    STATUS_PENDING_CUSTOMER = "pending_customer"
     STATUS_ASSIGNED = "assigned"
     STATUS_IN_PROGRESS = "in_progress"
+    STATUS_IN_PROGRESS_N1 = "in_progress_n1"
+    STATUS_IN_PROGRESS_N2 = "in_progress_n2"
+    STATUS_EXPERTISE = "expertise"
+    STATUS_INTERVENTION_PLANNED = "intervention_planned"
+    STATUS_INTERVENTION_DONE = "intervention_done"
+    STATUS_QA_CONTROL = "qa_control"
+    STATUS_PENDING_CLIENT_CONFIRMATION = "pending_client_confirmation"
     STATUS_WAITING = "waiting"
     STATUS_RESOLVED = "resolved"
     STATUS_CLOSED = "closed"
@@ -519,8 +528,17 @@ class Ticket(TimeStampedModel):
 
     STATUS_CHOICES = (
         (STATUS_NEW, "Nouveau"),
+        (STATUS_QUALIFICATION, "Qualification en cours"),
+        (STATUS_PENDING_CUSTOMER, "En attente client"),
         (STATUS_ASSIGNED, "Assigne"),
         (STATUS_IN_PROGRESS, "En cours"),
+        (STATUS_IN_PROGRESS_N1, "En traitement (N1)"),
+        (STATUS_IN_PROGRESS_N2, "En traitement (N2)"),
+        (STATUS_EXPERTISE, "Expertise en cours"),
+        (STATUS_INTERVENTION_PLANNED, "Intervention planifiee"),
+        (STATUS_INTERVENTION_DONE, "Intervention realisee"),
+        (STATUS_QA_CONTROL, "En controle qualite"),
+        (STATUS_PENDING_CLIENT_CONFIRMATION, "En attente confirmation client"),
         (STATUS_WAITING, "En attente"),
         (STATUS_RESOLVED, "Resolue"),
         (STATUS_CLOSED, "Ferme"),
@@ -639,7 +657,7 @@ class Ticket(TimeStampedModel):
     business_domain = models.CharField(max_length=20, choices=BUSINESS_DOMAIN_CHOICES, default=DOMAIN_OTHER)
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default=CATEGORY_BREAKDOWN)
     channel = models.CharField(max_length=20, choices=CHANNEL_CHOICES, default=CHANNEL_WEB)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_NEW)
+    status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=STATUS_NEW)
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default=PRIORITY_NORMAL)
     suspected_fraud = models.BooleanField(default=False)
     location = models.CharField(max_length=255, blank=True)

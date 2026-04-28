@@ -49,6 +49,7 @@ from .services import (
     answer_bi_question,
     apply_agentic_resolution,
     build_customer_insight,
+    can_create_ticket,
     calculate_sentiment,
     compute_agent_performance_rows,
     compute_average_first_response_hours,
@@ -84,6 +85,7 @@ from .services import (
     scope_sla_rule_queryset,
     scope_ticket_queryset,
     scope_user_queryset,
+    role_workspace_name,
     notify_ticket_status_change,
 )
 
@@ -96,6 +98,21 @@ def _percentage(value, total):
     if not total:
         return 0
     return round((value / total) * 100, 1)
+
+
+def _workspace_redirect_url(user):
+    workspace_name = role_workspace_name(user)
+    if workspace_name == "ticket-list" and user.role in {
+        User.ROLE_SUPPORT,
+        User.ROLE_AGENT,
+        User.ROLE_VIP_SUPPORT,
+        User.ROLE_CFAO_MANAGER,
+        User.ROLE_CFAO_WORKS,
+        User.ROLE_HVAC_MANAGER,
+        User.ROLE_SOFTWARE_OWNER,
+    }:
+        return f"{reverse(workspace_name)}?assignment=mine"
+    return reverse(workspace_name)
 
 
 def _dashboard_snapshot(user):
@@ -214,8 +231,13 @@ class TechnicianWorkspaceRequiredMixin(UserPassesTestMixin):
 class HomeRedirectView(View):
     def get(self, request, *args, **kwargs):
         if request.user.is_authenticated:
-            return redirect("dashboard")
+            return redirect(_workspace_redirect_url(request.user))
         return redirect("login")
+
+
+class RoleWorkspaceRedirectView(LoginRequiredMixin, View):
+    def get(self, request, *args, **kwargs):
+        return redirect(_workspace_redirect_url(request.user))
 
 
 class ClientRegisterView(FormView):
@@ -545,6 +567,9 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
     template_name = "sav/ticket_form.html"
 
     def dispatch(self, request, *args, **kwargs):
+        if not can_create_ticket(request.user):
+            django_messages.error(request, "Votre role ne permet pas de creer un ticket.")
+            return redirect(_workspace_redirect_url(request.user))
         if is_read_only_user(request.user):
             django_messages.error(request, "Le profil lecture seule est limite a la consultation.")
             return redirect("ticket-list")
@@ -578,6 +603,11 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
 
     def form_valid(self, form):
         form.instance.created_by = self.request.user
+        if self.request.user.role == User.ROLE_VIP_SUPPORT and form.instance.priority in {
+            Ticket.PRIORITY_LOW,
+            Ticket.PRIORITY_NORMAL,
+        }:
+            form.instance.priority = Ticket.PRIORITY_HIGH
         if self.request.user.role == User.ROLE_CLIENT:
             form.instance.client = self.request.user
             form.instance.status = Ticket.STATUS_NEW

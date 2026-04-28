@@ -332,7 +332,7 @@ AUTHENTICATION_BACKENDS = [
 ]
 
 LOGIN_URL = "/login/"
-LOGIN_REDIRECT_URL = "/dashboard/"
+LOGIN_REDIRECT_URL = "/workspace/"
 LOGOUT_REDIRECT_URL = "/login/"
 
 SESSION_COOKIE_AGE = int(os.getenv("SESSION_COOKIE_AGE", str(60 * 60 * 8)))

@@ -95,6 +95,7 @@ from .services import (
     apply_agentic_resolution,
     answer_support_question,
     build_customer_insight,
+    can_create_ticket,
     calculate_sentiment,
     compute_agent_performance_rows,
     compute_average_first_response_hours,
@@ -116,6 +117,7 @@ from .services import (
     maybe_flag_ticket_as_fraud,
     run_automation_rules_for_ticket,
     run_predictive_analysis,
+    role_default_processing_status,
     scope_equipment_category_queryset,
     scope_generated_report_queryset,
     scope_ai_action_queryset,
@@ -484,6 +486,8 @@ class TicketViewSet(AuditedModelViewSet):
         return queryset
 
     def perform_create(self, serializer):
+        if not can_create_ticket(self.request.user):
+            raise PermissionDenied("Votre role ne permet pas de creer un ticket.")
         ticket_kwargs = {}
         ticket_kwargs["created_by"] = self.request.user
         if self.request.user.role == User.ROLE_CLIENT:
@@ -499,6 +503,11 @@ class TicketViewSet(AuditedModelViewSet):
             and client.organization_id != self.request.user.organization_id
         ):
             raise PermissionDenied("Vous ne pouvez pas creer un ticket pour une autre organisation.")
+        if (
+            self.request.user.role == User.ROLE_VIP_SUPPORT
+            and serializer.validated_data.get("priority", Ticket.PRIORITY_NORMAL) in {Ticket.PRIORITY_LOW, Ticket.PRIORITY_NORMAL}
+        ):
+            serializer.validated_data["priority"] = Ticket.PRIORITY_HIGH
         instance = serializer.save(**ticket_kwargs)
         update_fields = []
         if instance.assigned_agent_id and instance.status == Ticket.STATUS_NEW:
@@ -560,8 +569,8 @@ class TicketViewSet(AuditedModelViewSet):
             )
         previous_status = ticket.status
         ticket.assigned_agent = request.user
-        if ticket.status in {Ticket.STATUS_NEW, Ticket.STATUS_ASSIGNED, Ticket.STATUS_WAITING}:
-            ticket.status = Ticket.STATUS_IN_PROGRESS
+        if ticket.status in set(OPEN_TICKET_STATUSES):
+            ticket.status = role_default_processing_status(request.user)
         ticket.save(update_fields=["assigned_agent", "status", "updated_at"])
         ensure_assignment_intervention(ticket, actor=request.user, note="Prise en charge manuelle du ticket.")
         self.audit("ticket_taken_ownership", ticket, {"assigned_agent": request.user.id})
@@ -584,7 +593,9 @@ class TicketViewSet(AuditedModelViewSet):
             pk=technician_id,
         )
         ticket.assigned_agent = technician
-        if ticket.status in {Ticket.STATUS_NEW, Ticket.STATUS_WAITING}:
+        if request.user.role == User.ROLE_DISPATCHER:
+            ticket.status = Ticket.STATUS_QUALIFICATION
+        elif ticket.status in {Ticket.STATUS_NEW, Ticket.STATUS_WAITING, Ticket.STATUS_PENDING_CUSTOMER, Ticket.STATUS_QUALIFICATION}:
             ticket.status = Ticket.STATUS_ASSIGNED
         ticket.save(update_fields=["assigned_agent", "status", "updated_at"])
         ensure_assignment_intervention(ticket, actor=request.user, note="Affectation explicite du responsable SAV.")

@@ -1553,7 +1553,52 @@ class SavPlatformTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, "/dashboard/")
+        self.assertEqual(response.url, "/workspace/")
+
+    def test_workspace_redirects_client_to_support_page(self):
+        self.client.force_login(self.client_user)
+
+        response = self.client.get(reverse("workspace"))
+
+        self.assertRedirects(response, reverse("support-page"))
+
+    def test_workspace_redirects_dispatcher_to_planning_page(self):
+        self.client.force_login(self.dispatcher)
+
+        response = self.client.get(reverse("workspace"))
+
+        self.assertRedirects(response, reverse("planning-page"))
+
+    def test_workspace_redirects_support_to_ticket_list_with_mine_filter(self):
+        self.client.force_login(self.agent)
+
+        response = self.client.get(reverse("workspace"))
+
+        self.assertRedirects(response, f"{reverse('ticket-list')}?assignment=mine")
+
+    def test_notification_list_returns_only_current_recipient_notifications(self):
+        Notification.objects.create(
+            recipient=self.manager,
+            channel=Notification.CHANNEL_IN_APP,
+            event_type="manager_only",
+            subject="Notif manager",
+            message="Visible uniquement manager.",
+        )
+        Notification.objects.create(
+            recipient=self.agent,
+            channel=Notification.CHANNEL_IN_APP,
+            event_type="agent_only",
+            subject="Notif agent",
+            message="Visible uniquement agent.",
+        )
+        self.api.force_authenticate(user=self.manager)
+
+        response = self.api.get(reverse("sav_api:notification-list"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.data["results"] if isinstance(response.data, dict) and "results" in response.data else response.data
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["recipient"], self.manager.id)
 
     def test_logout_redirects_to_login_page(self):
         self.client.force_login(self.client_user)
