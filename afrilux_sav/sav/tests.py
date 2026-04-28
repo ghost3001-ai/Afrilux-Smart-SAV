@@ -1875,6 +1875,14 @@ class SavPlatformTests(TestCase):
         self.assertRedirects(response, reverse("dashboard"))
         self.assertTrue(User.objects.filter(email="rita.nouveau@example.com", role=User.ROLE_CLIENT).exists())
 
+    def test_register_page_renders_for_anonymous_user(self):
+        response = self.client.get(reverse("register"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "data-client-registration")
+        self.assertContains(response, "data-company-field")
+        self.assertContains(response, "field--hidden")
+
     def test_planning_page_renders_for_manager(self):
         self.client.force_login(self.manager)
 

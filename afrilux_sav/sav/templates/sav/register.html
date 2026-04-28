@@ -21,7 +21,7 @@
             <p class="eyebrow">Inscription</p>
             <h2>Nouveau compte client</h2>
         </div>
-        {% with current_client_type=form.data.client_type|default:form.initial.client_type|default:'individual' %}
+        {% with current_client_type=form.client_type.value|default:'individual' %}
         <form method="post" class="form-grid" data-client-registration>
             {% csrf_token %}
             {% if form.non_field_errors %}
