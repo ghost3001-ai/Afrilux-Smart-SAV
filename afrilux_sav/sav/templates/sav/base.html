@@ -23,7 +23,13 @@
     <div class="layout">
         <header class="topbar">
             <a class="brand" href="{% if request.user.is_authenticated %}{% url 'workspace' %}{% else %}{% url 'login' %}{% endif %}">
-                <span class="brand__mark">{{ sav_shell.organization_initials|default:"AF" }}</span>
+                <span class="brand__logo-wrap">
+                    <img
+                        class="brand__logo"
+                        src="{% static 'sav/images/afrilux-smart-solutions-logo.jpeg' %}"
+                        alt="{% if sav_shell.organization_name %}{{ sav_shell.organization_name }}{% else %}Afrilux SAV{% endif %}"
+                    >
+                </span>
                 <span>
                     <strong>{% if sav_shell.organization_name %}{{ sav_shell.organization_name }}{% else %}Afrilux SAV{% endif %}</strong>
                     <small>{% if sav_shell.organization_tagline %}{{ sav_shell.organization_tagline }}{% else %}Service apres-vente intelligent{% endif %}</small>
