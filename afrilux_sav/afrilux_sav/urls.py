@@ -27,6 +27,7 @@ from django.views.static import serve as serve_media
 
 urlpatterns = [
     path("", include("sav.web_urls")),
+    path("i18n/", include("django.conf.urls.i18n")),
     path("admin/", admin.site.urls),
     path("api/docs/", TemplateView.as_view(template_name="sav/api_docs.html"), name="api-docs"),
     path("api/", include(("sav.urls", "sav_api"), namespace="sav_api")),

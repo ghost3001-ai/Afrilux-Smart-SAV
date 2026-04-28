@@ -41,7 +41,7 @@
                 {% for field in form %}
                     {% if not field.is_hidden and field.name == 'client_mode' or not field.is_hidden and field.name == 'existing_client_email' or not field.is_hidden and field.name == 'client_name' or not field.is_hidden and field.name == 'client_email' or not field.is_hidden and field.name == 'client_password1' or not field.is_hidden and field.name == 'client_password2' or not field.is_hidden and field.name == 'product_label' or not field.is_hidden and field.name == 'title' %}
                         <label class="field {% if field.name == 'title' or field.name == 'product_label' or field.name == 'client_mode' %}field--full{% endif %}{% if field.name == 'existing_client_email' %}{% if current_client_mode != 'existing' %} field--hidden{% endif %}{% elif field.name == 'client_name' or field.name == 'client_email' or field.name == 'client_password1' or field.name == 'client_password2' %}{% if current_client_mode != 'new' %} field--hidden{% endif %}{% endif %}"{% if field.name == 'existing_client_email' %} data-client-mode-group="existing"{% elif field.name == 'client_name' or field.name == 'client_email' or field.name == 'client_password1' or field.name == 'client_password2' %} data-client-mode-group="new"{% endif %}>
-                            <span>{{ field.label }}</span>
+                            <span>{{ field.label }}{% if field.field.required %} <strong>*</strong>{% endif %}</span>
                             {{ field }}
                             {% if field.help_text %}<small class="field__help">{{ field.help_text }}</small>{% endif %}
                             {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
@@ -55,7 +55,7 @@
             {% for field in form %}
                 {% if not field.is_hidden and field.name == 'description' or not field.is_hidden and field.name == 'business_domain' or not field.is_hidden and field.name == 'category' or not field.is_hidden and field.name == 'channel' or not field.is_hidden and field.name == 'location' %}
                     <label class="field {% if field.name == 'description' %}field--full{% endif %}">
-                        <span>{{ field.label }}</span>
+                        <span>{{ field.label }}{% if field.field.required %} <strong>*</strong>{% endif %}</span>
                         {{ field }}
                         {% if field.help_text %}<small class="field__help">{{ field.help_text }}</small>{% endif %}
                         {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
@@ -68,7 +68,7 @@
             {% for field in form %}
                 {% if not field.is_hidden and field.name == 'assigned_agent' or not field.is_hidden and field.name == 'status' or not field.is_hidden and field.name == 'priority' or not field.is_hidden and field.name == 'suspected_fraud' or not field.is_hidden and field.name == 'sla_deadline' or not field.is_hidden and field.name == 'initial_attachments' %}
                     <label class="field {% if field.name == 'initial_attachments' %}field--full{% endif %}">
-                        <span>{{ field.label }}</span>
+                        <span>{{ field.label }}{% if field.field.required %} <strong>*</strong>{% endif %}</span>
                         {{ field }}
                         {% if field.help_text %}<small class="field__help">{{ field.help_text }}</small>{% endif %}
                         {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}

@@ -869,9 +869,9 @@ class SavPlatformTests(TestCase):
         response = self.api.post(reverse("sav_api:ticket-take-ownership", args=[ticket.pk]), {})
         ticket.refresh_from_db()
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(ticket.assigned_agent, self.agent)
-        self.assertEqual(ticket.status, Ticket.STATUS_IN_PROGRESS)
+        self.assertEqual(response.status_code, 404)
+        self.assertIsNone(ticket.assigned_agent)
+        self.assertEqual(ticket.status, Ticket.STATUS_NEW)
 
     def test_client_can_reopen_resolved_ticket(self):
         ticket = Ticket.objects.create(
@@ -1064,8 +1064,8 @@ class SavPlatformTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Vers responsable CFAO")
         self.assertContains(response, "Vers conducteur de travaux CFAO")
-        self.assertContains(response, "Vers responsable froid &amp; climatisation")
-        self.assertContains(response, "Vers gestionnaire principal du logiciel")
+        self.assertNotContains(response, "Vers responsable froid &amp; climatisation")
+        self.assertNotContains(response, "Vers gestionnaire principal du logiciel")
 
     def test_internal_user_can_escalate_ticket_to_cfao_manager_via_api(self):
         cfao_manager = User.objects.create_user(
@@ -1170,8 +1170,8 @@ class SavPlatformTests(TestCase):
         )
         ticket.refresh_from_db()
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(ticket.assigned_agent, hvac_manager)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(ticket.assigned_agent, self.agent)
 
     def test_internal_user_can_escalate_ticket_to_software_owner_via_api(self):
         software_owner = User.objects.create_user(
@@ -1206,10 +1206,38 @@ class SavPlatformTests(TestCase):
         )
         ticket.refresh_from_db()
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(ticket.assigned_agent, software_owner)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(ticket.assigned_agent, self.agent)
 
-    def test_expert_then_head_sav_prefers_hvac_manager_for_cooling_ticket(self):
+    def test_manager_cannot_assign_ticket_to_unavailable_technician(self):
+        unavailable_technician = User.objects.create_user(
+            username="technician_unavailable",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_TECHNICIAN,
+            technician_status="on_leave",
+        )
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            title="Affectation indisponible",
+            description="Ne doit pas etre assigne a un technicien indisponible.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            status=Ticket.STATUS_NEW,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+
+        response = self.api.post(
+            reverse("sav_api:ticket-assign", args=[ticket.pk]),
+            {"technician": unavailable_technician.pk},
+            format="json",
+        )
+        ticket.refresh_from_db()
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIsNone(ticket.assigned_agent)
+
+    def test_expert_then_head_sav_falls_back_to_head_sav_for_cooling_ticket(self):
         hvac_manager = User.objects.create_user(
             username="hvac_fallback",
             password="secret123",
@@ -1245,9 +1273,9 @@ class SavPlatformTests(TestCase):
         ticket.refresh_from_db()
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(ticket.assigned_agent, hvac_manager)
+        self.assertEqual(ticket.assigned_agent, self.manager)
 
-    def test_expert_then_head_sav_prefers_software_owner_for_bug_ticket(self):
+    def test_expert_then_head_sav_falls_back_to_head_sav_for_bug_ticket(self):
         software_owner = User.objects.create_user(
             username="software_fallback",
             password="secret123",
@@ -1283,7 +1311,7 @@ class SavPlatformTests(TestCase):
         ticket.refresh_from_db()
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(ticket.assigned_agent, software_owner)
+        self.assertEqual(ticket.assigned_agent, self.manager)
 
     def test_client_can_confirm_resolution(self):
         ticket = Ticket.objects.create(
@@ -1364,7 +1392,7 @@ class SavPlatformTests(TestCase):
             },
         )
 
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 404)
         self.assertFalse(Message.objects.filter(ticket=ticket, content="Tentative auditeur").exists())
 
     def test_client_cannot_patch_ticket_directly(self):
@@ -1463,6 +1491,52 @@ class SavPlatformTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertTrue(User.objects.filter(email="nadia@example.com", role=User.ROLE_CLIENT).exists())
+
+    def test_public_registration_requires_company_for_enterprise_client_type(self):
+        response = self.client.post(
+            reverse("sav_api:public-register"),
+            json.dumps(
+                {
+                    "organization": self.organization.id,
+                    "first_name": "Client",
+                    "last_name": "Entreprise",
+                    "email": "client.entreprise@example.com",
+                    "phone": "+237677000101",
+                    "client_type": "enterprise",
+                    "company_name": "",
+                    "password": "ClientPass123!",
+                    "password_confirm": "ClientPass123!",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("company_name", response.json())
+
+    def test_public_registration_clears_company_for_non_enterprise_types(self):
+        response = self.client.post(
+            reverse("sav_api:public-register"),
+            json.dumps(
+                {
+                    "organization": self.organization.id,
+                    "first_name": "Client",
+                    "last_name": "Particulier",
+                    "email": "client.particulier@example.com",
+                    "phone": "+237677000102",
+                    "client_type": "individual",
+                    "company_name": "Ne doit pas etre conserve",
+                    "password": "ClientPass123!",
+                    "password_confirm": "ClientPass123!",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        created = User.objects.get(email="client.particulier@example.com")
+        self.assertEqual(created.client_type, "individual")
+        self.assertEqual(created.company_name, "")
 
     def test_web_login_accepts_email_identifier(self):
         user = User.objects.create_user(

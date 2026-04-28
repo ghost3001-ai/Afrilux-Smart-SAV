@@ -284,6 +284,9 @@ class UserSerializer(serializers.ModelSerializer):
         attrs = super().validate(attrs)
         email = (attrs.get("email") or getattr(self.instance, "email", "") or "").strip().lower()
         role = attrs.get("role") or getattr(self.instance, "role", User.ROLE_CLIENT)
+        if role == User.ROLE_FIELD_TECHNICIAN:
+            role = User.ROLE_TECHNICIAN
+            attrs["role"] = role
         organization = attrs.get("organization") or getattr(self.instance, "organization", None)
         professional_email = (attrs.get("professional_email") or "").strip().lower()
         password = attrs.get("password", "")
@@ -344,6 +347,12 @@ class ClientRegistrationSerializer(serializers.Serializer):
         attrs = super().validate(attrs)
         if attrs["password"] != attrs["password_confirm"]:
             raise serializers.ValidationError({"password_confirm": "Les mots de passe ne correspondent pas."})
+        client_type = (attrs.get("client_type") or "").strip().lower()
+        company_name = (attrs.get("company_name") or "").strip()
+        if client_type == "enterprise" and not company_name:
+            raise serializers.ValidationError({"company_name": "Le champ Entreprise est obligatoire pour ce type de client."})
+        if client_type and client_type != "enterprise":
+            attrs["company_name"] = ""
         return attrs
 
     def create(self, validated_data):
@@ -1116,6 +1125,15 @@ class TicketSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        blocked_categories = {
+            Ticket.CATEGORY_RETURN,
+            Ticket.CATEGORY_REFUND,
+            Ticket.CATEGORY_WITHDRAWAL,
+        }
+        if attrs.get("category") in blocked_categories:
+            raise serializers.ValidationError(
+                {"category": "Cette categorie n'est plus autorisee pour la creation ou la mise a jour des tickets."}
+            )
         client = attrs.get("client") or getattr(self.instance, "client", None)
         product = attrs.get("product") or getattr(self.instance, "product", None)
         related_transaction = attrs.get("related_transaction") or getattr(self.instance, "related_transaction", None)
@@ -1130,6 +1148,15 @@ class TicketSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Le client selectionne n'appartient pas a cette organisation.")
         if assigned_agent and client and assigned_agent.organization_id and client.organization_id and assigned_agent.organization_id != client.organization_id:
             raise serializers.ValidationError("L'agent selectionne appartient a une autre organisation.")
+        previous_assigned_agent = getattr(self.instance, "assigned_agent", None)
+        if (
+            assigned_agent
+            and not assigned_agent.is_ticket_assignment_eligible
+            and (not previous_assigned_agent or previous_assigned_agent.id != assigned_agent.id)
+        ):
+            raise serializers.ValidationError(
+                {"assigned_agent": "Affectation autorisee uniquement aux agents et techniciens disponibles."}
+            )
         return attrs
 
 

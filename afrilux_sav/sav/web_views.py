@@ -390,7 +390,6 @@ class AdministrationPageView(LoginRequiredMixin, AdminRequiredMixin, TemplateVie
                     "vip_support": internal_users.filter(role__in=User.SPECIAL_SUPPORT_ROLES).count(),
                     "techniciens": internal_users.filter(role__in=User.TECHNICAL_ROLES).count(),
                     "experts": internal_users.filter(role=User.ROLE_EXPERT).count(),
-                    "terrain": internal_users.filter(role=User.ROLE_FIELD_TECHNICIAN).count(),
                     "cfao": internal_users.filter(role=User.ROLE_CFAO_MANAGER).count(),
                     "cfao_works": internal_users.filter(role=User.ROLE_CFAO_WORKS).count(),
                     "hvac": internal_users.filter(role=User.ROLE_HVAC_MANAGER).count(),
@@ -578,6 +577,7 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
         return initial
 
     def form_valid(self, form):
+        form.instance.created_by = self.request.user
         if self.request.user.role == User.ROLE_CLIENT:
             form.instance.client = self.request.user
             form.instance.status = Ticket.STATUS_NEW

@@ -3,7 +3,7 @@ from datetime import datetime, time, timedelta
 from django.core.cache import cache
 from django.db import connections
 from django.http import HttpResponse
-from django.db.models import Avg, Count
+from django.db.models import Avg, Count, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import filters, mixins, parsers, status, viewsets
@@ -485,6 +485,7 @@ class TicketViewSet(AuditedModelViewSet):
 
     def perform_create(self, serializer):
         ticket_kwargs = {}
+        ticket_kwargs["created_by"] = self.request.user
         if self.request.user.role == User.ROLE_CLIENT:
             ticket_kwargs["client"] = self.request.user
             client = self.request.user
@@ -552,6 +553,11 @@ class TicketViewSet(AuditedModelViewSet):
     @action(detail=True, methods=["post"], permission_classes=[IsInternalUser])
     def take_ownership(self, request, pk=None):
         ticket = self.get_object()
+        if not request.user.is_ticket_assignment_eligible:
+            return Response(
+                {"detail": "Prise en charge autorisee uniquement pour les agents et techniciens disponibles."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         previous_status = ticket.status
         ticket.assigned_agent = request.user
         if ticket.status in {Ticket.STATUS_NEW, Ticket.STATUS_ASSIGNED, Ticket.STATUS_WAITING}:
@@ -569,8 +575,12 @@ class TicketViewSet(AuditedModelViewSet):
         technician_id = request.data.get("technician") or request.data.get("assigned_agent")
         if not technician_id:
             return Response({"detail": "Le technicien est obligatoire."}, status=status.HTTP_400_BAD_REQUEST)
+        assignment_queryset = User.objects.filter(is_active=True).filter(
+            Q(role__in=User.STANDARD_SUPPORT_ROLES + User.SPECIAL_SUPPORT_ROLES)
+            | Q(role=User.ROLE_TECHNICIAN, technician_status="available")
+        )
         technician = get_object_or_404(
-            scope_user_queryset(User.objects.filter(role__in=User.ASSIGNABLE_ROLES), request.user),
+            scope_user_queryset(assignment_queryset, request.user),
             pk=technician_id,
         )
         ticket.assigned_agent = technician

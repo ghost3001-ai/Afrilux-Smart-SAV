@@ -68,8 +68,13 @@ ESCALATION_TARGET_HEAD_SAV = "head_sav"
 ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV = "expert_then_head_sav"
 ESCALATION_TARGET_CFAO_MANAGER = "cfao_manager"
 ESCALATION_TARGET_CFAO_WORKS = "cfao_works"
-ESCALATION_TARGET_HVAC_MANAGER = "hvac_manager"
-ESCALATION_TARGET_SOFTWARE_OWNER = "software_owner"
+ESCALATION_ALLOWED_TARGETS = {
+    ESCALATION_TARGET_SUPERVISOR,
+    ESCALATION_TARGET_HEAD_SAV,
+    ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV,
+    ESCALATION_TARGET_CFAO_MANAGER,
+    ESCALATION_TARGET_CFAO_WORKS,
+}
 
 NEGATIVE_WORDS = [
     "decu",
@@ -249,14 +254,23 @@ def scope_user_queryset(queryset, user):
 def scope_ticket_queryset(queryset, user):
     if not user or not user.is_authenticated:
         return queryset.none()
+    if user.is_superuser:
+        return queryset
     if has_backoffice_access(user):
-        if user.is_superuser or not user.organization_id:
+        if user.organization_id:
+            queryset = queryset.filter(
+                Q(organization=user.organization)
+                | Q(client__organization=user.organization)
+                | Q(product__organization=user.organization)
+            ).distinct()
+        visibility_leadership_roles = {
+            User.ROLE_HEAD_SAV,
+            User.ROLE_ADMIN,
+            User.ROLE_MANAGER,
+        }
+        if getattr(user, "role", "") in visibility_leadership_roles:
             return queryset
-        return queryset.filter(
-            Q(organization=user.organization)
-            | Q(client__organization=user.organization)
-            | Q(product__organization=user.organization)
-        ).distinct()
+        return queryset.filter(Q(created_by=user) | Q(assigned_agent=user)).distinct()
     return queryset.filter(client=user)
 
 
@@ -272,27 +286,34 @@ def scope_equipment_category_queryset(queryset, user):
     return queryset.filter(Q(organization=user.organization) | Q(organization__isnull=True))
 
 
+def _scope_ticket_related_queryset(queryset, user, ticket_relation):
+    if not user or not user.is_authenticated:
+        return queryset.none()
+    visible_tickets = scope_ticket_queryset(Ticket.objects.all(), user)
+    return queryset.filter(**{f"{ticket_relation}__in": visible_tickets})
+
+
 def scope_message_queryset(queryset, user):
-    queryset = scope_by_access(queryset, user, "ticket__client", "ticket__organization")
+    queryset = _scope_ticket_related_queryset(queryset, user, "ticket")
     if not has_backoffice_access(user) and not getattr(user, "is_superuser", False):
         queryset = queryset.exclude(message_type=Message.TYPE_INTERNAL)
     return queryset
 
 
 def scope_attachment_queryset(queryset, user):
-    return scope_by_access(queryset, user, "ticket__client", "ticket__organization")
+    return _scope_ticket_related_queryset(queryset, user, "ticket")
 
 
 def scope_intervention_queryset(queryset, user):
-    return scope_by_access(queryset, user, "ticket__client", "ticket__organization")
+    return _scope_ticket_related_queryset(queryset, user, "ticket")
 
 
 def scope_intervention_media_queryset(queryset, user):
-    return scope_by_access(queryset, user, "intervention__ticket__client", "intervention__organization")
+    return _scope_ticket_related_queryset(queryset, user, "intervention__ticket")
 
 
 def scope_ticket_assignment_queryset(queryset, user):
-    return scope_by_access(queryset, user, "ticket__client", "organization")
+    return _scope_ticket_related_queryset(queryset, user, "ticket")
 
 
 def scope_client_contact_queryset(queryset, user):
@@ -300,7 +321,7 @@ def scope_client_contact_queryset(queryset, user):
 
 
 def scope_support_session_queryset(queryset, user):
-    return scope_by_access(queryset, user, "client", "organization")
+    return _scope_ticket_related_queryset(queryset, user, "ticket")
 
 
 def scope_predictive_alert_queryset(queryset, user):
@@ -411,6 +432,19 @@ def manager_queryset_for_organization(organization=None):
     return queryset.filter(Q(organization__isnull=True) | Q(is_superuser=True))
 
 
+def assignment_eligible_queryset_for_organization(organization=None):
+    queryset = User.objects.filter(is_active=True).filter(
+        Q(role__in=[User.ROLE_SUPPORT, User.ROLE_AGENT, User.ROLE_VIP_SUPPORT])
+        | Q(role=User.ROLE_TECHNICIAN, technician_status="available")
+    )
+    if organization is None:
+        return queryset
+    scoped_queryset = queryset.filter(organization=organization)
+    if scoped_queryset.exists():
+        return scoped_queryset
+    return queryset.filter(organization__isnull=True)
+
+
 def _select_least_loaded_agent_for_roles(*, roles, organization=None, exclude_user_ids=None):
     exclude_user_ids = [user_id for user_id in (exclude_user_ids or []) if user_id]
     queryset = User.objects.filter(is_active=True, role__in=roles)
@@ -479,26 +513,13 @@ def select_escalation_agent(ticket, *, target=ESCALATION_TARGET_EXPERT_THEN_HEAD
             exclude_user_ids=exclude_ids,
         )
 
-    if normalized_target == ESCALATION_TARGET_HVAC_MANAGER:
-        return _select_least_loaded_agent_for_roles(
-            roles=[User.ROLE_HVAC_MANAGER],
-            organization=ticket.organization,
-            exclude_user_ids=exclude_ids,
-        )
-
-    if normalized_target == ESCALATION_TARGET_SOFTWARE_OWNER:
-        return _select_least_loaded_agent_for_roles(
-            roles=[User.ROLE_SOFTWARE_OWNER],
-            organization=ticket.organization,
-            exclude_user_ids=exclude_ids,
-        )
-
-    role_resolution_order = [[User.ROLE_EXPERT]]
-    if ticket.business_domain == Ticket.DOMAIN_COOLING:
-        role_resolution_order.append([User.ROLE_HVAC_MANAGER])
-    if ticket.business_domain == Ticket.DOMAIN_IT or ticket.category in {Ticket.CATEGORY_BUG, Ticket.CATEGORY_ACCOUNT}:
-        role_resolution_order.append([User.ROLE_SOFTWARE_OWNER])
-    role_resolution_order.append([User.ROLE_HEAD_SAV])
+    role_resolution_order = [
+        [User.ROLE_EXPERT],
+        [User.ROLE_HEAD_SAV],
+        [User.ROLE_SUPERVISOR],
+        [User.ROLE_CFAO_MANAGER],
+        [User.ROLE_CFAO_WORKS],
+    ]
 
     for roles in role_resolution_order:
         escalation_agent = _select_least_loaded_agent_for_roles(
@@ -652,12 +673,16 @@ def provision_client_account(
         user.last_name = last_name.strip()
     if phone.strip():
         user.phone = phone.strip()
+    normalized_client_type = (client_type or "").strip().lower()
+    if normalized_client_type:
+        user.client_type = normalized_client_type
+
     if company_name.strip():
         user.company_name = company_name.strip()
-    elif organization and not user.company_name:
+    elif normalized_client_type == "enterprise" and organization and not user.company_name:
         user.company_name = organization.display_name
-    if client_type:
-        user.client_type = client_type
+    elif normalized_client_type and normalized_client_type != "enterprise":
+        user.company_name = ""
     if sector.strip():
         user.sector = sector.strip()
     if tax_identifier.strip():
@@ -1296,6 +1321,8 @@ def escalate_ticket(ticket, *, actor=None, note="", target=ESCALATION_TARGET_EXP
     previous_status = ticket.status
     previous_assigned_agent = ticket.assigned_agent
     normalized_target = (target or ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV).strip().lower()
+    if normalized_target not in ESCALATION_ALLOWED_TARGETS:
+        raise ValueError("Cible d'escalade invalide. Cibles autorisees: responsable, chef, conducteur CFAO, superviseur.")
     escalation_target = select_escalation_agent(ticket, target=normalized_target)
     escalation_note = (note or "Escalade du ticket pour prise en charge de niveau superieur.").strip()[:500]
 
@@ -1308,10 +1335,6 @@ def escalate_ticket(ticket, *, actor=None, note="", target=ESCALATION_TARGET_EXP
             raise ValueError("Aucun responsable CFAO disponible pour recevoir cette escalade.")
         if normalized_target == ESCALATION_TARGET_CFAO_WORKS:
             raise ValueError("Aucun conducteur de travaux CFAO disponible pour recevoir cette escalade.")
-        if normalized_target == ESCALATION_TARGET_HVAC_MANAGER:
-            raise ValueError("Aucun responsable froid & climatisation disponible pour recevoir cette escalade.")
-        if normalized_target == ESCALATION_TARGET_SOFTWARE_OWNER:
-            raise ValueError("Aucun gestionnaire principal du logiciel disponible pour recevoir cette escalade.")
         raise ValueError("Aucun expert ni responsable SAV disponible pour recevoir cette escalade.")
 
     ticket.priority = next_ticket_priority(ticket.priority)
@@ -1496,16 +1519,10 @@ def infer_ticket_category_from_text(text, current_category=Ticket.CATEGORY_BREAK
     lowered_text = (text or "").lower()
     if any(word in lowered_text for word in ["paiement", "payment", "carte", "solde debite"]):
         return Ticket.CATEGORY_PAYMENT
-    if any(word in lowered_text for word in ["retrait", "withdrawal", "cashout"]):
-        return Ticket.CATEGORY_WITHDRAWAL
     if any(word in lowered_text for word in ["bug", "erreur app", "application plante", "crash"]):
         return Ticket.CATEGORY_BUG
     if any(word in lowered_text for word in ["compte bloque", "blocage compte", "profil", "numero change"]):
         return Ticket.CATEGORY_ACCOUNT
-    if any(word in lowered_text for word in ["remboursement", "refund", "refunds"]):
-        return Ticket.CATEGORY_REFUND
-    if any(word in lowered_text for word in ["retour", "return", "echange"]):
-        return Ticket.CATEGORY_RETURN
     if any(word in lowered_text for word in ["installation", "installer", "mise en service"]):
         return Ticket.CATEGORY_INSTALLATION
     if any(word in lowered_text for word in ["maintenance", "preventive", "entretien"]):
@@ -1664,16 +1681,7 @@ def answer_support_question(question, user, product=None, ticket=None):
 
 
 def select_least_loaded_agent(organization=None):
-    base_queryset = User.objects.filter(is_active=True).filter(
-        Q(role__in=User.ASSIGNABLE_ROLES) | Q(is_superuser=True)
-    )
-    queryset = base_queryset
-    if organization is not None:
-        scoped_queryset = base_queryset.filter(Q(organization=organization) | Q(is_superuser=True))
-        if scoped_queryset.exists():
-            queryset = scoped_queryset
-        else:
-            queryset = base_queryset.filter(Q(organization__isnull=True) | Q(is_superuser=True))
+    queryset = assignment_eligible_queryset_for_organization(organization=organization)
     return (
         queryset
         .annotate(
@@ -1794,7 +1802,7 @@ def apply_agentic_resolution(ticket, approved_by=None):
             "You are Afrilux SAV's autonomous support agent. "
             "Return valid JSON only with keys: summary, suggested_priority, likely_issue, "
             "auto_resolve, resolution_summary, recommended_article_slug, actions_taken, confidence. "
-            "Only set auto_resolve to true for simple cases like warranty returns/refunds or very simple self-service fixes."
+            "Only set auto_resolve to true for simple self-service fixes or obvious under-warranty replacement guidance."
         )
         user_prompt = (
             "Analyse this support ticket and propose the next action.\n"
@@ -1839,10 +1847,13 @@ def apply_agentic_resolution(ticket, approved_by=None):
         ticket.resolution_summary = llm_resolution_summary
         actions_taken.extend(llm_actions or ["llm_auto_resolution"])
         auto_resolved = True
-    elif ticket.category in {Ticket.CATEGORY_RETURN, Ticket.CATEGORY_REFUND} and warranty_eligible:
+    elif (
+        ticket.category in {Ticket.CATEGORY_RETURN, Ticket.CATEGORY_REFUND}
+        or (ticket.category == Ticket.CATEGORY_COMPLAINT and "garantie" in full_text.lower())
+    ) and warranty_eligible:
         ticket.status = Ticket.STATUS_RESOLVED
         ticket.resolution_summary = (
-            "Resolution agentique: retour sous garantie valide, echange standard autorise automatiquement."
+            "Resolution agentique: cas sous garantie detecte, orientation echange standard automatisee."
         )
         actions_taken.append("warranty_exchange_approved")
         auto_resolved = True

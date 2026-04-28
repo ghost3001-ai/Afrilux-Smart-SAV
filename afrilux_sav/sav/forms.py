@@ -2,6 +2,8 @@ from django import forms
 from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from django.db.models import Q
+from django.utils import timezone
 
 from .models import EquipmentCategory, FinancialTransaction, Intervention, InterventionMedia, Message, Organization, Product, Ticket, TicketAttachment, User
 from .services import (
@@ -9,9 +11,8 @@ from .services import (
     ESCALATION_TARGET_CFAO_WORKS,
     ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV,
     ESCALATION_TARGET_HEAD_SAV,
-    ESCALATION_TARGET_HVAC_MANAGER,
-    ESCALATION_TARGET_SOFTWARE_OWNER,
     ESCALATION_TARGET_SUPERVISOR,
+    compute_ticket_sla_deadline,
     provision_client_account,
 )
 
@@ -64,6 +65,11 @@ class ClientRegistrationForm(forms.Form):
     password1 = forms.CharField(label="Mot de passe", widget=forms.PasswordInput())
     password2 = forms.CharField(label="Confirmation", widget=forms.PasswordInput())
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self.data:
+            self.fields["client_type"].initial = "individual"
+
     def clean_email(self):
         return self.cleaned_data["email"].strip().lower()
 
@@ -78,6 +84,12 @@ class ClientRegistrationForm(forms.Form):
                 validate_password(password1)
             except ValidationError as exc:
                 self.add_error("password1", exc)
+        client_type = (cleaned_data.get("client_type") or "").strip().lower()
+        company_name = (cleaned_data.get("company_name") or "").strip()
+        if client_type == "enterprise" and not company_name:
+            self.add_error("company_name", "Le champ Entreprise est obligatoire pour un client de type Entreprise.")
+        if client_type and client_type != "enterprise":
+            cleaned_data["company_name"] = ""
         return cleaned_data
 
     def save(self):
@@ -137,7 +149,10 @@ class TicketForm(forms.ModelForm):
         self.fields["product"].required = False
         self.fields["product"].widget = forms.HiddenInput()
         client_queryset = User.objects.filter(role=User.ROLE_CLIENT)
-        agent_queryset = User.objects.filter(role__in=User.ASSIGNABLE_ROLES)
+        agent_queryset = User.objects.filter(is_active=True).filter(
+            Q(role__in=User.STANDARD_SUPPORT_ROLES + User.SPECIAL_SUPPORT_ROLES)
+            | Q(role=User.ROLE_TECHNICIAN, technician_status="available")
+        )
         transaction_queryset = FinancialTransaction.objects.select_related("client")
         if user and user.is_authenticated and not user.is_superuser and user.organization_id:
             client_queryset = client_queryset.filter(organization=user.organization)
@@ -147,7 +162,13 @@ class TicketForm(forms.ModelForm):
             agent_queryset = (agent_queryset | User.objects.filter(pk=self.instance.assigned_agent_id)).distinct()
         self.fields["client"].queryset = client_queryset.order_by("username")
         self.fields["assigned_agent"].queryset = agent_queryset.order_by("username")
+        self.fields["assigned_agent"].help_text = "Affectation autorisee uniquement aux agents et techniciens disponibles."
         self.fields["related_transaction"].queryset = transaction_queryset.order_by("-occurred_at", "-created_at")
+        if not self.instance.pk and not self.initial.get("sla_deadline"):
+            base_priority = self.initial.get("priority") or self.fields["priority"].initial or Ticket.PRIORITY_NORMAL
+            org = getattr(user, "organization", None) if user and user.is_authenticated else None
+            default_deadline = compute_ticket_sla_deadline(base_priority, base_time=timezone.now(), organization=org)
+            self.initial["sla_deadline"] = timezone.localtime(default_deadline).replace(second=0, microsecond=0)
 
         if user and user.is_authenticated and user.role == User.ROLE_CLIENT:
             self.fields["client"].queryset = client_queryset.filter(pk=user.pk)
@@ -175,11 +196,19 @@ class TicketForm(forms.ModelForm):
         client = cleaned_data.get("client")
         product = cleaned_data.get("product")
         related_transaction = cleaned_data.get("related_transaction")
+        assigned_agent = cleaned_data.get("assigned_agent")
         cleaned_data["business_domain"] = cleaned_data.get("business_domain") or Ticket.DOMAIN_OTHER
         if client and product and product.client_id != client.id:
             self.add_error("product", "Le produit selectionne n'appartient pas a ce client.")
         if client and related_transaction and related_transaction.client_id != client.id:
             self.add_error("related_transaction", "La transaction selectionnee n'appartient pas a ce client.")
+        previous_assigned_agent = getattr(self.instance, "assigned_agent", None)
+        if (
+            assigned_agent
+            and not assigned_agent.is_ticket_assignment_eligible
+            and (not previous_assigned_agent or previous_assigned_agent.id != assigned_agent.id)
+        ):
+            self.add_error("assigned_agent", "Affectation autorisee uniquement aux agents et techniciens disponibles.")
         return cleaned_data
 
 
@@ -412,17 +441,12 @@ class TicketEscalationForm(forms.Form):
     TARGET_EXPERT_THEN_HEAD_SAV = ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV
     TARGET_CFAO_MANAGER = ESCALATION_TARGET_CFAO_MANAGER
     TARGET_CFAO_WORKS = ESCALATION_TARGET_CFAO_WORKS
-    TARGET_HVAC_MANAGER = ESCALATION_TARGET_HVAC_MANAGER
-    TARGET_SOFTWARE_OWNER = ESCALATION_TARGET_SOFTWARE_OWNER
-
     TARGET_CHOICES = (
         (TARGET_SUPERVISOR, "1. Vers superviseur"),
         (TARGET_HEAD_SAV, "2. Vers responsable SAV"),
         (TARGET_EXPERT_THEN_HEAD_SAV, "3. Expert puis responsable SAV"),
         (TARGET_CFAO_MANAGER, "4. Vers responsable CFAO"),
         (TARGET_CFAO_WORKS, "5. Vers conducteur de travaux CFAO"),
-        (TARGET_HVAC_MANAGER, "6. Vers responsable froid & climatisation"),
-        (TARGET_SOFTWARE_OWNER, "7. Vers gestionnaire principal du logiciel"),
     )
 
     target = forms.ChoiceField(

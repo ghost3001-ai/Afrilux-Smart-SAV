@@ -21,14 +21,15 @@
             <p class="eyebrow">Inscription</p>
             <h2>Nouveau compte client</h2>
         </div>
-        <form method="post" class="form-grid">
+        {% with current_client_type=form.data.client_type|default:form.initial.client_type|default:'individual' %}
+        <form method="post" class="form-grid" data-client-registration>
             {% csrf_token %}
             {% if form.non_field_errors %}
                 <div class="form-errors">{{ form.non_field_errors }}</div>
             {% endif %}
             {% for field in form %}
-                <label class="field">
-                    <span>{{ field.label }}</span>
+                <label class="field{% if field.name == 'company_name' and current_client_type != 'enterprise' %} field--hidden{% endif %}"{% if field.name == 'company_name' %} data-company-field{% endif %}>
+                    <span>{{ field.label }}{% if field.field.required %} <strong>*</strong>{% endif %}</span>
                     {{ field }}
                     {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
                     {% if field.errors %}
@@ -38,6 +39,7 @@
             {% endfor %}
             <button class="button button--primary" type="submit">Creer le compte client</button>
         </form>
+        {% endwith %}
         <p class="muted" style="margin-top: 1rem;">
             Deja inscrit ? <a href="{% url 'login' %}">Se connecter</a>
         </p>

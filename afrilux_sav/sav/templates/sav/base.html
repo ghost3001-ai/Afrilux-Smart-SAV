@@ -1,4 +1,4 @@
-{% load static sav_extras %}
+{% load static sav_extras i18n %}
 <!DOCTYPE html>
 <html lang="{{ LANGUAGE_CODE|default:'fr' }}">
 <head>
@@ -52,6 +52,17 @@
                     {% endif %}
                     <a href="{% url 'knowledge-list' %}">Knowledge</a>
                     <a href="{% url 'notifications' %}">Notifications <span class="nav__badge">{{ sav_shell.unread_notifications }}</span></a>
+                    <form method="post" action="{% url 'set_language' %}" class="nav__logout-form">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <select name="language" class="input input--compact" onchange="this.form.submit()">
+                            {% get_current_language as CURRENT_LANGUAGE %}
+                            {% get_available_languages as LANGUAGES %}
+                            {% for code, name in LANGUAGES %}
+                                <option value="{{ code }}"{% if CURRENT_LANGUAGE|slice:":2" == code %} selected{% endif %}>{{ name }}</option>
+                            {% endfor %}
+                        </select>
+                    </form>
                     <button class="button button--ghost button--compact" type="button" data-theme-toggle>Theme</button>
                     <form method="post" action="{% url 'logout' %}" class="nav__logout-form">
                         {% csrf_token %}

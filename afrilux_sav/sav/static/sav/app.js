@@ -140,6 +140,35 @@ function initializeTicketClientMode() {
   sync();
 }
 
+function initializeClientRegistration() {
+  const root = document.querySelector("[data-client-registration]");
+  if (!root) {
+    return;
+  }
+  const clientTypeField = root.querySelector("[name='client_type']");
+  const companyFieldContainer = root.querySelector("[data-company-field]");
+  if (!clientTypeField || !companyFieldContainer) {
+    return;
+  }
+  const companyInput = companyFieldContainer.querySelector("input, select, textarea");
+  if (!companyInput) {
+    return;
+  }
+
+  const sync = () => {
+    const selectedType = (clientTypeField.value || "").toLowerCase();
+    const isEnterprise = selectedType === "enterprise";
+    companyFieldContainer.classList.toggle("field--hidden", !isEnterprise);
+    companyInput.required = isEnterprise;
+    if (!isEnterprise) {
+      companyInput.value = "";
+    }
+  };
+
+  clientTypeField.addEventListener("change", sync);
+  sync();
+}
+
 function buildLineChart(target, dataset) {
   if (!target || !Array.isArray(dataset) || !dataset.length) {
     return;
@@ -404,6 +433,7 @@ function initializeSupportChat() {
 document.addEventListener("DOMContentLoaded", () => {
   fadeFlashes();
   initializeThemeToggle();
+  initializeClientRegistration();
   initializeTicketClientMode();
   initializeTicketWizard();
   initializeDashboardCharts();

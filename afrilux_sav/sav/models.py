@@ -79,7 +79,7 @@ class User(AbstractUser):
     ROLE_SUPERVISOR = "supervisor"
     ROLE_QA = "qa"
     ROLE_DISPATCHER = "dispatcher"
-    ROLE_FIELD_TECHNICIAN = "field_technician"
+    ROLE_FIELD_TECHNICIAN = "field_technician"  # legacy value preserved for compatibility/migrations
     ROLE_VIP_SUPPORT = "vip_support"
     ROLE_SYSTEM_BOT = "system_bot"
     ROLE_HEAD_SAV = "head_sav"
@@ -100,7 +100,6 @@ class User(AbstractUser):
         (ROLE_SUPERVISOR, "Superviseur / Team Leader"),
         (ROLE_QA, "Qualite / QA SAV"),
         (ROLE_DISPATCHER, "Planificateur / Dispatch"),
-        (ROLE_FIELD_TECHNICIAN, "Technicien terrain"),
         (ROLE_VIP_SUPPORT, "Support VIP / Grands comptes"),
         (ROLE_SYSTEM_BOT, "Systeme automatique (IA / Bot)"),
         (ROLE_HEAD_SAV, "Responsable SAV"),
@@ -124,7 +123,6 @@ class User(AbstractUser):
     TECHNICAL_ROLES = (
         ROLE_TECHNICIAN,
         ROLE_EXPERT,
-        ROLE_FIELD_TECHNICIAN,
     )
     SPECIALIST_ROLES = (
         ROLE_CFAO_MANAGER,
@@ -157,11 +155,14 @@ class User(AbstractUser):
         *LEADERSHIP_ROLES,
     )
     ASSIGNABLE_ROLES = (
-        *FRONTLINE_ROLES,
-        *TECHNICAL_ROLES,
-        *SPECIALIST_ROLES,
+        *STANDARD_SUPPORT_ROLES,
+        *SPECIAL_SUPPORT_ROLES,
+        ROLE_TECHNICIAN,
     )
-    TECHNICIAN_SPACE_ROLES = ASSIGNABLE_ROLES
+    TECHNICIAN_SPACE_ROLES = (
+        *ASSIGNABLE_ROLES,
+        ROLE_EXPERT,
+    )
     REPORTING_ROLES = (
         *LEADERSHIP_ROLES,
         *READ_ONLY_ROLES,
@@ -231,11 +232,38 @@ class User(AbstractUser):
         return full_name or self.username
 
     def save(self, *args, **kwargs):
+        if self.role == self.ROLE_FIELD_TECHNICIAN:
+            self.role = self.ROLE_TECHNICIAN
         if self.role == self.ROLE_ADMIN and not self.is_staff:
             self.is_staff = True
-        if self.role == self.ROLE_CLIENT and self.organization_id and not self.company_name:
+        if (
+            self.role == self.ROLE_CLIENT
+            and self.client_type == "enterprise"
+            and self.organization_id
+            and not self.company_name
+        ):
             self.company_name = self.organization.display_name
         super().save(*args, **kwargs)
+
+    @property
+    def is_ticket_assignment_eligible(self):
+        if not self.is_active:
+            return False
+        if self.role in {*self.STANDARD_SUPPORT_ROLES, *self.SPECIAL_SUPPORT_ROLES}:
+            return True
+        return self.role == self.ROLE_TECHNICIAN and self.technician_status == "available"
+
+    @property
+    def is_ticket_escalation_target(self):
+        return self.role in {
+            self.ROLE_HEAD_SAV,
+            self.ROLE_MANAGER,
+            self.ROLE_ADMIN,
+            self.ROLE_SUPERVISOR,
+            self.ROLE_EXPERT,
+            self.ROLE_CFAO_MANAGER,
+            self.ROLE_CFAO_WORKS,
+        }
 
     @property
     def account_balance(self):
@@ -556,11 +584,8 @@ class Ticket(TimeStampedModel):
         (CATEGORY_BREAKDOWN, "Panne"),
         (CATEGORY_INSTALLATION, "Installation"),
         (CATEGORY_MAINTENANCE, "Maintenance"),
-        (CATEGORY_RETURN, "Retour"),
-        (CATEGORY_REFUND, "Remboursement"),
         (CATEGORY_COMPLAINT, "Reclamation"),
         (CATEGORY_PAYMENT, "Paiement"),
-        (CATEGORY_WITHDRAWAL, "Retrait"),
         (CATEGORY_BUG, "Bug"),
         (CATEGORY_ACCOUNT, "Compte"),
     )
@@ -578,6 +603,13 @@ class Ticket(TimeStampedModel):
         on_delete=models.CASCADE,
         related_name="tickets",
         limit_choices_to={"role": User.ROLE_CLIENT},
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="created_tickets",
+        null=True,
+        blank=True,
     )
     product_label = models.CharField(max_length=255, blank=True)
     product = models.ForeignKey(
@@ -644,6 +676,8 @@ class Ticket(TimeStampedModel):
             self.organization = self.client.organization
         elif self.product_id and self.product.organization_id:
             self.organization = self.product.organization
+        if not self.created_by_id and self.client_id:
+            self.created_by = self.client
         if not self.reference:
             self.reference = self.generate_reference()
         if self.status == self.STATUS_RESOLVED and not self.resolved_at:
