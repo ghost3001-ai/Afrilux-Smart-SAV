@@ -334,7 +334,7 @@ def scope_ticket_queryset(queryset, user):
         }
         if getattr(user, "role", "") in visibility_leadership_roles:
             return queryset
-        return queryset.filter(Q(created_by=user) | Q(assigned_agent=user)).distinct()
+        return queryset.filter(Q(created_by=user) | Q(assigned_agent=user) | Q(interventions__agent=user)).distinct()
     return queryset.filter(client=user)
 
 

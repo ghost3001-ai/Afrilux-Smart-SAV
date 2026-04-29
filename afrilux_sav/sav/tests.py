@@ -23,6 +23,7 @@ from .models import (
     GeneratedReport,
     FinancialTransaction,
     KnowledgeArticle,
+    Intervention,
     Message,
     Notification,
     Organization,
@@ -1850,6 +1851,35 @@ class SavPlatformTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "sav/technician_space.html")
+
+    def test_technician_can_open_ticket_from_today_intervention(self):
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            assigned_agent=self.agent,
+            title="Intervention du jour",
+            description="Le technicien doit pouvoir ouvrir le dossier depuis son espace.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            status=Ticket.STATUS_INTERVENTION_PLANNED,
+            priority=Ticket.PRIORITY_HIGH,
+        )
+        Intervention.objects.create(
+            ticket=ticket,
+            organization=self.organization,
+            agent=self.technician,
+            intervention_type=Intervention.TYPE_ON_SITE,
+            status=Intervention.STATUS_PLANNED,
+            scheduled_for=timezone.now(),
+            location_snapshot="Douala",
+        )
+        self.client.force_login(self.technician)
+
+        workspace_response = self.client.get(reverse("technician-space"))
+        detail_response = self.client.get(reverse("ticket-detail", args=[ticket.pk]))
+
+        self.assertEqual(workspace_response.status_code, 200)
+        self.assertContains(workspace_response, reverse("ticket-detail", args=[ticket.pk]))
+        self.assertEqual(detail_response.status_code, 200)
 
     def test_internal_user_can_create_client_from_register_page(self):
         self.client.force_login(self.manager)
