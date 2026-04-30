@@ -1737,6 +1737,31 @@ class SavPlatformTests(TestCase):
         created_ticket = Ticket.objects.get(title="Ticket pour client existant")
         self.assertEqual(created_ticket.client, self.client_user)
 
+    def test_internal_user_can_create_ticket_with_initial_assignee(self):
+        self.client.force_login(self.manager)
+
+        response = self.client.post(
+            reverse("ticket-create"),
+            {
+                "client_mode": TicketCreateForm.CLIENT_MODE_EXISTING,
+                "existing_client_email": self.client_user.email,
+                "product_label": "Serveur ondule",
+                "assigned_agent": self.agent.pk,
+                "title": "Ticket assigne a la creation",
+                "description": "Creation de ticket avec affectation initiale.",
+                "category": Ticket.CATEGORY_MAINTENANCE,
+                "channel": Ticket.CHANNEL_PHONE,
+                "status": Ticket.STATUS_NEW,
+                "priority": Ticket.PRIORITY_NORMAL,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        created_ticket = Ticket.objects.get(title="Ticket assigne a la creation")
+        self.assertEqual(created_ticket.client, self.client_user)
+        self.assertEqual(created_ticket.assigned_agent, self.agent)
+        self.assertEqual(created_ticket.status, Ticket.STATUS_ASSIGNED)
+
     def test_internal_user_gets_error_when_existing_client_email_is_unknown(self):
         self.client.force_login(self.manager)
 

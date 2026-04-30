@@ -608,11 +608,6 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
 
     def form_valid(self, form):
         form.instance.created_by = self.request.user
-        if self.request.user.role == User.ROLE_VIP_SUPPORT and form.instance.priority in {
-            Ticket.PRIORITY_LOW,
-            Ticket.PRIORITY_NORMAL,
-        }:
-            form.instance.priority = Ticket.PRIORITY_HIGH
         if self.request.user.role == User.ROLE_CLIENT:
             form.instance.client = self.request.user
             form.instance.status = Ticket.STATUS_NEW
@@ -624,15 +619,7 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
             except ValueError as exc:
                 form.add_error("client_email", str(exc))
                 return self.form_invalid(form)
-        if form.instance.assigned_agent_id and (
-            not previous_assigned_agent_id
-            or form.instance.status in {
-                Ticket.STATUS_NEW,
-                Ticket.STATUS_QUALIFICATION,
-                Ticket.STATUS_PENDING_CUSTOMER,
-                Ticket.STATUS_WAITING,
-            }
-        ):
+        if form.instance.assigned_agent_id:
             form.instance.status = Ticket.STATUS_ASSIGNED
 
         response = super().form_valid(form)
