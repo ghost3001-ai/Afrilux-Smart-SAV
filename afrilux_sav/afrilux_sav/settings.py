@@ -102,12 +102,17 @@ for derived_host in {RENDER_EXTERNAL_HOSTNAME, _hostname_from_url(SAV_PUBLIC_BAS
     if derived_host and derived_host not in ALLOWED_HOSTS:
         ALLOWED_HOSTS.append(derived_host)
 SERVE_STATIC_LOCAL = _env_bool("DJANGO_SERVE_STATIC_LOCAL", bool(os.getenv("RENDER")))
-USE_MANIFEST_STATIC_STORAGE = (
+USE_WHITENOISE_STATIC_STORAGE = (
     SERVE_STATIC_LOCAL
     and not DEBUG
     and "runserver" not in sys.argv
     and "test" not in sys.argv
 )
+USE_MANIFEST_STATIC_STORAGE = (
+    USE_WHITENOISE_STATIC_STORAGE
+    and _env_bool("DJANGO_USE_MANIFEST_STATIC_STORAGE", False)
+)
+WHITENOISE_MANIFEST_STRICT = _env_bool("WHITENOISE_MANIFEST_STRICT", False)
 
 
 # Application definition
@@ -250,7 +255,11 @@ STORAGES = {
         "BACKEND": (
             "whitenoise.storage.CompressedManifestStaticFilesStorage"
             if USE_MANIFEST_STATIC_STORAGE
-            else "django.contrib.staticfiles.storage.StaticFilesStorage"
+            else (
+                "whitenoise.storage.CompressedStaticFilesStorage"
+                if USE_WHITENOISE_STATIC_STORAGE
+                else "django.contrib.staticfiles.storage.StaticFilesStorage"
+            )
         ),
     },
 }
