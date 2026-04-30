@@ -243,20 +243,19 @@ class SavPlatformTests(TestCase):
             client=self.client_user,
             product=self.product,
             assigned_agent=self.agent,
-            title="Reclamation cloturee",
-            description="Plainte client resolue.",
-            category=Ticket.CATEGORY_COMPLAINT,
+            title="Bug cloture",
+            description="Incident logiciel resolu.",
+            category=Ticket.CATEGORY_BUG,
             status=Ticket.STATUS_RESOLVED,
             priority=Ticket.PRIORITY_HIGH,
-            suspected_fraud=True,
         )
         Ticket.objects.filter(pk=ticket.pk).update(created_at=timezone.now() - timedelta(hours=6))
 
         response = self.api.get(reverse("sav_api:dashboard"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["complaints_total"], 1)
-        self.assertEqual(response.data["fraud_suspected_open"], 0)
+        self.assertEqual(response.data["bug_total"], 1)
+        self.assertEqual(response.data["maintenance_total"], 0)
         self.assertAlmostEqual(response.data["average_resolution_hours"], 6.0, places=1)
         self.assertEqual(response.data["top_agents"][0]["agent_name"], str(self.agent))
 
@@ -396,16 +395,15 @@ class SavPlatformTests(TestCase):
         self.assertEqual(response.data[0]["id"], self.client_user.id)
         self.assertEqual(response.data[0]["organization_name"], self.organization.display_name)
 
-    def test_ticket_queryset_can_filter_suspected_fraud(self):
+    def test_ticket_queryset_ignores_removed_fraud_filter(self):
         Ticket.objects.create(
             client=self.client_user,
             product=self.product,
-            title="Paiement frauduleux",
-            description="Je signale une fraude sur la transaction.",
-            category=Ticket.CATEGORY_COMPLAINT,
+            title="Bug applicatif",
+            description="Je signale une erreur dans l'application.",
+            category=Ticket.CATEGORY_BUG,
             status=Ticket.STATUS_NEW,
             priority=Ticket.PRIORITY_HIGH,
-            suspected_fraud=True,
         )
         Ticket.objects.create(
             client=self.client_user,
@@ -420,8 +418,9 @@ class SavPlatformTests(TestCase):
         response = self.api.get(reverse("sav_api:ticket-list"), {"suspected_fraud": "true"})
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
-        self.assertTrue(response.data[0]["suspected_fraud"])
+        payload = response.data["results"] if isinstance(response.data, dict) and "results" in response.data else response.data
+        self.assertEqual(len(payload), 2)
+        self.assertNotIn("suspected_fraud", payload[0])
 
     def test_analytics_ask_answers_about_critical_tickets(self):
         Ticket.objects.create(
@@ -636,13 +635,21 @@ class SavPlatformTests(TestCase):
             ).exists()
         )
 
-    def test_manager_can_credit_account_via_api(self):
+    def test_admin_can_credit_account_via_api(self):
+        admin_user = User.objects.create_user(
+            username="admin_credit",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_ADMIN,
+            is_staff=True,
+        )
+        self.api.force_authenticate(user=admin_user)
         ticket = Ticket.objects.create(
             client=self.client_user,
             product=self.product,
             title="Demande geste commercial",
             description="Le client demande un credit sur son compte.",
-            category=Ticket.CATEGORY_REFUND,
+            category=Ticket.CATEGORY_BREAKDOWN,
             status=Ticket.STATUS_IN_PROGRESS,
             priority=Ticket.PRIORITY_HIGH,
         )
@@ -664,7 +671,7 @@ class SavPlatformTests(TestCase):
         self.assertEqual(AccountCredit.objects.filter(ticket=ticket).count(), 1)
         credit = AccountCredit.objects.get(ticket=ticket)
         self.assertEqual(str(credit.amount), "15000.00")
-        self.assertEqual(credit.executed_by, self.manager)
+        self.assertEqual(credit.executed_by, admin_user)
         self.assertTrue(WorkflowExecution.objects.filter(ticket=ticket, trigger_event="account_credit").exists())
         self.assertTrue(
             Notification.objects.filter(ticket=ticket, recipient=self.client_user, event_type="account_credit").exists()
@@ -672,6 +679,30 @@ class SavPlatformTests(TestCase):
         self.assertTrue(
             Message.objects.filter(ticket=ticket, direction=Message.DIRECTION_OUTBOUND, content__icontains="15000.00").exists()
         )
+
+    def test_support_cannot_credit_account_via_api(self):
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            title="Demande geste commercial",
+            description="Le credit compte est reserve a l'administrateur.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            status=Ticket.STATUS_IN_PROGRESS,
+            priority=Ticket.PRIORITY_HIGH,
+        )
+
+        response = self.api.post(
+            reverse("sav_api:ticket-credit-account", args=[ticket.pk]),
+            {
+                "amount": "15000.00",
+                "currency": "XAF",
+                "reason": "Geste commercial SAV",
+                "note": "Credit demande par le support.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(AccountCredit.objects.filter(ticket=ticket).exists())
 
     def test_device_registration_endpoint_registers_token(self):
         response = self.api.post(
@@ -708,8 +739,8 @@ class SavPlatformTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         technician_rows = {row["status"]: row["total"] for row in response.data["technician_status_breakdown"]}
-        self.assertEqual(sum(technician_rows.values()), 5)
-        self.assertEqual(technician_rows["available"], 5)
+        self.assertEqual(sum(technician_rows.values()), 3)
+        self.assertEqual(technician_rows["available"], 3)
 
     def test_api_docs_page_renders(self):
         response = self.client.get(reverse("api-docs"))
@@ -796,7 +827,7 @@ class SavPlatformTests(TestCase):
             product=self.product,
             title="Ticket organisation A",
             description="Visible pour le manager A.",
-            category=Ticket.CATEGORY_COMPLAINT,
+            category=Ticket.CATEGORY_MAINTENANCE,
             status=Ticket.STATUS_NEW,
             priority=Ticket.PRIORITY_HIGH,
         )
@@ -805,7 +836,7 @@ class SavPlatformTests(TestCase):
             product=self.other_product,
             title="Ticket organisation B",
             description="Ne doit pas etre visible pour le manager A.",
-            category=Ticket.CATEGORY_COMPLAINT,
+            category=Ticket.CATEGORY_MAINTENANCE,
             status=Ticket.STATUS_NEW,
             priority=Ticket.PRIORITY_HIGH,
         )
@@ -814,7 +845,7 @@ class SavPlatformTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["tickets_total"], 1)
-        self.assertEqual(response.data["complaints_total"], 1)
+        self.assertEqual(response.data["maintenance_total"], 1)
         self.assertEqual(response.data["organization_name"], self.organization.display_name)
 
     def test_me_endpoint_exposes_verification_and_balance(self):
@@ -870,9 +901,9 @@ class SavPlatformTests(TestCase):
         response = self.api.post(reverse("sav_api:ticket-take-ownership", args=[ticket.pk]), {})
         ticket.refresh_from_db()
 
-        self.assertEqual(response.status_code, 404)
-        self.assertIsNone(ticket.assigned_agent)
-        self.assertEqual(ticket.status, Ticket.STATUS_NEW)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ticket.assigned_agent, self.agent)
+        self.assertEqual(ticket.status, Ticket.STATUS_ASSIGNED)
 
     def test_client_can_reopen_resolved_ticket(self):
         ticket = Ticket.objects.create(
@@ -880,7 +911,7 @@ class SavPlatformTests(TestCase):
             product=self.product,
             title="Ticket resolu",
             description="Le client souhaite rouvrir le dossier.",
-            category=Ticket.CATEGORY_COMPLAINT,
+            category=Ticket.CATEGORY_BREAKDOWN,
             status=Ticket.STATUS_RESOLVED,
             priority=Ticket.PRIORITY_NORMAL,
             resolved_at=timezone.now(),
@@ -1563,12 +1594,12 @@ class SavPlatformTests(TestCase):
 
         self.assertRedirects(response, reverse("support-page"))
 
-    def test_workspace_redirects_dispatcher_to_planning_page(self):
+    def test_workspace_redirects_dispatcher_to_ticket_list_with_mine_filter(self):
         self.client.force_login(self.dispatcher)
 
         response = self.client.get(reverse("workspace"))
 
-        self.assertRedirects(response, reverse("planning-page"))
+        self.assertRedirects(response, f"{reverse('ticket-list')}?assignment=mine")
 
     def test_workspace_redirects_support_to_ticket_list_with_mine_filter(self):
         self.client.force_login(self.agent)
@@ -1655,8 +1686,6 @@ class SavPlatformTests(TestCase):
         self.assertNotIsInstance(form.fields["existing_client_email"].widget, HiddenInput)
         self.assertIsInstance(form.fields["client"].widget, HiddenInput)
         self.assertFalse(form.fields["client"].required)
-        self.assertIsInstance(form.fields["related_transaction"].widget, HiddenInput)
-        self.assertFalse(form.fields["related_transaction"].required)
         self.assertNotIsInstance(form.fields["client_name"].widget, HiddenInput)
         self.assertNotIsInstance(form.fields["client_email"].widget, HiddenInput)
         self.assertNotIsInstance(form.fields["client_password1"].widget, HiddenInput)
@@ -1682,7 +1711,7 @@ class SavPlatformTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.context["form"].errors["existing_client_email"],
-            ["L'email du client existant est obligatoire."],
+            ["La recherche du client existant est obligatoire."],
         )
         self.assertFalse(Ticket.objects.filter(title="Ticket sans email client").exists())
 
@@ -1727,7 +1756,7 @@ class SavPlatformTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Aucun client existant ne correspond a cet email.")
+        self.assertContains(response, "Aucun client existant ne correspond a cette recherche.")
         self.assertFalse(Ticket.objects.filter(title="Ticket client inconnu").exists())
 
     def test_internal_user_can_create_ticket_and_client_in_one_flow(self):

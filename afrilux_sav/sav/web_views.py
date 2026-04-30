@@ -60,17 +60,19 @@ from .services import (
     compute_ticket_sla_deadline,
     compute_ticket_volume_series,
     credit_account_for_ticket,
+    create_notification,
     ensure_assignment_intervention,
     escalate_ticket,
     generate_intervention_pdf,
     has_backoffice_access,
     has_reporting_access,
     has_technician_space_access,
+    is_admin_user,
     is_internal_user,
     is_manager_user,
     is_read_only_user,
+    is_support_user,
     log_audit_event,
-    maybe_flag_ticket_as_fraud,
     scope_audit_log_queryset,
     scope_equipment_category_queryset,
     run_automation_rules_for_ticket,
@@ -100,17 +102,21 @@ def _percentage(value, total):
     return round((value / total) * 100, 1)
 
 
+def _ticket_status_from_intervention(intervention):
+    if intervention.status == Intervention.STATUS_DONE or intervention.finished_at:
+        return Ticket.STATUS_INTERVENTION_DONE
+    if intervention.status == Intervention.STATUS_IN_PROGRESS or intervention.started_at:
+        return Ticket.STATUS_IN_PROGRESS_N2
+    if intervention.status == Intervention.STATUS_CANCELLED:
+        return Ticket.STATUS_WAITING
+    if intervention.scheduled_for:
+        return Ticket.STATUS_INTERVENTION_PLANNED
+    return Ticket.STATUS_ASSIGNED if intervention.ticket.assigned_agent_id else Ticket.STATUS_NEW
+
+
 def _workspace_redirect_url(user):
     workspace_name = role_workspace_name(user)
-    if workspace_name == "ticket-list" and user.role in {
-        User.ROLE_SUPPORT,
-        User.ROLE_AGENT,
-        User.ROLE_VIP_SUPPORT,
-        User.ROLE_CFAO_MANAGER,
-        User.ROLE_CFAO_WORKS,
-        User.ROLE_HVAC_MANAGER,
-        User.ROLE_SOFTWARE_OWNER,
-    }:
+    if workspace_name == "ticket-list" and is_support_user(user):
         return f"{reverse(workspace_name)}?assignment=mine"
     return reverse(workspace_name)
 
@@ -142,8 +148,8 @@ def _dashboard_snapshot(user):
         "tickets_overdue": open_tickets.filter(sla_deadline__lt=timezone.now()).count(),
         "tickets_critical_open": open_tickets.filter(priority=Ticket.PRIORITY_CRITICAL).count(),
         "tickets_unassigned": open_tickets.filter(assigned_agent__isnull=True).count(),
-        "complaints_total": tickets.filter(category=Ticket.CATEGORY_COMPLAINT).count(),
-        "fraud_suspected_open": open_tickets.filter(suspected_fraud=True).count(),
+        "maintenance_total": tickets.filter(category=Ticket.CATEGORY_MAINTENANCE).count(),
+        "bug_total": tickets.filter(category=Ticket.CATEGORY_BUG).count(),
         "products_total": products.count(),
         "products_under_warranty": products.filter(warranty_end__gte=timezone.localdate()).count(),
         "alerts_open": alerts.filter(status__in=[PredictiveAlert.STATUS_OPEN, PredictiveAlert.STATUS_IN_PROGRESS]).count(),
@@ -538,8 +544,6 @@ class TicketListView(LoginRequiredMixin, ListView):
             queryset = queryset.filter(priority=priority_filter)
         if focus_filter == "urgent":
             queryset = queryset.filter(priority__in=[Ticket.PRIORITY_HIGH, Ticket.PRIORITY_CRITICAL])
-        if focus_filter == "fraud":
-            queryset = queryset.filter(suspected_fraud=True)
         if assignment_filter == "mine" and is_internal_user(self.request.user):
             queryset = queryset.filter(assigned_agent=self.request.user)
         if assignment_filter == "unassigned" and is_internal_user(self.request.user):
@@ -558,6 +562,7 @@ class TicketListView(LoginRequiredMixin, ListView):
         }
         context["status_choices"] = Ticket.STATUS_CHOICES
         context["priority_choices"] = Ticket.PRIORITY_CHOICES
+        context["can_create_ticket"] = can_create_ticket(self.request.user)
         return context
 
 
@@ -611,12 +616,24 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
         if self.request.user.role == User.ROLE_CLIENT:
             form.instance.client = self.request.user
             form.instance.status = Ticket.STATUS_NEW
+            form.instance.priority = Ticket.PRIORITY_NORMAL
+            form.instance.assigned_agent = None
         else:
             try:
                 form.instance.client = form.resolve_ticket_client()
             except ValueError as exc:
                 form.add_error("client_email", str(exc))
                 return self.form_invalid(form)
+        if form.instance.assigned_agent_id and (
+            not previous_assigned_agent_id
+            or form.instance.status in {
+                Ticket.STATUS_NEW,
+                Ticket.STATUS_QUALIFICATION,
+                Ticket.STATUS_PENDING_CUSTOMER,
+                Ticket.STATUS_WAITING,
+            }
+        ):
+            form.instance.status = Ticket.STATUS_ASSIGNED
 
         response = super().form_valid(form)
 
@@ -638,7 +655,6 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
             log_audit_event(self.request.user, "ticket_attachment_created_web", attachment, {"ticket": self.object.reference})
 
         log_audit_event(self.request.user, "ticket_created_web", self.object, {"via": "portal"})
-        maybe_flag_ticket_as_fraud(self.object)
         run_automation_rules_for_ticket(self.object, actor=self.request.user)
         django_messages.success(self.request, f"Ticket {self.object.reference} cree avec succes.")
         return response
@@ -652,6 +668,12 @@ class TicketUpdateView(LoginRequiredMixin, InternalRequiredMixin, UpdateView):
     form_class = TicketForm
     template_name = "sav/ticket_form.html"
 
+    def dispatch(self, request, *args, **kwargs):
+        if not (is_support_user(request.user) or is_admin_user(request.user)):
+            django_messages.error(request, "Seul le support peut modifier directement un ticket.")
+            return redirect("ticket-detail", pk=kwargs["pk"])
+        return super().dispatch(request, *args, **kwargs)
+
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
         kwargs["user"] = self.request.user
@@ -660,6 +682,8 @@ class TicketUpdateView(LoginRequiredMixin, InternalRequiredMixin, UpdateView):
     def form_valid(self, form):
         previous_status = self.get_object().status
         previous_assigned_agent_id = self.get_object().assigned_agent_id
+        if form.instance.assigned_agent_id:
+            form.instance.status = Ticket.STATUS_ASSIGNED
         response = super().form_valid(form)
         if self.object.is_open:
             self.object.sla_deadline = compute_ticket_sla_deadline(self.object.priority, organization=self.object.organization)
@@ -667,7 +691,6 @@ class TicketUpdateView(LoginRequiredMixin, InternalRequiredMixin, UpdateView):
         if self.object.assigned_agent_id and self.object.assigned_agent_id != previous_assigned_agent_id:
             ensure_assignment_intervention(self.object, actor=self.request.user, note="Affectation mise a jour depuis le portail.")
         log_audit_event(self.request.user, "ticket_updated_web", self.object, {"via": "portal"})
-        maybe_flag_ticket_as_fraud(self.object)
         notify_ticket_status_change(self.object, previous_status, actor=self.request.user)
         run_automation_rules_for_ticket(self.object, actor=self.request.user)
         django_messages.success(self.request, f"Ticket {self.object.reference} mis a jour.")
@@ -684,7 +707,7 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
 
     def get_queryset(self):
         return scope_ticket_queryset(
-            Ticket.objects.select_related("client", "product", "assigned_agent", "related_transaction", "feedback").prefetch_related(
+            Ticket.objects.select_related("client", "product", "assigned_agent", "feedback").prefetch_related(
                 "messages",
                 "attachments",
                 "client__contacts",
@@ -702,8 +725,14 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         ticket = self.object
-        can_participate = not is_read_only_user(self.request.user)
-        context["message_form"] = MessageForm(user=self.request.user)
+        user = self.request.user
+        can_support_edit = is_support_user(user) or is_admin_user(user)
+        is_assigned_technician = user.role == User.ROLE_TECHNICIAN and ticket.assigned_agent_id == user.id
+        can_participate = (
+            not is_read_only_user(user)
+            and (user.role == User.ROLE_CLIENT and ticket.client_id == user.id or can_support_edit)
+        )
+        context["message_form"] = MessageForm(user=user, ticket=ticket)
         context["attachment_form"] = TicketAttachmentForm()
         context["product_alerts"] = (
             ticket.product.predictive_alerts.order_by("-created_at")[:5] if ticket.product else []
@@ -723,23 +752,25 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         context["ai_actions"] = ticket.ai_actions.order_by("-created_at")
         context["visible_messages"] = scope_message_queryset(ticket.messages.all(), self.request.user)
         context["attachments"] = scope_attachment_queryset(ticket.attachments.all(), self.request.user)
-        context["account_credits"] = ticket.account_credits.order_by("-executed_at")
+        context["account_credits"] = ticket.account_credits.order_by("-executed_at") if is_admin_user(user) else []
         context["can_participate"] = can_participate
-        context["can_edit"] = is_internal_user(self.request.user)
-        context["can_credit_account"] = is_manager_user(self.request.user)
-        context["can_escalate"] = is_internal_user(self.request.user) and ticket.status in OPEN_TICKET_STATUSES
+        context["can_edit"] = can_support_edit
+        context["can_add_intervention"] = can_support_edit or is_assigned_technician
+        context["can_credit_account"] = is_admin_user(user)
+        context["can_escalate"] = can_support_edit and ticket.status in OPEN_TICKET_STATUSES
         context["escalation_form"] = TicketEscalationForm()
         context["can_confirm_resolution"] = (
             ticket.status == Ticket.STATUS_RESOLVED
-            and (self.request.user.role == User.ROLE_CLIENT and ticket.client_id == self.request.user.id)
+            and (user.role == User.ROLE_CLIENT and ticket.client_id == user.id)
         )
         context["can_reopen"] = can_participate and ticket.status in {Ticket.STATUS_RESOLVED, Ticket.STATUS_CLOSED}
         context["client_contacts"] = ticket.client.contacts.order_by("-is_primary", "first_name", "last_name")[:8]
         context["assignment_history"] = ticket.assignment_history.select_related("technician", "assigned_by").all()[:12]
         context["intervention_form"] = InterventionForm(
-            user=self.request.user,
+            user=user,
+            ticket=ticket,
             initial={
-                "agent": ticket.assigned_agent or (self.request.user if is_internal_user(self.request.user) else None),
+                "agent": ticket.assigned_agent or (user if is_internal_user(user) else None),
                 "status": Intervention.STATUS_PLANNED,
                 "scheduled_for": timezone.now(),
                 "location_snapshot": ticket.location,
@@ -867,7 +898,7 @@ class TicketMessageCreateView(LoginRequiredMixin, View):
         if is_read_only_user(request.user):
             django_messages.error(request, "Le profil lecture seule est limite a la consultation.")
             return redirect("ticket-detail", pk=pk)
-        form = MessageForm(request.POST, user=request.user)
+        form = MessageForm(request.POST, user=request.user, ticket=ticket)
         if not form.is_valid():
             django_messages.error(request, "Impossible d'ajouter le message. Verifiez les champs.")
             return redirect("ticket-detail", pk=pk)
@@ -878,6 +909,7 @@ class TicketMessageCreateView(LoginRequiredMixin, View):
         message = form.save(commit=False)
         message.ticket = ticket
         message.sender = request.user
+        message.recipient = form.cleaned_data.get("recipient")
         message.direction = direction
         message.channel = form.cleaned_data["channel"] if is_internal_user(request.user) else Message.CHANNEL_PORTAL
         message.message_type = message_type
@@ -888,7 +920,15 @@ class TicketMessageCreateView(LoginRequiredMixin, View):
             ticket.first_response_at = timezone.now()
             ticket.save(update_fields=["first_response_at", "updated_at"])
 
-        if direction == Message.DIRECTION_OUTBOUND and message_type == Message.TYPE_PUBLIC:
+        if message.recipient_id:
+            create_notification(
+                recipient=message.recipient,
+                subject=f"{ticket.reference} - Nouveau message",
+                message=message.content,
+                event_type="ticket_message",
+                ticket=ticket,
+            )
+        elif direction == Message.DIRECTION_OUTBOUND and message_type == Message.TYPE_PUBLIC:
             create_message_delivery_notifications(message)
 
         log_audit_event(request.user, "ticket_message_created_web", message, {"ticket": ticket.reference})
@@ -929,7 +969,10 @@ class TicketAttachmentCreateView(LoginRequiredMixin, View):
 class TicketInterventionCreateView(LoginRequiredMixin, InternalRequiredMixin, View):
     def post(self, request, pk):
         ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
-        form = InterventionForm(request.POST, request.FILES, user=request.user)
+        if request.user.role == User.ROLE_TECHNICIAN and ticket.assigned_agent_id != request.user.id:
+            django_messages.error(request, "Vous ne pouvez intervenir que sur les tickets qui vous sont affectes.")
+            return redirect("ticket-detail", pk=pk)
+        form = InterventionForm(request.POST, request.FILES, user=request.user, ticket=ticket)
         if not form.is_valid():
             django_messages.error(request, "Impossible d'enregistrer l'intervention. Verifiez les champs saisis.")
             return redirect("ticket-detail", pk=pk)
@@ -937,6 +980,9 @@ class TicketInterventionCreateView(LoginRequiredMixin, InternalRequiredMixin, Vi
         intervention = form.save(commit=False)
         intervention.ticket = ticket
         intervention.organization = ticket.organization
+        if request.user.role == User.ROLE_TECHNICIAN:
+            intervention.agent = request.user
+            intervention.intervention_type = Intervention.TYPE_ON_SITE
         if not intervention.location_snapshot:
             intervention.location_snapshot = ticket.location
         intervention.save()
@@ -951,6 +997,12 @@ class TicketInterventionCreateView(LoginRequiredMixin, InternalRequiredMixin, Vi
             )
 
         generate_intervention_pdf(intervention)
+        previous_status = ticket.status
+        next_status = _ticket_status_from_intervention(intervention)
+        if next_status != previous_status:
+            ticket.status = next_status
+            ticket.save(update_fields=["status", "updated_at"])
+            notify_ticket_status_change(ticket, previous_status, actor=request.user)
         log_audit_event(request.user, "intervention_created_web", intervention, {"ticket": ticket.reference})
         django_messages.success(request, "Intervention enregistree et bon PDF genere.")
         return redirect("ticket-detail", pk=pk)
@@ -974,7 +1026,7 @@ class TicketAutomationRunView(LoginRequiredMixin, InternalRequiredMixin, View):
         return redirect("ticket-detail", pk=pk)
 
 
-class TicketCreditAccountView(LoginRequiredMixin, ManagerRequiredMixin, View):
+class TicketCreditAccountView(LoginRequiredMixin, AdminRequiredMixin, View):
     def post(self, request, pk):
         ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
         form = CreditAccountForm(request.POST)

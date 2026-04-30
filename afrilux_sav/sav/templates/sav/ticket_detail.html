@@ -12,9 +12,6 @@
             <span class="badge badge--{{ ticket.priority|badge_tone }}">{{ ticket.get_priority_display }}</span>
             <span class="badge badge--{{ ticket.status|badge_tone }}">{{ ticket.get_status_display }}</span>
             <span class="badge badge--neutral">{{ ticket.get_channel_display }}</span>
-            {% if ticket.suspected_fraud %}
-                <span class="badge badge--warning">Fraude suspectee</span>
-            {% endif %}
         </div>
     </div>
     <div class="hero__actions">
@@ -78,10 +75,6 @@
             <div><dt>Canal d'entree</dt><dd>{{ ticket.get_channel_display }}</dd></div>
             <div><dt>Localisation</dt><dd>{{ ticket.location|default:"Non renseignee" }}</dd></div>
             <div><dt>NINEA / RC</dt><dd>{{ ticket.client.tax_identifier|default:"-" }}</dd></div>
-            {% if ticket.related_transaction %}
-                <div><dt>Transaction</dt><dd>{{ ticket.related_transaction.external_reference|default:ticket.related_transaction.provider_reference|default:ticket.related_transaction.pk }}</dd></div>
-                <div><dt>Montant</dt><dd>{{ ticket.related_transaction.amount }} {{ ticket.related_transaction.currency }}</dd></div>
-            {% endif %}
             <div class="detail-grid__full"><dt>Adresse client</dt><dd>{{ ticket.client.address|default:"Non renseignee" }}</dd></div>
             <div class="detail-grid__full"><dt>Description</dt><dd>{{ ticket.description }}</dd></div>
             {% if ticket.resolution_summary %}
@@ -175,6 +168,9 @@
                 <div class="timeline__item">
                     <div class="timeline__head">
                         <strong>{{ message.sender }}</strong>
+                        {% if message.recipient %}
+                            <span class="badge badge--neutral">Vers {{ message.recipient }}</span>
+                        {% endif %}
                         <span class="badge badge--{{ message.message_type|badge_tone }}">{{ message.get_message_type_display }}</span>
                     </div>
                     <p>{{ message.content }}</p>
@@ -208,10 +204,10 @@
         </div>
         {% for attachment in attachments %}
             <div class="list-row">
-                <div>
-                    <strong><a href="{{ attachment.file.url }}" target="_blank" rel="noopener">{{ attachment.original_name|default:"Fichier" }}</a></strong>
-                    <p>{{ attachment.get_kind_display }}{% if attachment.note %} · {{ attachment.note }}{% endif %}</p>
-                </div>
+	                <div>
+	                    <strong><a href="{{ attachment.file.url }}" target="_blank" rel="noopener">{{ attachment.original_name|default:"Fichier" }}</a></strong>
+	                    <p>{{ attachment.get_kind_display }} · par {{ attachment.uploaded_by|default:"Systeme" }}{% if attachment.note %} · {{ attachment.note }}{% endif %}</p>
+	                </div>
                 <span class="badge badge--neutral">{{ attachment.created_at|date:"d/m H:i" }}</span>
             </div>
         {% empty %}
@@ -233,44 +229,46 @@
         {% endif %}
     </article>
 
-    <article class="card">
-        <div class="section-head">
-            <p class="eyebrow">Actions metier</p>
-            <h2>Credits compte</h2>
-        </div>
-        {% for credit in account_credits %}
-            <div class="list-row">
-                <div>
-                    <strong>{% if credit.currency == "XAF" %}{{ credit.amount|currency_xaf }}{% else %}{{ credit.amount }} {{ credit.currency }}{% endif %}</strong>
-                    <p>{{ credit.reason }}{% if credit.note %} · {{ credit.note|truncatechars:80 }}{% endif %}</p>
-                </div>
-                <span class="badge badge--success">{{ credit.executed_at|date:"d/m H:i" }}</span>
-            </div>
-        {% empty %}
-            <p class="muted">Aucun credit compte execute sur ce dossier.</p>
-        {% endfor %}
-        {% if ticket.feedback %}
-            <hr class="divider">
-            <div class="mini-card">
-                <strong>Feedback client: {{ ticket.feedback.rating }}/5</strong>
-                <p>{{ ticket.feedback.comment|default:"Aucun commentaire" }}</p>
-            </div>
-        {% endif %}
-        {% if can_credit_account %}
-            <hr class="divider">
-            <form method="post" action="{% url 'ticket-credit-account' ticket.pk %}" class="form-grid">
-                {% csrf_token %}
-                {% for field in credit_form %}
-                    <label class="field {% if field.name == 'note' %}field--full{% endif %}">
-                        <span>{{ field.label }}</span>
-                        {{ field }}
-                        {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
-                    </label>
-                {% endfor %}
-                <button class="button button--primary" type="submit">Crediter le compte</button>
-            </form>
-        {% endif %}
-    </article>
+	    {% if ticket.feedback or can_credit_account %}
+	        <article class="card">
+	            <div class="section-head">
+	                <p class="eyebrow">Actions metier</p>
+	                <h2>{% if can_credit_account %}Credits compte{% else %}Feedback client{% endif %}</h2>
+	            </div>
+	            {% if can_credit_account %}
+	                {% for credit in account_credits %}
+	                    <div class="list-row">
+	                        <div>
+	                            <strong>{% if credit.currency == "XAF" %}{{ credit.amount|currency_xaf }}{% else %}{{ credit.amount }} {{ credit.currency }}{% endif %}</strong>
+	                            <p>{{ credit.reason }}{% if credit.note %} · {{ credit.note|truncatechars:80 }}{% endif %}</p>
+	                        </div>
+	                        <span class="badge badge--success">{{ credit.executed_at|date:"d/m H:i" }}</span>
+	                    </div>
+	                {% empty %}
+	                    <p class="muted">Aucun credit compte execute sur ce dossier.</p>
+	                {% endfor %}
+	                <hr class="divider">
+	                <form method="post" action="{% url 'ticket-credit-account' ticket.pk %}" class="form-grid">
+	                    {% csrf_token %}
+	                    {% for field in credit_form %}
+	                        <label class="field {% if field.name == 'note' %}field--full{% endif %}">
+	                            <span>{{ field.label }}</span>
+	                            {{ field }}
+	                            {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
+	                        </label>
+	                    {% endfor %}
+	                    <button class="button button--primary" type="submit">Crediter le compte</button>
+	                </form>
+	            {% endif %}
+	            {% if ticket.feedback %}
+	                {% if can_credit_account %}<hr class="divider">{% endif %}
+	                <div class="mini-card">
+	                    <strong>Feedback client: {{ ticket.feedback.rating }}/5</strong>
+	                    <p>{{ ticket.feedback.comment|default:"Aucun commentaire" }}</p>
+	                </div>
+	            {% endif %}
+	        </article>
+	    {% endif %}
 
     <article class="card">
         <div class="section-head">
@@ -313,9 +311,9 @@
         {% empty %}
             <p class="muted">Aucune intervention rattachee.</p>
         {% endfor %}
-        {% if can_edit %}
-            <hr class="divider">
-            <form method="post" action="{% url 'ticket-intervention-create' ticket.pk %}" enctype="multipart/form-data" class="form-grid">
+	        {% if can_add_intervention %}
+	            <hr class="divider">
+	            <form method="post" action="{% url 'ticket-intervention-create' ticket.pk %}" enctype="multipart/form-data" class="form-grid">
                 {% csrf_token %}
                 {% for field in intervention_form %}
                     <label class="field {% if field.name == 'diagnosis' or field.name == 'technical_report' or field.name == 'parts_used' or field.name == 'structured_parts_used' or field.name == 'intervention_media' %}field--full{% endif %}">
@@ -358,11 +356,11 @@
         {% endfor %}
         <hr class="divider">
         {% for offer in offers %}
-            <div class="mini-card">
-                <strong>{{ offer.title }}</strong>
-                <p>{{ offer.description }}</p>
-                <small>{{ offer.price|currency_xaf }} · {{ offer.get_status_display }}</small>
-            </div>
+	            <div class="mini-card">
+	                <strong>{{ offer.title }}</strong>
+	                <p>{{ offer.description }}</p>
+	                <small>{{ offer.get_status_display }}</small>
+	            </div>
         {% empty %}
             <p class="muted">Aucune offre contextuelle sur ce ticket.</p>
         {% endfor %}

@@ -30,7 +30,7 @@ from .models import (
     User,
     WorkflowExecution,
 )
-from .services import generate_client_username, provision_client_account, scope_message_queryset
+from .services import generate_client_username, is_admin_user, provision_client_account, scope_message_queryset
 
 MAX_TICKET_ATTACHMENT_BYTES = 10 * 1024 * 1024
 
@@ -431,6 +431,7 @@ class ProductSerializer(serializers.ModelSerializer):
 
 class MessageInlineSerializer(serializers.ModelSerializer):
     sender_name = serializers.SerializerMethodField()
+    recipient_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
@@ -438,6 +439,8 @@ class MessageInlineSerializer(serializers.ModelSerializer):
             "id",
             "sender",
             "sender_name",
+            "recipient",
+            "recipient_name",
             "message_type",
             "channel",
             "direction",
@@ -450,6 +453,7 @@ class MessageInlineSerializer(serializers.ModelSerializer):
             "id",
             "sender",
             "sender_name",
+            "recipient_name",
             "sentiment_score",
             "ai_summary",
             "created_at",
@@ -457,6 +461,11 @@ class MessageInlineSerializer(serializers.ModelSerializer):
 
     def get_sender_name(self, obj):
         return str(obj.sender)
+
+    def get_recipient_name(self, obj):
+        if not obj.recipient:
+            return None
+        return str(obj.recipient)
 
 
 class MessageSerializer(MessageInlineSerializer):
@@ -559,7 +568,6 @@ class InterventionInlineSerializer(serializers.ModelSerializer):
             "client_signature_file",
             "report_pdf",
             "report_generated_at",
-            "cost",
             "media",
             "created_at",
         ]
@@ -881,7 +889,6 @@ class FinancialTransactionSerializer(serializers.ModelSerializer):
             "signed_amount",
             "currency",
             "status",
-            "suspected_fraud",
             "description",
             "metadata",
             "occurred_at",
@@ -1051,16 +1058,12 @@ class TicketSerializer(serializers.ModelSerializer):
     assigned_agent_name = serializers.SerializerMethodField()
     organization_name = serializers.CharField(source="organization.display_name", read_only=True)
     product_name = serializers.CharField(source="product_display_name", read_only=True)
-    related_transaction_reference = serializers.CharField(source="related_transaction.external_reference", read_only=True)
-    related_transaction_type = serializers.CharField(source="related_transaction.transaction_type", read_only=True)
-    related_transaction_amount = serializers.CharField(source="related_transaction.amount", read_only=True)
-    related_transaction_currency = serializers.CharField(source="related_transaction.currency", read_only=True)
     is_overdue = serializers.BooleanField(read_only=True)
     messages = serializers.SerializerMethodField()
     attachments = TicketAttachmentSerializer(many=True, read_only=True)
     interventions = InterventionInlineSerializer(many=True, read_only=True)
     support_sessions = SupportSessionInlineSerializer(many=True, read_only=True)
-    account_credits = AccountCreditInlineSerializer(many=True, read_only=True)
+    account_credits = serializers.SerializerMethodField()
     assignment_history = TicketAssignmentSerializer(many=True, read_only=True)
     feedback = TicketFeedbackSerializer(read_only=True)
 
@@ -1076,11 +1079,6 @@ class TicketSerializer(serializers.ModelSerializer):
             "product_label",
             "product",
             "product_name",
-            "related_transaction",
-            "related_transaction_reference",
-            "related_transaction_type",
-            "related_transaction_amount",
-            "related_transaction_currency",
             "assigned_agent",
             "assigned_agent_name",
             "title",
@@ -1090,7 +1088,6 @@ class TicketSerializer(serializers.ModelSerializer):
             "channel",
             "status",
             "priority",
-            "suspected_fraud",
             "location",
             "sla_deadline",
             "first_response_at",
@@ -1123,12 +1120,22 @@ class TicketSerializer(serializers.ModelSerializer):
         queryset = scope_message_queryset(obj.messages.all(), user) if user and user.is_authenticated else obj.messages.none()
         return MessageInlineSerializer(queryset, many=True, context=self.context).data
 
+    def get_account_credits(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not is_admin_user(user):
+            return []
+        return AccountCreditInlineSerializer(obj.account_credits.all(), many=True, context=self.context).data
+
     def validate(self, attrs):
         attrs = super().validate(attrs)
         blocked_categories = {
             Ticket.CATEGORY_RETURN,
             Ticket.CATEGORY_REFUND,
             Ticket.CATEGORY_WITHDRAWAL,
+            Ticket.CATEGORY_COMPLAINT,
+            Ticket.CATEGORY_PAYMENT,
+            Ticket.CATEGORY_ACCOUNT,
         }
         if attrs.get("category") in blocked_categories:
             raise serializers.ValidationError(
@@ -1136,14 +1143,11 @@ class TicketSerializer(serializers.ModelSerializer):
             )
         client = attrs.get("client") or getattr(self.instance, "client", None)
         product = attrs.get("product") or getattr(self.instance, "product", None)
-        related_transaction = attrs.get("related_transaction") or getattr(self.instance, "related_transaction", None)
         assigned_agent = attrs.get("assigned_agent") or getattr(self.instance, "assigned_agent", None)
         organization = attrs.get("organization") or getattr(self.instance, "organization", None)
 
         if client and product and product.client_id != client.id:
             raise serializers.ValidationError("Le produit selectionne n'appartient pas a ce client.")
-        if client and related_transaction and related_transaction.client_id != client.id:
-            raise serializers.ValidationError("La transaction selectionnee n'appartient pas a ce client.")
         if client and organization and client.organization_id != organization.id:
             raise serializers.ValidationError("Le client selectionne n'appartient pas a cette organisation.")
         if assigned_agent and client and assigned_agent.organization_id and client.organization_id and assigned_agent.organization_id != client.organization_id:

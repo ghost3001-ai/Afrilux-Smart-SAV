@@ -13,7 +13,9 @@
         {% if sav_shell.has_backoffice_access %}
             <a class="button button--ghost" href="{% url 'planning-page' %}">Planning</a>
         {% endif %}
-        <a class="button button--primary" href="{% url 'ticket-create' %}">Nouveau ticket</a>
+        {% if can_create_ticket %}
+            <a class="button button--primary" href="{% url 'ticket-create' %}">Nouveau ticket</a>
+        {% endif %}
     </div>
 </section>
 
@@ -35,7 +37,6 @@
         <select name="focus">
             <option value="">Vue standard</option>
             <option value="urgent" {% if filters.focus == "urgent" %}selected{% endif %}>Urgents</option>
-            <option value="fraud" {% if filters.focus == "fraud" %}selected{% endif %}>Fraude suspectee</option>
         </select>
         {% if sav_shell.is_internal %}
             <select name="assignment">
@@ -54,9 +55,6 @@
             <div class="ticket-card__top">
                 <span class="badge badge--{{ ticket.priority|badge_tone }}">{{ ticket.get_priority_display }}</span>
                 <span class="badge badge--{{ ticket.status|badge_tone }}">{{ ticket.get_status_display }}</span>
-                {% if ticket.suspected_fraud %}
-                    <span class="badge badge--warning">Fraude suspectee</span>
-                {% endif %}
             </div>
             <h2><a href="{% url 'ticket-detail' ticket.pk %}">{{ ticket.title }}</a></h2>
             <p class="muted">{{ ticket.reference }} · {{ ticket.client }}</p>

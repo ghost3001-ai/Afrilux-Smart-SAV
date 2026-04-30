@@ -111,13 +111,13 @@ from .services import (
     escalate_ticket,
     generate_intervention_pdf,
     has_reporting_access,
+    is_admin_user,
     is_internal_user,
     is_manager_user,
+    is_support_user,
     log_audit_event,
-    maybe_flag_ticket_as_fraud,
     run_automation_rules_for_ticket,
     run_predictive_analysis,
-    role_default_processing_status,
     scope_equipment_category_queryset,
     scope_generated_report_queryset,
     scope_ai_action_queryset,
@@ -145,6 +145,18 @@ from .services import (
     notify_ticket_status_change,
     archive_generated_report,
 )
+
+
+def _ticket_status_from_intervention(intervention):
+    if intervention.status == Intervention.STATUS_DONE or intervention.finished_at:
+        return Ticket.STATUS_INTERVENTION_DONE
+    if intervention.status == Intervention.STATUS_IN_PROGRESS or intervention.started_at:
+        return Ticket.STATUS_IN_PROGRESS_N2
+    if intervention.status == Intervention.STATUS_CANCELLED:
+        return Ticket.STATUS_WAITING
+    if intervention.scheduled_for:
+        return Ticket.STATUS_INTERVENTION_PLANNED
+    return Ticket.STATUS_ASSIGNED if intervention.ticket.assigned_agent_id else Ticket.STATUS_NEW
 
 
 class AuditedModelViewSet(viewsets.ModelViewSet):
@@ -423,7 +435,7 @@ class TicketViewSet(AuditedModelViewSet):
 
     def get_permissions(self):
         if self.action == "credit_account":
-            return [IsManagerUser()]
+            return [IsAuthenticatedSavUser()]
         if self.action in {"confirm_resolution", "reopen"}:
             return [ReadOnlyForAuditors()]
         if self.action == "agentic_resolution":
@@ -447,7 +459,6 @@ class TicketViewSet(AuditedModelViewSet):
             "client",
             "product",
             "assigned_agent",
-            "related_transaction",
             "feedback",
         ).prefetch_related(
             "messages",
@@ -463,7 +474,6 @@ class TicketViewSet(AuditedModelViewSet):
         assigned_agent = self.request.query_params.get("assigned_agent")
         assignment = self.request.query_params.get("assignment")
         client = self.request.query_params.get("client")
-        suspected_fraud = self.request.query_params.get("suspected_fraud")
         urgent = self.request.query_params.get("urgent")
 
         queryset = scope_ticket_queryset(queryset, self.request.user)
@@ -479,8 +489,6 @@ class TicketViewSet(AuditedModelViewSet):
             queryset = queryset.filter(assigned_agent__isnull=True)
         if client:
             queryset = queryset.filter(client_id=client)
-        if suspected_fraud is not None and suspected_fraud.strip():
-            queryset = queryset.filter(suspected_fraud=suspected_fraud.strip().lower() in {"true", "1", "yes", "oui"})
         if urgent is not None and urgent.strip().lower() in {"true", "1", "yes", "oui"}:
             queryset = queryset.filter(priority__in=[Ticket.PRIORITY_HIGH, Ticket.PRIORITY_CRITICAL])
         return queryset
@@ -492,6 +500,9 @@ class TicketViewSet(AuditedModelViewSet):
         ticket_kwargs["created_by"] = self.request.user
         if self.request.user.role == User.ROLE_CLIENT:
             ticket_kwargs["client"] = self.request.user
+            serializer.validated_data["priority"] = Ticket.PRIORITY_NORMAL
+            serializer.validated_data["status"] = Ticket.STATUS_NEW
+            serializer.validated_data["assigned_agent"] = None
             client = self.request.user
         else:
             client = serializer.validated_data.get("client")
@@ -503,11 +514,6 @@ class TicketViewSet(AuditedModelViewSet):
             and client.organization_id != self.request.user.organization_id
         ):
             raise PermissionDenied("Vous ne pouvez pas creer un ticket pour une autre organisation.")
-        if (
-            self.request.user.role == User.ROLE_VIP_SUPPORT
-            and serializer.validated_data.get("priority", Ticket.PRIORITY_NORMAL) in {Ticket.PRIORITY_LOW, Ticket.PRIORITY_NORMAL}
-        ):
-            serializer.validated_data["priority"] = Ticket.PRIORITY_HIGH
         instance = serializer.save(**ticket_kwargs)
         update_fields = []
         if instance.assigned_agent_id and instance.status == Ticket.STATUS_NEW:
@@ -523,10 +529,11 @@ class TicketViewSet(AuditedModelViewSet):
             ensure_assignment_intervention(instance, actor=self.request.user, note="Affectation initiale a la creation du ticket.")
 
         self.audit("ticket_created", instance)
-        maybe_flag_ticket_as_fraud(instance)
         run_automation_rules_for_ticket(instance, actor=self.request.user, trigger_event=AutomationRule.TRIGGER_TICKET_CREATED)
 
     def perform_update(self, serializer):
+        if not (is_support_user(self.request.user) or is_admin_user(self.request.user)):
+            raise PermissionDenied("Seul le support peut modifier directement un ticket.")
         previous_status = serializer.instance.status
         previous_assigned_agent_id = serializer.instance.assigned_agent_id
         client = serializer.validated_data.get("client", serializer.instance.client)
@@ -538,7 +545,16 @@ class TicketViewSet(AuditedModelViewSet):
             and client.organization_id != self.request.user.organization_id
         ):
             raise PermissionDenied("Vous ne pouvez pas deplacer ce ticket vers une autre organisation.")
-        if serializer.validated_data.get("assigned_agent") and serializer.instance.status == Ticket.STATUS_NEW:
+        if serializer.validated_data.get("assigned_agent") and (
+            serializer.instance.status
+            in {
+                Ticket.STATUS_NEW,
+                Ticket.STATUS_QUALIFICATION,
+                Ticket.STATUS_PENDING_CUSTOMER,
+                Ticket.STATUS_WAITING,
+            }
+            or not previous_assigned_agent_id
+        ):
             serializer.validated_data["status"] = Ticket.STATUS_ASSIGNED
         instance = serializer.save()
         if serializer.validated_data.get("priority") and instance.is_open:
@@ -547,7 +563,6 @@ class TicketViewSet(AuditedModelViewSet):
         if instance.assigned_agent_id and instance.assigned_agent_id != previous_assigned_agent_id:
             ensure_assignment_intervention(instance, actor=self.request.user, note="Affectation mise a jour depuis l'API.")
         self.audit("ticket_updated", instance)
-        maybe_flag_ticket_as_fraud(instance)
         notify_ticket_status_change(instance, previous_status, actor=self.request.user)
 
         trigger_event = AutomationRule.TRIGGER_TICKET_OVERDUE if instance.is_overdue else AutomationRule.TRIGGER_TICKET_UPDATED
@@ -569,8 +584,8 @@ class TicketViewSet(AuditedModelViewSet):
             )
         previous_status = ticket.status
         ticket.assigned_agent = request.user
-        if ticket.status in set(OPEN_TICKET_STATUSES):
-            ticket.status = role_default_processing_status(request.user)
+        if ticket.status in {Ticket.STATUS_NEW, Ticket.STATUS_WAITING, Ticket.STATUS_PENDING_CUSTOMER, Ticket.STATUS_QUALIFICATION}:
+            ticket.status = Ticket.STATUS_ASSIGNED
         ticket.save(update_fields=["assigned_agent", "status", "updated_at"])
         ensure_assignment_intervention(ticket, actor=request.user, note="Prise en charge manuelle du ticket.")
         self.audit("ticket_taken_ownership", ticket, {"assigned_agent": request.user.id})
@@ -593,9 +608,7 @@ class TicketViewSet(AuditedModelViewSet):
             pk=technician_id,
         )
         ticket.assigned_agent = technician
-        if request.user.role == User.ROLE_DISPATCHER:
-            ticket.status = Ticket.STATUS_QUALIFICATION
-        elif ticket.status in {Ticket.STATUS_NEW, Ticket.STATUS_WAITING, Ticket.STATUS_PENDING_CUSTOMER, Ticket.STATUS_QUALIFICATION}:
+        if ticket.status in {Ticket.STATUS_NEW, Ticket.STATUS_WAITING, Ticket.STATUS_PENDING_CUSTOMER, Ticket.STATUS_QUALIFICATION}:
             ticket.status = Ticket.STATUS_ASSIGNED
         ticket.save(update_fields=["assigned_agent", "status", "updated_at"])
         ensure_assignment_intervention(ticket, actor=request.user, note="Affectation explicite du responsable SAV.")
@@ -695,6 +708,8 @@ class TicketViewSet(AuditedModelViewSet):
 
     @action(detail=True, methods=["post"], permission_classes=[IsManagerUser])
     def credit_account(self, request, pk=None):
+        if not is_admin_user(request.user):
+            raise PermissionDenied("Le credit compte est reserve a l'administrateur.")
         ticket = self.get_object()
         try:
             credit_payload = credit_account_for_ticket(
@@ -823,11 +838,28 @@ class MessageViewSet(AuditedModelViewSet):
         return [ReadOnlyForAuditors()]
 
     def get_queryset(self):
-        queryset = Message.objects.select_related("ticket", "sender").all()
+        queryset = Message.objects.select_related("ticket", "sender", "recipient").all()
         return scope_message_queryset(queryset, self.request.user)
+
+    def _validate_recipient(self, ticket, recipient):
+        if not recipient:
+            return
+        if recipient.pk == ticket.client_id:
+            return
+        if recipient.role in set(User.SUPPORT_ROLE_ALIASES) and (
+            not ticket.organization_id or recipient.organization_id == ticket.organization_id
+        ):
+            return
+        raise PermissionDenied("Le destinataire doit etre le client ou un membre support autorise sur ce ticket.")
 
     def perform_create(self, serializer):
         ticket = serializer.validated_data["ticket"]
+        if not (
+            self.request.user.role == User.ROLE_CLIENT
+            or is_support_user(self.request.user)
+            or is_admin_user(self.request.user)
+        ):
+            raise PermissionDenied("Seuls le client et le support peuvent participer a la conversation.")
         if self.request.user.role == User.ROLE_CLIENT and ticket.client_id != self.request.user.id:
             raise PermissionDenied("Vous ne pouvez pas publier un message sur le ticket d'un autre client.")
         if (
@@ -837,6 +869,7 @@ class MessageViewSet(AuditedModelViewSet):
             and ticket.organization_id != self.request.user.organization_id
         ):
             raise PermissionDenied("Vous ne pouvez pas publier un message sur une autre organisation.")
+        self._validate_recipient(ticket, serializer.validated_data.get("recipient"))
 
         if is_internal_user(self.request.user):
             direction = serializer.validated_data.get("direction") or Message.DIRECTION_OUTBOUND
@@ -858,11 +891,22 @@ class MessageViewSet(AuditedModelViewSet):
             ticket.save(update_fields=["first_response_at", "updated_at"])
 
         self.audit("message_created", instance)
-        if direction == Message.DIRECTION_OUTBOUND and message_type == Message.TYPE_PUBLIC and is_internal_user(self.request.user):
+        if instance.recipient_id:
+            from .services import create_notification
+
+            create_notification(
+                recipient=instance.recipient,
+                subject=f"{ticket.reference} - Nouveau message",
+                message=instance.content,
+                event_type="ticket_message",
+                ticket=ticket,
+            )
+        elif direction == Message.DIRECTION_OUTBOUND and message_type == Message.TYPE_PUBLIC and is_internal_user(self.request.user):
             create_message_delivery_notifications(instance)
 
     def perform_update(self, serializer):
         ticket = serializer.validated_data.get("ticket", serializer.instance.ticket)
+        recipient = serializer.validated_data.get("recipient", serializer.instance.recipient)
         if (
             is_internal_user(self.request.user)
             and not self.request.user.is_superuser
@@ -870,6 +914,7 @@ class MessageViewSet(AuditedModelViewSet):
             and ticket.organization_id != self.request.user.organization_id
         ):
             raise PermissionDenied("Vous ne pouvez pas deplacer ce message vers une autre organisation.")
+        self._validate_recipient(ticket, recipient)
         instance = serializer.save()
         self.audit("message_updated", instance)
 
@@ -934,7 +979,7 @@ class TicketAttachmentViewSet(
 class InterventionViewSet(AuditedModelViewSet):
     serializer_class = InterventionSerializer
     filter_backends = [filters.OrderingFilter]
-    ordering_fields = ["scheduled_for", "created_at", "cost"]
+    ordering_fields = ["scheduled_for", "created_at"]
 
     def get_permissions(self):
         if self.request.method in {"POST", "PUT", "PATCH", "DELETE"}:
@@ -947,15 +992,27 @@ class InterventionViewSet(AuditedModelViewSet):
 
     def perform_create(self, serializer):
         ticket = serializer.validated_data["ticket"]
+        if self.request.user.role == User.ROLE_TECHNICIAN and ticket.assigned_agent_id != self.request.user.id:
+            raise PermissionDenied("Vous ne pouvez intervenir que sur les tickets qui vous sont affectes.")
         if (
             not self.request.user.is_superuser
             and self.request.user.organization_id
             and ticket.organization_id != self.request.user.organization_id
         ):
             raise PermissionDenied("Vous ne pouvez pas creer une intervention pour une autre organisation.")
-        instance = serializer.save(organization=ticket.organization)
+        extra = {"organization": ticket.organization}
+        if self.request.user.role == User.ROLE_TECHNICIAN:
+            extra["agent"] = self.request.user
+            extra["intervention_type"] = Intervention.TYPE_ON_SITE
+        instance = serializer.save(**extra)
         if instance.status == Intervention.STATUS_DONE:
             generate_intervention_pdf(instance)
+        previous_status = ticket.status
+        next_status = _ticket_status_from_intervention(instance)
+        if next_status != previous_status:
+            ticket.status = next_status
+            ticket.save(update_fields=["status", "updated_at"])
+            notify_ticket_status_change(ticket, previous_status, actor=self.request.user)
         self.audit("intervention_created", instance)
 
     def perform_update(self, serializer):
@@ -1563,7 +1620,6 @@ class DashboardView(APIView):
         ai_actions = scope_ai_action_queryset(AIActionLog.objects.all(), request.user)
         messages = scope_message_queryset(Message.objects.filter(sentiment_score__isnull=False), request.user)
         support_sessions = scope_support_session_queryset(SupportSession.objects.all(), request.user)
-        transactions = scope_financial_transaction_queryset(FinancialTransaction.objects.all(), request.user)
         feedbacks = scope_ticket_feedback_queryset(TicketFeedback.objects.all(), request.user)
         users = scope_user_queryset(User.objects.filter(role=User.ROLE_CLIENT), request.user)
         technicians = scope_user_queryset(
@@ -1589,11 +1645,8 @@ class DashboardView(APIView):
             "tickets_open": tickets.filter(status__in=OPEN_TICKET_STATUSES).count(),
             "tickets_overdue": tickets.filter(status__in=OPEN_TICKET_STATUSES, sla_deadline__lt=timezone.now()).count(),
             "tickets_unassigned": tickets.filter(status__in=OPEN_TICKET_STATUSES, assigned_agent__isnull=True).count(),
-            "complaints_total": tickets.filter(category=Ticket.CATEGORY_COMPLAINT).count(),
-            "fraud_suspected_open": tickets.filter(
-                status__in=OPEN_TICKET_STATUSES,
-                suspected_fraud=True,
-            ).count(),
+            "maintenance_total": tickets.filter(category=Ticket.CATEGORY_MAINTENANCE).count(),
+            "bug_total": tickets.filter(category=Ticket.CATEGORY_BUG).count(),
             "tickets_critical_open": tickets.filter(
                 status__in=OPEN_TICKET_STATUSES,
                 priority=Ticket.PRIORITY_CRITICAL,
@@ -1613,8 +1666,6 @@ class DashboardView(APIView):
             "support_sessions_active": support_sessions.filter(
                 status__in=[SupportSession.STATUS_SCHEDULED, SupportSession.STATUS_LIVE]
             ).count(),
-            "transactions_total": transactions.count(),
-            "transactions_disputed": transactions.filter(status=FinancialTransaction.STATUS_DISPUTED).count(),
             "clients_verified": users.filter(is_verified=True).count(),
             "feedback_average_rating": float(feedbacks.aggregate(avg=Avg("rating"))["avg"])
             if feedbacks.exists()

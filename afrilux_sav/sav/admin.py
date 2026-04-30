@@ -209,10 +209,9 @@ class FinancialTransactionAdmin(admin.ModelAdmin):
         "amount",
         "currency",
         "status",
-        "suspected_fraud",
         "occurred_at",
     )
-    list_filter = ("organization", "transaction_type", "ledger_side", "status", "suspected_fraud", "currency")
+    list_filter = ("organization", "transaction_type", "ledger_side", "status", "currency")
     search_fields = ("external_reference", "provider_reference", "client__username", "description", "organization__name")
 
 
@@ -225,7 +224,7 @@ class MessageAdmin(admin.ModelAdmin):
 
 @admin.register(Intervention)
 class InterventionAdmin(admin.ModelAdmin):
-    list_display = ("ticket", "agent", "intervention_type", "status", "scheduled_for", "time_spent_minutes", "cost", "report_generated_at")
+    list_display = ("ticket", "agent", "intervention_type", "status", "scheduled_for", "time_spent_minutes", "report_generated_at")
     list_filter = ("intervention_type", "status")
     search_fields = ("ticket__reference", "agent__username", "action_taken", "diagnosis")
     inlines = [InterventionMediaInline]

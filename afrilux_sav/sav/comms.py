@@ -174,7 +174,7 @@ def create_message_delivery_notifications(message: Message) -> list[Notification
     if message.direction != Message.DIRECTION_OUTBOUND or message.message_type != Message.TYPE_PUBLIC:
         return []
 
-    recipient = message.ticket.client
+    recipient = message.recipient or message.ticket.client
     phone = normalize_phone(recipient.phone)
     channels = [Notification.CHANNEL_IN_APP]
     if firebase_push_enabled() and recipient.device_registrations.filter(is_active=True).exists():
@@ -447,7 +447,6 @@ def _find_or_create_email_client(sender_email, organization, sender_name=""):
 def handle_email_inbound(payload: dict[str, str], uploaded_files=None) -> dict:
     from .services import (
         calculate_sentiment,
-        detect_fraud_signals,
         infer_priority_from_text,
         infer_ticket_category_from_text,
     )
@@ -500,7 +499,6 @@ def handle_email_inbound(payload: dict[str, str], uploaded_files=None) -> dict:
             channel=Ticket.CHANNEL_EMAIL,
             status=Ticket.STATUS_NEW,
             priority=priority,
-            suspected_fraud=detect_fraud_signals(subject, body),
             sla_deadline=_default_sla_deadline(priority),
         )
         created_ticket = True

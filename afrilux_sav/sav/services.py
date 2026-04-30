@@ -87,10 +87,7 @@ ESCALATION_ALLOWED_TARGETS = {
 
 TICKET_CREATOR_ROLES = {
     User.ROLE_CLIENT,
-    User.ROLE_SUPPORT,
-    User.ROLE_AGENT,
-    User.ROLE_VIP_SUPPORT,
-    User.ROLE_SYSTEM_BOT,
+    *User.SUPPORT_ROLE_ALIASES,
 }
 
 NEGATIVE_WORDS = [
@@ -155,17 +152,6 @@ DEFAULT_EQUIPMENT_CATEGORIES = [
     "Autre",
 ]
 
-FRAUD_WORDS = [
-    "fraude",
-    "fraud",
-    "arnaque",
-    "escroquerie",
-    "chargeback",
-    "paiement suspect",
-    "faux paiement",
-    "carte volee",
-]
-
 ISSUE_KEYWORDS = {
     "battery_issue": ["batterie", "charge", "autonomie"],
     "overheating_issue": ["chauffe", "temperature", "surchauffe"],
@@ -179,19 +165,27 @@ def is_manager_user(user):
     return bool(
         user
         and user.is_authenticated
-        and (user.is_superuser or getattr(user, "role", "") in set(User.MANAGER_ROLES))
+        and (user.is_superuser or getattr(user, "role", "") in set(User.MANAGER_ROLES) or is_support_user(user))
     )
+
+
+def is_support_user(user):
+    return bool(
+        user
+        and user.is_authenticated
+        and (user.is_superuser or getattr(user, "role", "") in set(User.SUPPORT_ROLE_ALIASES))
+    )
+
+
+def is_admin_user(user):
+    return bool(user and user.is_authenticated and (user.is_superuser or getattr(user, "role", "") == User.ROLE_ADMIN))
 
 
 def can_create_ticket(user):
     return bool(
         user
         and user.is_authenticated
-        and (
-            user.is_superuser
-            or getattr(user, "role", "") in TICKET_CREATOR_ROLES
-            or getattr(user, "role", "") in {User.ROLE_HEAD_SAV, User.ROLE_ADMIN, User.ROLE_MANAGER}
-        )
+        and (user.is_superuser or getattr(user, "role", "") in TICKET_CREATOR_ROLES)
     )
 
 
@@ -248,7 +242,7 @@ def role_workspace_name(user):
         return "login"
     if user.role == User.ROLE_CLIENT:
         return "support-page"
-    if user.role in {User.ROLE_SUPPORT, User.ROLE_AGENT, User.ROLE_VIP_SUPPORT}:
+    if user.role in set(User.SUPPORT_ROLE_ALIASES):
         return "ticket-list"
     if user.role in {User.ROLE_TECHNICIAN, User.ROLE_EXPERT}:
         return "technician-space"
@@ -267,7 +261,7 @@ def role_default_processing_status(user):
     if not user or not user.is_authenticated:
         return Ticket.STATUS_NEW
     role = getattr(user, "role", "")
-    if role in {User.ROLE_SUPPORT, User.ROLE_AGENT, User.ROLE_VIP_SUPPORT}:
+    if role in set(User.SUPPORT_ROLE_ALIASES):
         return Ticket.STATUS_IN_PROGRESS_N1
     if role == User.ROLE_TECHNICIAN:
         return Ticket.STATUS_IN_PROGRESS_N2
@@ -327,12 +321,7 @@ def scope_ticket_queryset(queryset, user):
                 | Q(client__organization=user.organization)
                 | Q(product__organization=user.organization)
             ).distinct()
-        visibility_leadership_roles = {
-            User.ROLE_HEAD_SAV,
-            User.ROLE_ADMIN,
-            User.ROLE_MANAGER,
-        }
-        if getattr(user, "role", "") in visibility_leadership_roles:
+        if is_support_user(user) or is_admin_user(user):
             return queryset
         return queryset.filter(Q(created_by=user) | Q(assigned_agent=user) | Q(interventions__agent=user)).distinct()
     return queryset.filter(client=user)
@@ -359,6 +348,11 @@ def _scope_ticket_related_queryset(queryset, user, ticket_relation):
 
 def scope_message_queryset(queryset, user):
     queryset = _scope_ticket_related_queryset(queryset, user, "ticket")
+    if not user or not user.is_authenticated:
+        return queryset.none()
+    if is_support_user(user) or is_admin_user(user):
+        return queryset
+    queryset = queryset.filter(Q(recipient__isnull=True) | Q(recipient=user) | Q(sender=user))
     if not has_backoffice_access(user) and not getattr(user, "is_superuser", False):
         queryset = queryset.exclude(message_type=Message.TYPE_INTERNAL)
     return queryset
@@ -395,8 +389,6 @@ def scope_predictive_alert_queryset(queryset, user):
 def scope_notification_queryset(queryset, user):
     if not user or not user.is_authenticated:
         return queryset.none()
-    if user.is_superuser:
-        return queryset
     return queryset.filter(recipient=user)
 
 
@@ -418,6 +410,8 @@ def scope_offer_queryset(queryset, user):
 
 
 def scope_account_credit_queryset(queryset, user):
+    if not is_admin_user(user):
+        return queryset.none()
     return scope_by_access(queryset, user, "client", "organization")
 
 
@@ -496,7 +490,7 @@ def manager_queryset_for_organization(organization=None):
 
 def assignment_eligible_queryset_for_organization(organization=None):
     queryset = User.objects.filter(is_active=True).filter(
-        Q(role__in=[User.ROLE_SUPPORT, User.ROLE_AGENT, User.ROLE_VIP_SUPPORT])
+        Q(role__in=User.SUPPORT_ROLE_ALIASES)
         | Q(role=User.ROLE_TECHNICIAN, technician_status="available")
     )
     if organization is None:
@@ -863,26 +857,6 @@ def calculate_sentiment(text):
     return score.quantize(Decimal("0.01"))
 
 
-def detect_fraud_signals(*parts):
-    lowered_text = " ".join(part or "" for part in parts).lower()
-    return any(word in lowered_text for word in FRAUD_WORDS)
-
-
-def maybe_flag_ticket_as_fraud(ticket):
-    if ticket.suspected_fraud:
-        return False
-    if getattr(ticket, "related_transaction", None) and ticket.related_transaction.suspected_fraud:
-        ticket.suspected_fraud = True
-        ticket.save(update_fields=["suspected_fraud", "updated_at"])
-        return True
-    if not detect_fraud_signals(ticket.title, ticket.description):
-        return False
-
-    ticket.suspected_fraud = True
-    ticket.save(update_fields=["suspected_fraud", "updated_at"])
-    return True
-
-
 def _parse_completion_json(completion):
     if not completion.ok:
         return None
@@ -1082,7 +1056,6 @@ def _client_context(client):
                 "currency": transaction.currency,
                 "status": transaction.status,
                 "occurred_at": transaction.occurred_at.isoformat(),
-                "suspected_fraud": transaction.suspected_fraud,
             }
             for transaction in recent_transactions
         ],
@@ -1586,18 +1559,12 @@ def infer_issue_from_text(text):
 
 def infer_ticket_category_from_text(text, current_category=Ticket.CATEGORY_BREAKDOWN):
     lowered_text = (text or "").lower()
-    if any(word in lowered_text for word in ["paiement", "payment", "carte", "solde debite"]):
-        return Ticket.CATEGORY_PAYMENT
     if any(word in lowered_text for word in ["bug", "erreur app", "application plante", "crash"]):
         return Ticket.CATEGORY_BUG
-    if any(word in lowered_text for word in ["compte bloque", "blocage compte", "profil", "numero change"]):
-        return Ticket.CATEGORY_ACCOUNT
     if any(word in lowered_text for word in ["installation", "installer", "mise en service"]):
         return Ticket.CATEGORY_INSTALLATION
     if any(word in lowered_text for word in ["maintenance", "preventive", "entretien"]):
         return Ticket.CATEGORY_MAINTENANCE
-    if any(word in lowered_text for word in ["plainte", "reclamation", "fraude", "fraud", "arnaque"]):
-        return Ticket.CATEGORY_COMPLAINT
     return current_category
 
 
@@ -1661,8 +1628,7 @@ def answer_support_question(question, user, product=None, ticket=None):
     )
     likely_issue = infer_issue_from_text(full_text)
     should_create_ticket = ticket is None and (
-        detect_fraud_signals(full_text)
-        or suggested_priority in {Ticket.PRIORITY_HIGH, Ticket.PRIORITY_CRITICAL}
+        suggested_priority in {Ticket.PRIORITY_HIGH, Ticket.PRIORITY_CRITICAL}
         or any(keyword in full_text.lower() for keyword in ["probleme", "panne", "reclamation", "incident"])
     )
 
@@ -1916,10 +1882,7 @@ def apply_agentic_resolution(ticket, approved_by=None):
         ticket.resolution_summary = llm_resolution_summary
         actions_taken.extend(llm_actions or ["llm_auto_resolution"])
         auto_resolved = True
-    elif (
-        ticket.category in {Ticket.CATEGORY_RETURN, Ticket.CATEGORY_REFUND}
-        or (ticket.category == Ticket.CATEGORY_COMPLAINT and "garantie" in full_text.lower())
-    ) and warranty_eligible:
+    elif "garantie" in full_text.lower() and warranty_eligible:
         ticket.status = Ticket.STATUS_RESOLVED
         ticket.resolution_summary = (
             "Resolution agentique: cas sous garantie detecte, orientation echange standard automatisee."
@@ -2934,27 +2897,22 @@ def answer_bi_question(question, user):
             "data": {"under_warranty": under_warranty, "warranty_expiring_soon": expiring},
         }
 
-    elif "plainte" in lowered or "reclamation" in lowered:
-        complaints_total = tickets.filter(category=Ticket.CATEGORY_COMPLAINT).count()
-        fraud_total = tickets.filter(suspected_fraud=True).count()
+    elif "maintenance" in lowered or "entretien" in lowered:
+        maintenance_total = tickets.filter(category=Ticket.CATEGORY_MAINTENANCE).count()
         base_result = {
-            "matched_intent": "complaints",
-            "answer": (
-                f"{complaints_total} ticket(s) de reclamation ont ete enregistres, avec {fraud_total} dossier(s) signales comme fraude potentielle."
-            ),
+            "matched_intent": "maintenance",
+            "answer": f"{maintenance_total} ticket(s) de maintenance sont enregistres dans le perimetre courant.",
             "data": {
-                "complaints_total": complaints_total,
-                "suspected_fraud_tickets": fraud_total,
+                "maintenance_total": maintenance_total,
             },
         }
 
-    elif "fraude" in lowered or "fraud" in lowered:
-        open_fraud = tickets.filter(status__in=OPEN_TICKET_STATUSES, suspected_fraud=True).count()
-        total_fraud = tickets.filter(suspected_fraud=True).count()
+    elif "bug" in lowered or "erreur" in lowered:
+        bug_total = tickets.filter(category=Ticket.CATEGORY_BUG).count()
         base_result = {
-            "matched_intent": "fraud",
-            "answer": f"{open_fraud} ticket(s) suspect(s) sont encore ouverts, sur {total_fraud} dossier(s) marques comme fraude potentielle.",
-            "data": {"open_suspected_fraud_tickets": open_fraud, "suspected_fraud_tickets": total_fraud},
+            "matched_intent": "bugs",
+            "answer": f"{bug_total} ticket(s) sont classes comme bug.",
+            "data": {"bug_total": bug_total},
         }
 
     elif "resolution" in lowered or "resolu" in lowered:
@@ -3050,7 +3008,8 @@ def answer_bi_question(question, user):
                 "tickets_total": total_tickets,
                 "products_total": total_products,
                 "alerts_total": total_alerts,
-                "complaints_total": tickets.filter(category=Ticket.CATEGORY_COMPLAINT).count(),
+                "maintenance_total": tickets.filter(category=Ticket.CATEGORY_MAINTENANCE).count(),
+                "bug_total": tickets.filter(category=Ticket.CATEGORY_BUG).count(),
                 "average_resolution_hours": float(average_resolution_hours) if average_resolution_hours is not None else None,
             },
         }

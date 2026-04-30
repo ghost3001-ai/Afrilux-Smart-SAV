@@ -1,0 +1,3539 @@
+{
+  "files": [
+    {
+      "path": ".codex",
+      "lines": 0,
+      "suffix": ".codex",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": ".dockerignore",
+      "lines": 12,
+      "suffix": ".dockerignore",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": ".gitignore",
+      "lines": 25,
+      "suffix": ".gitignore",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": ".idea/.gitignore",
+      "lines": 5,
+      "suffix": ".gitignore",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": ".idea/Service Apres Vente.iml",
+      "lines": 8,
+      "suffix": ".iml",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": ".idea/inspectionProfiles/profiles_settings.xml",
+      "lines": 6,
+      "suffix": ".xml",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": ".idea/modules.xml",
+      "lines": 8,
+      "suffix": ".xml",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": ".idea/workspace.xml",
+      "lines": 82,
+      "suffix": ".xml",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "CDC_Helpdesk_AFRILUX_v2.docx",
+      "lines": 1940,
+      "suffix": ".docx",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "Dockerfile",
+      "lines": 23,
+      "suffix": "Dockerfile",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "README.md",
+      "lines": 583,
+      "suffix": ".md",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/.dockerignore",
+      "lines": 14,
+      "suffix": ".dockerignore",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/.env",
+      "lines": 33,
+      "suffix": ".env",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/.env.example",
+      "lines": 68,
+      "suffix": ".example",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/Dockerfile",
+      "lines": 23,
+      "suffix": "Dockerfile",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/NORTHFLANK.md",
+      "lines": 106,
+      "suffix": ".md",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/RENDER.md",
+      "lines": 79,
+      "suffix": ".md",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/afrilux_sav/__init__.py",
+      "lines": 0,
+      "suffix": ".py",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/afrilux_sav/asgi.py",
+      "lines": 16,
+      "suffix": ".py",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/afrilux_sav/settings.py",
+      "lines": 354,
+      "suffix": ".py",
+      "classes": [],
+      "functions": [
+        {
+          "name": "_load_local_env",
+          "line": 26
+        },
+        {
+          "name": "_env_bool",
+          "line": 45
+        },
+        {
+          "name": "_env_list",
+          "line": 52
+        },
+        {
+          "name": "_hostname_from_url",
+          "line": 60
+        },
+        {
+          "name": "_argon2_hasher_available",
+          "line": 67
+        }
+      ]
+    },
+    {
+      "path": "afrilux_sav/afrilux_sav/urls.py",
+      "lines": 46,
+      "suffix": ".py",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/afrilux_sav/wsgi.py",
+      "lines": 16,
+      "suffix": ".py",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/deploy/northflank-migrate.sh",
+      "lines": 4,
+      "suffix": ".sh",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/deploy/northflank-scheduler.sh",
+      "lines": 11,
+      "suffix": ".sh",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/deploy/start-web.sh",
+      "lines": 11,
+      "suffix": ".sh",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/docker-compose.yml",
+      "lines": 51,
+      "suffix": ".yml",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/entrypoint.sh",
+      "lines": 110,
+      "suffix": ".sh",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/manage.py",
+      "lines": 28,
+      "suffix": ".py",
+      "classes": [],
+      "functions": [
+        {
+          "name": "main",
+          "line": 7
+        }
+      ]
+    },
+    {
+      "path": "afrilux_sav/requirements.txt",
+      "lines": 13,
+      "suffix": ".txt",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/__init__.py",
+      "lines": 0,
+      "suffix": ".py",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/admin.py",
+      "lines": 375,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "OrganizationAdmin",
+          "line": 40
+        },
+        {
+          "name": "MessageInline",
+          "line": 46
+        },
+        {
+          "name": "InterventionInline",
+          "line": 51
+        },
+        {
+          "name": "SupportSessionInline",
+          "line": 56
+        },
+        {
+          "name": "ClientContactInline",
+          "line": 61
+        },
+        {
+          "name": "AccountCreditInline",
+          "line": 66
+        },
+        {
+          "name": "TicketFeedbackInline",
+          "line": 71
+        },
+        {
+          "name": "ProductTelemetryInline",
+          "line": 76
+        },
+        {
+          "name": "PredictiveAlertInline",
+          "line": 81
+        },
+        {
+          "name": "InterventionMediaInline",
+          "line": 86
+        },
+        {
+          "name": "TicketAssignmentInline",
+          "line": 91
+        },
+        {
+          "name": "UserAdmin",
+          "line": 97
+        },
+        {
+          "name": "ProductAdmin",
+          "line": 165
+        },
+        {
+          "name": "TicketAdmin",
+          "line": 185
+        },
+        {
+          "name": "FinancialTransactionAdmin",
+          "line": 203
+        },
+        {
+          "name": "MessageAdmin",
+          "line": 220
+        },
+        {
+          "name": "InterventionAdmin",
+          "line": 227
+        },
+        {
+          "name": "SupportSessionAdmin",
+          "line": 235
+        },
+        {
+          "name": "ProductTelemetryAdmin",
+          "line": 242
+        },
+        {
+          "name": "ClientContactAdmin",
+          "line": 249
+        },
+        {
+          "name": "EquipmentCategoryAdmin",
+          "line": 256
+        },
+        {
+          "name": "TicketAssignmentAdmin",
+          "line": 263
+        },
+        {
+          "name": "InterventionMediaAdmin",
+          "line": 270
+        },
+        {
+          "name": "PredictiveAlertAdmin",
+          "line": 277
+        },
+        {
+          "name": "KnowledgeArticleAdmin",
+          "line": 284
+        },
+        {
+          "name": "NotificationAdmin",
+          "line": 292
+        },
+        {
+          "name": "SlaRuleAdmin",
+          "line": 299
+        },
+        {
+          "name": "GeneratedReportAdmin",
+          "line": 306
+        },
+        {
+          "name": "DeviceRegistrationAdmin",
+          "line": 313
+        },
+        {
+          "name": "OfferRecommendationAdmin",
+          "line": 320
+        },
+        {
+          "name": "AccountCreditAdmin",
+          "line": 327
+        },
+        {
+          "name": "TicketFeedbackAdmin",
+          "line": 334
+        },
+        {
+          "name": "AutomationRuleAdmin",
+          "line": 341
+        },
+        {
+          "name": "WorkflowExecutionAdmin",
+          "line": 348
+        },
+        {
+          "name": "AIActionLogAdmin",
+          "line": 355
+        },
+        {
+          "name": "AuditLogAdmin",
+          "line": 362
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/ai.py",
+      "lines": 149,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "LLMCompletion",
+          "line": 11
+        },
+        {
+          "name": "OpenAIResponsesClient",
+          "line": 21
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/apps.py",
+      "lines": 7,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "SavConfig",
+          "line": 4
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/auth_backends.py",
+      "lines": 20,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "EmailOrUsernameBackend",
+          "line": 7
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/comms.py",
+      "lines": 738,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "DeliveryResult",
+          "line": 23
+        }
+      ],
+      "functions": [
+        {
+          "name": "normalize_phone",
+          "line": 31
+        },
+        {
+          "name": "twilio_sms_enabled",
+          "line": 42
+        },
+        {
+          "name": "twilio_whatsapp_enabled",
+          "line": 46
+        },
+        {
+          "name": "email_enabled",
+          "line": 50
+        },
+        {
+          "name": "firebase_push_enabled",
+          "line": 54
+        },
+        {
+          "name": "_default_sla_deadline",
+          "line": 58
+        },
+        {
+          "name": "deliver_notification",
+          "line": 64
+        },
+        {
+          "name": "dispatch_pending_notifications",
+          "line": 93
+        },
+        {
+          "name": "_incoming_contacts_organization",
+          "line": 115
+        },
+        {
+          "name": "_create_and_deliver_notifications",
+          "line": 127
+        },
+        {
+          "name": "create_external_channel_notifications",
+          "line": 152
+        },
+        {
+          "name": "create_message_delivery_notifications",
+          "line": 173
+        },
+        {
+          "name": "handle_twilio_inbound",
+          "line": 200
+        },
+        {
+          "name": "infer_attachment_kind",
+          "line": 282
+        },
+        {
+          "name": "_decode_mime_header",
+          "line": 292
+        },
+        {
+          "name": "_extract_email_body",
+          "line": 305
+        },
+        {
+          "name": "parse_inbound_email_message",
+          "line": 347
+        },
+        {
+          "name": "_organization_from_inbound_email",
+          "line": 387
+        },
+        {
+          "name": "_find_or_create_email_client",
+          "line": 412
+        },
+        {
+          "name": "handle_email_inbound",
+          "line": 447
+        },
+        {
+          "name": "_deliver_email",
+          "line": 556
+        },
+        {
+          "name": "_firebase_access_token",
+          "line": 576
+        },
+        {
+          "name": "_deliver_push",
+          "line": 596
+        },
+        {
+          "name": "_deliver_twilio_message",
+          "line": 679
+        }
+      ]
+    },
+    {
+      "path": "afrilux_sav/sav/context_processors.py",
+      "lines": 54,
+      "suffix": ".py",
+      "classes": [],
+      "functions": [
+        {
+          "name": "sav_shell",
+          "line": 14
+        }
+      ]
+    },
+    {
+      "path": "afrilux_sav/sav/forms.py",
+      "lines": 649,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "MultipleFileInput",
+          "line": 29
+        },
+        {
+          "name": "MultipleFileField",
+          "line": 33
+        },
+        {
+          "name": "SavAuthenticationForm",
+          "line": 45
+        },
+        {
+          "name": "ClientRegistrationForm",
+          "line": 53
+        },
+        {
+          "name": "TicketForm",
+          "line": 102
+        },
+        {
+          "name": "TicketCreateForm",
+          "line": 186
+        },
+        {
+          "name": "MessageForm",
+          "line": 389
+        },
+        {
+          "name": "TicketEscalationForm",
+          "line": 409
+        },
+        {
+          "name": "TicketAttachmentForm",
+          "line": 440
+        },
+        {
+          "name": "InterventionForm",
+          "line": 455
+        },
+        {
+          "name": "InterventionMediaForm",
+          "line": 529
+        },
+        {
+          "name": "AnalyticsQuestionForm",
+          "line": 538
+        },
+        {
+          "name": "SupportAssistantQuestionForm",
+          "line": 549
+        },
+        {
+          "name": "CreditAccountForm",
+          "line": 574
+        },
+        {
+          "name": "ProductForm",
+          "line": 582
+        }
+      ],
+      "functions": [
+        {
+          "name": "_split_full_name",
+          "line": 21
+        }
+      ]
+    },
+    {
+      "path": "afrilux_sav/sav/management/__init__.py",
+      "lines": 1,
+      "suffix": ".py",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/management/commands/__init__.py",
+      "lines": 1,
+      "suffix": ".py",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/management/commands/backup_database.py",
+      "lines": 80,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Command",
+          "line": 11
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/management/commands/bootstrap_platform.py",
+      "lines": 94,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Command",
+          "line": 7
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/management/commands/dispatch_pending_notifications.py",
+      "lines": 17,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Command",
+          "line": 6
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/management/commands/fetch_inbound_emails.py",
+      "lines": 81,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Command",
+          "line": 9
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/management/commands/purge_demo_data.py",
+      "lines": 100,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Command",
+          "line": 48
+        }
+      ],
+      "functions": [
+        {
+          "name": "_placeholder_organization_queryset",
+          "line": 30
+        },
+        {
+          "name": "_placeholder_user_queryset",
+          "line": 41
+        }
+      ]
+    },
+    {
+      "path": "afrilux_sav/sav/management/commands/run_platform_scheduler.py",
+      "lines": 78,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Command",
+          "line": 9
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/management/commands/run_sav_automation.py",
+      "lines": 50,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Command",
+          "line": 10
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/management/commands/send_scheduled_reports.py",
+      "lines": 51,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Command",
+          "line": 11
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/middleware.py",
+      "lines": 13,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "CurrentRequestMiddleware",
+          "line": 4
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/migrations/0001_initial.py",
+      "lines": 130,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Migration",
+          "line": 11
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/migrations/0002_automationrule_message_ai_summary_message_channel_and_more.py",
+      "lines": 236,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Migration",
+          "line": 9
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/migrations/0003_ticket_suspected_fraud_deviceregistration.py",
+      "lines": 39,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Migration",
+          "line": 9
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/migrations/0004_organization_aiactionlog_organization_and_more.py",
+      "lines": 214,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Migration",
+          "line": 131
+        }
+      ],
+      "functions": [
+        {
+          "name": "_unique_slug",
+          "line": 9
+        },
+        {
+          "name": "populate_organizations",
+          "line": 20
+        },
+        {
+          "name": "noop_reverse",
+          "line": 127
+        }
+      ]
+    },
+    {
+      "path": "afrilux_sav/sav/migrations/0005_ticketattachment.py",
+      "lines": 35,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Migration",
+          "line": 8
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/migrations/0006_accountcredit.py",
+      "lines": 38,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Migration",
+          "line": 9
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/migrations/0007_user_is_verified_alter_ticket_category_and_more.py",
+      "lines": 193,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Migration",
+          "line": 9
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/migrations/0008_ticket_business_domain_ticket_location_and_more.py",
+      "lines": 160,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Migration",
+          "line": 20
+        }
+      ],
+      "functions": [
+        {
+          "name": "migrate_ticket_statuses",
+          "line": 8
+        }
+      ]
+    },
+    {
+      "path": "afrilux_sav/sav/migrations/0009_intervention_client_signature_file_and_more.py",
+      "lines": 361,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Migration",
+          "line": 8
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/migrations/0010_ticketassignment_generatedreport_equipmentcategory_and_more.py",
+      "lines": 254,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Migration",
+          "line": 9
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/migrations/0011_auditlog_http_method_auditlog_request_path_and_more.py",
+      "lines": 33,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Migration",
+          "line": 6
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/migrations/0012_admin_role_grants_staff_access.py",
+      "lines": 19,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Migration",
+          "line": 11
+        }
+      ],
+      "functions": [
+        {
+          "name": "grant_staff_to_admin_role_users",
+          "line": 6
+        }
+      ]
+    },
+    {
+      "path": "afrilux_sav/sav/migrations/0013_ticket_product_label_alter_user_role.py",
+      "lines": 23,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Migration",
+          "line": 6
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/migrations/0014_alter_intervention_agent_alter_supportsession_agent_and_more.py",
+      "lines": 35,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Migration",
+          "line": 8
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/migrations/0015_expand_specialist_roles_and_escalation_targets.py",
+      "lines": 140,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "Migration",
+          "line": 8
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/migrations/__init__.py",
+      "lines": 0,
+      "suffix": ".py",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/models.py",
+      "lines": 1647,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "TimeStampedModel",
+          "line": 11
+        },
+        {
+          "name": "Organization",
+          "line": 32
+        },
+        {
+          "name": "User",
+          "line": 70
+        },
+        {
+          "name": "ClientContact",
+          "line": 252
+        },
+        {
+          "name": "EquipmentCategory",
+          "line": 287
+        },
+        {
+          "name": "FinancialTransaction",
+          "line": 313
+        },
+        {
+          "name": "Product",
+          "line": 398
+        },
+        {
+          "name": "Ticket",
+          "line": 483
+        },
+        {
+          "name": "TicketAssignment",
+          "line": 669
+        },
+        {
+          "name": "Message",
+          "line": 720
+        },
+        {
+          "name": "TicketAttachment",
+          "line": 776
+        },
+        {
+          "name": "Intervention",
+          "line": 835
+        },
+        {
+          "name": "InterventionMedia",
+          "line": 906
+        },
+        {
+          "name": "SupportSession",
+          "line": 952
+        },
+        {
+          "name": "ProductTelemetry",
+          "line": 1018
+        },
+        {
+          "name": "PredictiveAlert",
+          "line": 1043
+        },
+        {
+          "name": "KnowledgeArticle",
+          "line": 1106
+        },
+        {
+          "name": "Notification",
+          "line": 1156
+        },
+        {
+          "name": "DeviceRegistration",
+          "line": 1215
+        },
+        {
+          "name": "OfferRecommendation",
+          "line": 1243
+        },
+        {
+          "name": "AccountCredit",
+          "line": 1310
+        },
+        {
+          "name": "TicketFeedback",
+          "line": 1365
+        },
+        {
+          "name": "SlaRule",
+          "line": 1399
+        },
+        {
+          "name": "GeneratedReport",
+          "line": 1420
+        },
+        {
+          "name": "AutomationRule",
+          "line": 1469
+        },
+        {
+          "name": "WorkflowExecution",
+          "line": 1506
+        },
+        {
+          "name": "AIActionLog",
+          "line": 1545
+        },
+        {
+          "name": "AuditLog",
+          "line": 1612
+        }
+      ],
+      "functions": [
+        {
+          "name": "_generate_unique_slug",
+          "line": 19
+        }
+      ]
+    },
+    {
+      "path": "afrilux_sav/sav/pagination.py",
+      "lines": 12,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "OptionalPageNumberPagination",
+          "line": 4
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/permissions.py",
+      "lines": 60,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "IsAuthenticatedSavUser",
+          "line": 30
+        },
+        {
+          "name": "IsInternalUser",
+          "line": 35
+        },
+        {
+          "name": "IsManagerUser",
+          "line": 40
+        },
+        {
+          "name": "ReadOnlyForClients",
+          "line": 45
+        },
+        {
+          "name": "ReadOnlyForAuditors",
+          "line": 54
+        }
+      ],
+      "functions": [
+        {
+          "name": "is_internal",
+          "line": 6
+        },
+        {
+          "name": "is_manager",
+          "line": 14
+        },
+        {
+          "name": "is_read_only",
+          "line": 22
+        }
+      ]
+    },
+    {
+      "path": "afrilux_sav/sav/reporting.py",
+      "lines": 449,
+      "suffix": ".py",
+      "classes": [],
+      "functions": [
+        {
+          "name": "_aware_bounds",
+          "line": 39
+        },
+        {
+          "name": "_period_for",
+          "line": 45
+        },
+        {
+          "name": "_serialize_ticket",
+          "line": 68
+        },
+        {
+          "name": "_serialize_intervention",
+          "line": 81
+        },
+        {
+          "name": "_sla_compliance_rows",
+          "line": 94
+        },
+        {
+          "name": "_build_common_snapshot",
+          "line": 121
+        },
+        {
+          "name": "build_daily_report",
+          "line": 165
+        },
+        {
+          "name": "build_weekly_report",
+          "line": 195
+        },
+        {
+          "name": "build_monthly_report",
+          "line": 236
+        },
+        {
+          "name": "build_report",
+          "line": 296
+        },
+        {
+          "name": "_render_section_rows",
+          "line": 312
+        },
+        {
+          "name": "export_report_csv",
+          "line": 322
+        },
+        {
+          "name": "export_report_xlsx",
+          "line": 348
+        },
+        {
+          "name": "export_report_pdf",
+          "line": 409
+        }
+      ]
+    },
+    {
+      "path": "afrilux_sav/sav/request_context.py",
+      "lines": 16,
+      "suffix": ".py",
+      "classes": [],
+      "functions": [
+        {
+          "name": "set_current_request",
+          "line": 7
+        },
+        {
+          "name": "reset_current_request",
+          "line": 11
+        },
+        {
+          "name": "get_current_request",
+          "line": 15
+        }
+      ]
+    },
+    {
+      "path": "afrilux_sav/sav/serializers.py",
+      "lines": 1172,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "OrganizationSerializer",
+          "line": 38
+        },
+        {
+          "name": "PublicOrganizationSerializer",
+          "line": 66
+        },
+        {
+          "name": "ClientContactSerializer",
+          "line": 85
+        },
+        {
+          "name": "EquipmentCategorySerializer",
+          "line": 112
+        },
+        {
+          "name": "TicketAssignmentSerializer",
+          "line": 130
+        },
+        {
+          "name": "SlaRuleSerializer",
+          "line": 165
+        },
+        {
+          "name": "GeneratedReportSerializer",
+          "line": 185
+        },
+        {
+          "name": "UserSerializer",
+          "line": 223
+        },
+        {
+          "name": "ClientRegistrationSerializer",
+          "line": 326
+        },
+        {
+          "name": "ProductSerializer",
+          "line": 367
+        },
+        {
+          "name": "MessageInlineSerializer",
+          "line": 423
+        },
+        {
+          "name": "MessageSerializer",
+          "line": 453
+        },
+        {
+          "name": "TicketAttachmentSerializer",
+          "line": 458
+        },
+        {
+          "name": "InterventionInlineSerializer",
+          "line": 526
+        },
+        {
+          "name": "InterventionSerializer",
+          "line": 565
+        },
+        {
+          "name": "SupportSessionInlineSerializer",
+          "line": 578
+        },
+        {
+          "name": "SupportSessionSerializer",
+          "line": 611
+        },
+        {
+          "name": "ProductTelemetrySerializer",
+          "line": 627
+        },
+        {
+          "name": "PredictiveAlertSerializer",
+          "line": 644
+        },
+        {
+          "name": "KnowledgeArticleSerializer",
+          "line": 673
+        },
+        {
+          "name": "NotificationSerializer",
+          "line": 700
+        },
+        {
+          "name": "DeviceRegistrationSerializer",
+          "line": 729
+        },
+        {
+          "name": "OfferRecommendationSerializer",
+          "line": 754
+        },
+        {
+          "name": "AccountCreditInlineSerializer",
+          "line": 797
+        },
+        {
+          "name": "AccountCreditSerializer",
+          "line": 849
+        },
+        {
+          "name": "FinancialTransactionSerializer",
+          "line": 854
+        },
+        {
+          "name": "TicketFeedbackSerializer",
+          "line": 891
+        },
+        {
+          "name": "AutomationRuleSerializer",
+          "line": 933
+        },
+        {
+          "name": "WorkflowExecutionSerializer",
+          "line": 954
+        },
+        {
+          "name": "AIActionLogSerializer",
+          "line": 976
+        },
+        {
+          "name": "AuditLogSerializer",
+          "line": 1009
+        },
+        {
+          "name": "TicketSerializer",
+          "line": 1040
+        },
+        {
+          "name": "InterventionMediaInlineSerializer",
+          "line": 1136
+        },
+        {
+          "name": "InterventionMediaSerializer",
+          "line": 1170
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/services.py",
+      "lines": 2995,
+      "suffix": ".py",
+      "classes": [],
+      "functions": [
+        {
+          "name": "is_manager_user",
+          "line": 156
+        },
+        {
+          "name": "is_internal_user",
+          "line": 164
+        },
+        {
+          "name": "is_platform_internal_user",
+          "line": 172
+        },
+        {
+          "name": "is_read_only_user",
+          "line": 176
+        },
+        {
+          "name": "is_auditor_user",
+          "line": 180
+        },
+        {
+          "name": "has_technician_space_access",
+          "line": 184
+        },
+        {
+          "name": "has_reporting_access",
+          "line": 192
+        },
+        {
+          "name": "has_oversight_access",
+          "line": 200
+        },
+        {
+          "name": "has_backoffice_access",
+          "line": 208
+        },
+        {
+          "name": "scope_by_access",
+          "line": 212
+        },
+        {
+          "name": "scope_by_client_relation",
+          "line": 222
+        },
+        {
+          "name": "scope_user_queryset",
+          "line": 232
+        },
+        {
+          "name": "scope_ticket_queryset",
+          "line": 249
+        },
+        {
+          "name": "scope_product_queryset",
+          "line": 263
+        },
+        {
+          "name": "scope_equipment_category_queryset",
+          "line": 267
+        },
+        {
+          "name": "scope_message_queryset",
+          "line": 275
+        },
+        {
+          "name": "scope_attachment_queryset",
+          "line": 282
+        },
+        {
+          "name": "scope_intervention_queryset",
+          "line": 286
+        },
+        {
+          "name": "scope_intervention_media_queryset",
+          "line": 290
+        },
+        {
+          "name": "scope_ticket_assignment_queryset",
+          "line": 294
+        },
+        {
+          "name": "scope_client_contact_queryset",
+          "line": 298
+        },
+        {
+          "name": "scope_support_session_queryset",
+          "line": 302
+        },
+        {
+          "name": "scope_predictive_alert_queryset",
+          "line": 306
+        },
+        {
+          "name": "scope_notification_queryset",
+          "line": 310
+        },
+        {
+          "name": "scope_knowledge_article_queryset",
+          "line": 320
+        },
+        {
+          "name": "scope_offer_queryset",
+          "line": 333
+        },
+        {
+          "name": "scope_account_credit_queryset",
+          "line": 337
+        },
+        {
+          "name": "scope_financial_transaction_queryset",
+          "line": 341
+        },
+        {
+          "name": "scope_ticket_feedback_queryset",
+          "line": 345
+        },
+        {
+          "name": "scope_ai_action_queryset",
+          "line": 349
+        },
+        {
+          "name": "scope_automation_rule_queryset",
+          "line": 353
+        },
+        {
+          "name": "scope_sla_rule_queryset",
+          "line": 361
+        },
+        {
+          "name": "scope_workflow_execution_queryset",
+          "line": 369
+        },
+        {
+          "name": "scope_generated_report_queryset",
+          "line": 373
+        },
+        {
+          "name": "scope_audit_log_queryset",
+          "line": 383
+        },
+        {
+          "name": "organization_for_instance",
+          "line": 391
+        },
+        {
+          "name": "manager_queryset_for_organization",
+          "line": 404
+        },
+        {
+          "name": "_select_least_loaded_agent_for_roles",
+          "line": 414
+        },
+        {
+          "name": "next_ticket_priority",
+          "line": 438
+        },
+        {
+          "name": "select_escalation_agent",
+          "line": 449
+        },
+        {
+          "name": "create_notification",
+          "line": 515
+        },
+        {
+          "name": "ensure_default_sla_rules",
+          "line": 529
+        },
+        {
+          "name": "ensure_default_equipment_categories",
+          "line": 548
+        },
+        {
+          "name": "_resolve_sla_rule",
+          "line": 563
+        },
+        {
+          "name": "get_sla_rule_values",
+          "line": 572
+        },
+        {
+          "name": "compute_ticket_response_deadline",
+          "line": 582
+        },
+        {
+          "name": "compute_ticket_sla_deadline",
+          "line": 588
+        },
+        {
+          "name": "generate_client_username",
+          "line": 594
+        },
+        {
+          "name": "provision_client_account",
+          "line": 605
+        },
+        {
+          "name": "_extract_request_audit_metadata",
+          "line": 684
+        },
+        {
+          "name": "log_audit_event",
+          "line": 704
+        },
+        {
+          "name": "calculate_sentiment",
+          "line": 761
+        },
+        {
+          "name": "detect_fraud_signals",
+          "line": 779
+        },
+        {
+          "name": "maybe_flag_ticket_as_fraud",
+          "line": 784
+        },
+        {
+          "name": "_parse_completion_json",
+          "line": 799
+        },
+        {
+          "name": "_coerce_bool",
+          "line": 808
+        },
+        {
+          "name": "_coerce_decimal",
+          "line": 816
+        },
+        {
+          "name": "_format_money",
+          "line": 823
+        },
+        {
+          "name": "_clamp_confidence",
+          "line": 827
+        },
+        {
+          "name": "_completed_at",
+          "line": 836
+        },
+        {
+          "name": "compute_average_first_response_hours",
+          "line": 840
+        },
+        {
+          "name": "compute_average_resolution_hours",
+          "line": 856
+        },
+        {
+          "name": "compute_agent_performance_rows",
+          "line": 873
+        },
+        {
+          "name": "_ticket_context",
+          "line": 931
+        },
+        {
+          "name": "_client_context",
+          "line": 950
+        },
+        {
+          "name": "_product_context",
+          "line": 1005
+        },
+        {
+          "name": "compute_ticket_hotspots",
+          "line": 1044
+        },
+        {
+          "name": "compute_ticket_volume_series",
+          "line": 1058
+        },
+        {
+          "name": "compute_ticket_monthly_series",
+          "line": 1075
+        },
+        {
+          "name": "compute_technician_status_rows",
+          "line": 1101
+        },
+        {
+          "name": "parse_reporting_recipients",
+          "line": 1115
+        },
+        {
+          "name": "generate_intervention_pdf",
+          "line": 1137
+        },
+        {
+          "name": "send_intervention_assignment_email",
+          "line": 1190
+        },
+        {
+          "name": "archive_generated_report",
+          "line": 1211
+        },
+        {
+          "name": "send_report_to_recipients",
+          "line": 1237
+        },
+        {
+          "name": "sync_ticket_assignment",
+          "line": 1253
+        },
+        {
+          "name": "escalate_ticket",
+          "line": 1291
+        },
+        {
+          "name": "ensure_assignment_intervention",
+          "line": 1404
+        },
+        {
+          "name": "infer_priority_from_text",
+          "line": 1469
+        },
+        {
+          "name": "infer_issue_from_text",
+          "line": 1487
+        },
+        {
+          "name": "infer_ticket_category_from_text",
+          "line": 1495
+        },
+        {
+          "name": "match_knowledge_articles",
+          "line": 1518
+        },
+        {
+          "name": "answer_support_question",
+          "line": 1552
+        },
+        {
+          "name": "select_least_loaded_agent",
+          "line": 1666
+        },
+        {
+          "name": "ensure_offer",
+          "line": 1690
+        },
+        {
+          "name": "generate_offer_recommendations",
+          "line": 1714
+        },
+        {
+          "name": "apply_agentic_resolution",
+          "line": 1781
+        },
+        {
+          "name": "build_customer_insight",
+          "line": 1926
+        },
+        {
+          "name": "_create_predictive_alert",
+          "line": 2035
+        },
+        {
+          "name": "run_predictive_analysis",
+          "line": 2069
+        },
+        {
+          "name": "credit_account_for_ticket",
+          "line": 2278
+        },
+        {
+          "name": "conditions_match_ticket",
+          "line": 2367
+        },
+        {
+          "name": "execute_rule_action",
+          "line": 2387
+        },
+        {
+          "name": "run_automation_rules_for_ticket",
+          "line": 2479
+        },
+        {
+          "name": "notify_ticket_status_change",
+          "line": 2560
+        },
+        {
+          "name": "_notification_recently_sent",
+          "line": 2610
+        },
+        {
+          "name": "dispatch_sla_operational_notifications",
+          "line": 2619
+        },
+        {
+          "name": "auto_close_resolved_tickets",
+          "line": 2689
+        },
+        {
+          "name": "_due_report_types",
+          "line": 2726
+        },
+        {
+          "name": "dispatch_due_reports",
+          "line": 2737
+        },
+        {
+          "name": "answer_bi_question",
+          "line": 2806
+        }
+      ]
+    },
+    {
+      "path": "afrilux_sav/sav/static/sav/admin-theme.css",
+      "lines": 240,
+      "suffix": ".css",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/static/sav/app.js",
+      "lines": 412,
+      "suffix": ".js",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/static/sav/styles.css",
+      "lines": 1142,
+      "suffix": ".css",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/admin/base_site.html",
+      "lines": 28,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/sav/administration.html",
+      "lines": 246,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/sav/alert_list.html",
+      "lines": 50,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/sav/analytics.html",
+      "lines": 32,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/sav/api_docs.html",
+      "lines": 96,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/sav/base.html",
+      "lines": 76,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/sav/dashboard.html",
+      "lines": 365,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/sav/knowledge_detail.html",
+      "lines": 17,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/sav/knowledge_list.html",
+      "lines": 35,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/sav/login.html",
+      "lines": 63,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/sav/notification_list.html",
+      "lines": 38,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/sav/planning.html",
+      "lines": 102,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/sav/product_confirm_delete.html",
+      "lines": 43,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/sav/product_detail.html",
+      "lines": 125,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/sav/product_form.html",
+      "lines": 34,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/sav/product_list.html",
+      "lines": 46,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/sav/register.html",
+      "lines": 46,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/sav/reporting.html",
+      "lines": 131,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/sav/support.html",
+      "lines": 99,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/sav/technician_space.html",
+      "lines": 152,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/sav/ticket_detail.html",
+      "lines": 408,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/sav/ticket_form.html",
+      "lines": 90,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templates/sav/ticket_list.html",
+      "lines": 75,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templatetags/__init__.py",
+      "lines": 1,
+      "suffix": ".py",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/templatetags/sav_extras.py",
+      "lines": 66,
+      "suffix": ".py",
+      "classes": [],
+      "functions": [
+        {
+          "name": "badge_tone",
+          "line": 9
+        },
+        {
+          "name": "percentage",
+          "line": 38
+        },
+        {
+          "name": "currency_xaf",
+          "line": 46
+        },
+        {
+          "name": "sentiment_tone",
+          "line": 55
+        }
+      ]
+    },
+    {
+      "path": "afrilux_sav/sav/tests.py",
+      "lines": 2187,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "SavPlatformTests",
+          "line": 42
+        }
+      ],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/urls.py",
+      "lines": 94,
+      "suffix": ".py",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/views.py",
+      "lines": 1862,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "AuditedModelViewSet",
+          "line": 148
+        },
+        {
+          "name": "UserViewSet",
+          "line": 160
+        },
+        {
+          "name": "ClientContactViewSet",
+          "line": 245
+        },
+        {
+          "name": "ClientViewSet",
+          "line": 275
+        },
+        {
+          "name": "EquipmentCategoryViewSet",
+          "line": 316
+        },
+        {
+          "name": "ProductViewSet",
+          "line": 348
+        },
+        {
+          "name": "EquipmentViewSet",
+          "line": 402
+        },
+        {
+          "name": "TicketViewSet",
+          "line": 406
+        },
+        {
+          "name": "FinancialTransactionViewSet",
+          "line": 709
+        },
+        {
+          "name": "TicketFeedbackViewSet",
+          "line": 757
+        },
+        {
+          "name": "MessageViewSet",
+          "line": 794
+        },
+        {
+          "name": "TicketAttachmentViewSet",
+          "line": 856
+        },
+        {
+          "name": "InterventionViewSet",
+          "line": 913
+        },
+        {
+          "name": "InterventionMediaViewSet",
+          "line": 962
+        },
+        {
+          "name": "TicketAssignmentViewSet",
+          "line": 1002
+        },
+        {
+          "name": "SlaRuleViewSet",
+          "line": 1020
+        },
+        {
+          "name": "GeneratedReportViewSet",
+          "line": 1052
+        },
+        {
+          "name": "SupportSessionViewSet",
+          "line": 1067
+        },
+        {
+          "name": "ProductTelemetryViewSet",
+          "line": 1107
+        },
+        {
+          "name": "PredictiveAlertViewSet",
+          "line": 1145
+        },
+        {
+          "name": "KnowledgeArticleViewSet",
+          "line": 1186
+        },
+        {
+          "name": "NotificationViewSet",
+          "line": 1224
+        },
+        {
+          "name": "DeviceRegistrationViewSet",
+          "line": 1311
+        },
+        {
+          "name": "OfferRecommendationViewSet",
+          "line": 1357
+        },
+        {
+          "name": "AutomationRuleViewSet",
+          "line": 1418
+        },
+        {
+          "name": "WorkflowExecutionViewSet",
+          "line": 1439
+        },
+        {
+          "name": "AIActionLogViewSet",
+          "line": 1450
+        },
+        {
+          "name": "AuditLogViewSet",
+          "line": 1461
+        },
+        {
+          "name": "HealthCheckView",
+          "line": 1472
+        },
+        {
+          "name": "PublicOrganizationListView",
+          "line": 1504
+        },
+        {
+          "name": "ClientRegistrationView",
+          "line": 1514
+        },
+        {
+          "name": "DashboardView",
+          "line": 1533
+        },
+        {
+          "name": "BaseReportView",
+          "line": 1642
+        },
+        {
+          "name": "DailyReportView",
+          "line": 1653
+        },
+        {
+          "name": "WeeklyReportView",
+          "line": 1657
+        },
+        {
+          "name": "MonthlyReportView",
+          "line": 1661
+        },
+        {
+          "name": "ReportExportView",
+          "line": 1665
+        },
+        {
+          "name": "TechnicianPlanningView",
+          "line": 1725
+        },
+        {
+          "name": "AnalyticsAskView",
+          "line": 1806
+        },
+        {
+          "name": "SupportAssistantView",
+          "line": 1818
+        },
+        {
+          "name": "TwilioInboundWebhookView",
+          "line": 1841
+        },
+        {
+          "name": "EmailInboundWebhookView",
+          "line": 1851
+        }
+      ],
+      "functions": [
+        {
+          "name": "_parse_anchor_date",
+          "line": 1633
+        }
+      ]
+    },
+    {
+      "path": "afrilux_sav/sav/web_urls.py",
+      "lines": 91,
+      "suffix": ".py",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav/sav/web_views.py",
+      "lines": 1209,
+      "suffix": ".py",
+      "classes": [
+        {
+          "name": "InternalRequiredMixin",
+          "line": 181
+        },
+        {
+          "name": "ManagerRequiredMixin",
+          "line": 186
+        },
+        {
+          "name": "AdminRequiredMixin",
+          "line": 191
+        },
+        {
+          "name": "BackofficeRequiredMixin",
+          "line": 199
+        },
+        {
+          "name": "ReportingRequiredMixin",
+          "line": 204
+        },
+        {
+          "name": "TechnicianWorkspaceRequiredMixin",
+          "line": 209
+        },
+        {
+          "name": "HomeRedirectView",
+          "line": 214
+        },
+        {
+          "name": "ClientRegisterView",
+          "line": 221
+        },
+        {
+          "name": "DashboardPageView",
+          "line": 244
+        },
+        {
+          "name": "ReportingPageView",
+          "line": 274
+        },
+        {
+          "name": "TechnicianPlanningPageView",
+          "line": 292
+        },
+        {
+          "name": "AdministrationPageView",
+          "line": 357
+        },
+        {
+          "name": "TechnicianSpaceView",
+          "line": 408
+        },
+        {
+          "name": "SupportPageView",
+          "line": 463
+        },
+        {
+          "name": "TicketListView",
+          "line": 487
+        },
+        {
+          "name": "TicketCreateView",
+          "line": 543
+        },
+        {
+          "name": "TicketUpdateView",
+          "line": 620
+        },
+        {
+          "name": "TicketDetailView",
+          "line": 650
+        },
+        {
+          "name": "TicketConfirmResolutionView",
+          "line": 727
+        },
+        {
+          "name": "TicketReopenView",
+          "line": 759
+        },
+        {
+          "name": "TicketEscalateView",
+          "line": 794
+        },
+        {
+          "name": "TicketMessageCreateView",
+          "line": 834
+        },
+        {
+          "name": "TicketAgenticResolutionView",
+          "line": 869
+        },
+        {
+          "name": "TicketAttachmentCreateView",
+          "line": 878
+        },
+        {
+          "name": "TicketInterventionCreateView",
+          "line": 899
+        },
+        {
+          "name": "TicketInterventionPdfView",
+          "line": 929
+        },
+        {
+          "name": "TicketAutomationRunView",
+          "line": 939
+        },
+        {
+          "name": "TicketCreditAccountView",
+          "line": 947
+        },
+        {
+          "name": "ProductListView",
+          "line": 973
+        },
+        {
+          "name": "ProductCreateView",
+          "line": 1001
+        },
+        {
+          "name": "ProductUpdateView",
+          "line": 1023
+        },
+        {
+          "name": "ProductDeleteView",
+          "line": 1048
+        },
+        {
+          "name": "ProductDetailView",
+          "line": 1077
+        },
+        {
+          "name": "ProductPredictiveAnalysisView",
+          "line": 1105
+        },
+        {
+          "name": "PredictiveAlertListView",
+          "line": 1113
+        },
+        {
+          "name": "KnowledgeArticleListView",
+          "line": 1141
+        },
+        {
+          "name": "KnowledgeArticleDetailView",
+          "line": 1165
+        },
+        {
+          "name": "NotificationListView",
+          "line": 1176
+        },
+        {
+          "name": "NotificationMarkReadView",
+          "line": 1186
+        },
+        {
+          "name": "AnalyticsPageView",
+          "line": 1196
+        }
+      ],
+      "functions": [
+        {
+          "name": "_choice_map",
+          "line": 91
+        },
+        {
+          "name": "_percentage",
+          "line": 95
+        },
+        {
+          "name": "_dashboard_snapshot",
+          "line": 101
+        }
+      ]
+    },
+    {
+      "path": "afrilux_sav_mobile/.flutter-plugins-dependencies",
+      "lines": 1,
+      "suffix": ".flutter-plugins-dependencies",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/.gitignore",
+      "lines": 49,
+      "suffix": ".gitignore",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/.idea/libraries/Dart_SDK.xml",
+      "lines": 19,
+      "suffix": ".xml",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/.idea/libraries/KotlinJavaRuntime.xml",
+      "lines": 15,
+      "suffix": ".xml",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/.idea/modules.xml",
+      "lines": 9,
+      "suffix": ".xml",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/.idea/runConfigurations/main_dart.xml",
+      "lines": 6,
+      "suffix": ".xml",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/.idea/workspace.xml",
+      "lines": 36,
+      "suffix": ".xml",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/.metadata",
+      "lines": 45,
+      "suffix": ".metadata",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/README.md",
+      "lines": 111,
+      "suffix": ".md",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/afrilux_sav_mobile.iml",
+      "lines": 17,
+      "suffix": ".iml",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/analysis_options.yaml",
+      "lines": 28,
+      "suffix": ".yaml",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/android/.gitignore",
+      "lines": 14,
+      "suffix": ".gitignore",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/android/afrilux_sav_mobile_android.iml",
+      "lines": 29,
+      "suffix": ".iml",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/android/app/build.gradle.kts",
+      "lines": 71,
+      "suffix": ".kts",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/android/app/src/debug/AndroidManifest.xml",
+      "lines": 7,
+      "suffix": ".xml",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/android/app/src/main/AndroidManifest.xml",
+      "lines": 48,
+      "suffix": ".xml",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java",
+      "lines": 39,
+      "suffix": ".java",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/android/app/src/main/kotlin/com/afrilux/savmobile/MainActivity.kt",
+      "lines": 5,
+      "suffix": ".kt",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/android/app/src/main/res/drawable/launch_background.xml",
+      "lines": 12,
+      "suffix": ".xml",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/android/app/src/main/res/drawable-v21/launch_background.xml",
+      "lines": 12,
+      "suffix": ".xml",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/android/app/src/main/res/values/styles.xml",
+      "lines": 18,
+      "suffix": ".xml",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/android/app/src/main/res/values-night/styles.xml",
+      "lines": 18,
+      "suffix": ".xml",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/android/app/src/profile/AndroidManifest.xml",
+      "lines": 7,
+      "suffix": ".xml",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/android/build.gradle.kts",
+      "lines": 24,
+      "suffix": ".kts",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/android/gradle/wrapper/gradle-wrapper.properties",
+      "lines": 5,
+      "suffix": ".properties",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/android/gradle.properties",
+      "lines": 4,
+      "suffix": ".properties",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/android/gradlew",
+      "lines": 160,
+      "suffix": "gradlew",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/android/gradlew.bat",
+      "lines": 90,
+      "suffix": ".bat",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/android/key.properties.example",
+      "lines": 4,
+      "suffix": ".example",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/android/local.properties",
+      "lines": 5,
+      "suffix": ".properties",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/android/settings.gradle.kts",
+      "lines": 26,
+      "suffix": ".kts",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/.gitignore",
+      "lines": 34,
+      "suffix": ".gitignore",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Flutter/AppFrameworkInfo.plist",
+      "lines": 26,
+      "suffix": ".plist",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Flutter/Debug.xcconfig",
+      "lines": 1,
+      "suffix": ".xcconfig",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Flutter/Generated.xcconfig",
+      "lines": 14,
+      "suffix": ".xcconfig",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Flutter/Release.xcconfig",
+      "lines": 1,
+      "suffix": ".xcconfig",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Flutter/ephemeral/flutter_lldb_helper.py",
+      "lines": 32,
+      "suffix": ".py",
+      "classes": [],
+      "functions": [
+        {
+          "name": "handle_new_rx_page",
+          "line": 7
+        },
+        {
+          "name": "__lldb_init_module",
+          "line": 24
+        }
+      ]
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Flutter/ephemeral/flutter_lldbinit",
+      "lines": 5,
+      "suffix": "flutter_lldbinit",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Flutter/flutter_export_environment.sh",
+      "lines": 13,
+      "suffix": ".sh",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Runner/AppDelegate.swift",
+      "lines": 13,
+      "suffix": ".swift",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/Contents.json",
+      "lines": 122,
+      "suffix": ".json",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Runner/Assets.xcassets/LaunchImage.imageset/Contents.json",
+      "lines": 23,
+      "suffix": ".json",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Runner/Assets.xcassets/LaunchImage.imageset/README.md",
+      "lines": 5,
+      "suffix": ".md",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Runner/Base.lproj/LaunchScreen.storyboard",
+      "lines": 37,
+      "suffix": ".storyboard",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Runner/Base.lproj/Main.storyboard",
+      "lines": 26,
+      "suffix": ".storyboard",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Runner/GeneratedPluginRegistrant.h",
+      "lines": 19,
+      "suffix": ".h",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Runner/GeneratedPluginRegistrant.m",
+      "lines": 35,
+      "suffix": ".m",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Runner/Info.plist",
+      "lines": 81,
+      "suffix": ".plist",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Runner/Runner-Bridging-Header.h",
+      "lines": 1,
+      "suffix": ".h",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Runner.xcodeproj/project.pbxproj",
+      "lines": 616,
+      "suffix": ".pbxproj",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Runner.xcodeproj/project.xcworkspace/contents.xcworkspacedata",
+      "lines": 7,
+      "suffix": ".xcworkspacedata",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist",
+      "lines": 8,
+      "suffix": ".plist",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings",
+      "lines": 8,
+      "suffix": ".xcsettings",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme",
+      "lines": 101,
+      "suffix": ".xcscheme",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Runner.xcworkspace/contents.xcworkspacedata",
+      "lines": 7,
+      "suffix": ".xcworkspacedata",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Runner.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist",
+      "lines": 8,
+      "suffix": ".plist",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/Runner.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings",
+      "lines": 8,
+      "suffix": ".xcsettings",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/ios/RunnerTests/RunnerTests.swift",
+      "lines": 12,
+      "suffix": ".swift",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/lib/main.dart",
+      "lines": 5,
+      "suffix": ".dart",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/lib/src/api_client.dart",
+      "lines": 282,
+      "suffix": ".dart",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/lib/src/app.dart",
+      "lines": 3469,
+      "suffix": ".dart",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/lib/src/push_notifications.dart",
+      "lines": 169,
+      "suffix": ".dart",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/linux/.gitignore",
+      "lines": 1,
+      "suffix": ".gitignore",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/linux/CMakeLists.txt",
+      "lines": 128,
+      "suffix": ".txt",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/linux/flutter/CMakeLists.txt",
+      "lines": 88,
+      "suffix": ".txt",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/linux/flutter/generated_plugin_registrant.cc",
+      "lines": 15,
+      "suffix": ".cc",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/linux/flutter/generated_plugin_registrant.h",
+      "lines": 15,
+      "suffix": ".h",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/linux/flutter/generated_plugins.cmake",
+      "lines": 24,
+      "suffix": ".cmake",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/linux/runner/CMakeLists.txt",
+      "lines": 26,
+      "suffix": ".txt",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/linux/runner/main.cc",
+      "lines": 6,
+      "suffix": ".cc",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/linux/runner/my_application.cc",
+      "lines": 144,
+      "suffix": ".cc",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/linux/runner/my_application.h",
+      "lines": 18,
+      "suffix": ".h",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/.gitignore",
+      "lines": 7,
+      "suffix": ".gitignore",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/Flutter/Flutter-Debug.xcconfig",
+      "lines": 1,
+      "suffix": ".xcconfig",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/Flutter/Flutter-Release.xcconfig",
+      "lines": 1,
+      "suffix": ".xcconfig",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/Flutter/GeneratedPluginRegistrant.swift",
+      "lines": 16,
+      "suffix": ".swift",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/Flutter/ephemeral/Flutter-Generated.xcconfig",
+      "lines": 11,
+      "suffix": ".xcconfig",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/Flutter/ephemeral/flutter_export_environment.sh",
+      "lines": 12,
+      "suffix": ".sh",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/Runner/AppDelegate.swift",
+      "lines": 13,
+      "suffix": ".swift",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/Runner/Assets.xcassets/AppIcon.appiconset/Contents.json",
+      "lines": 68,
+      "suffix": ".json",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/Runner/Base.lproj/MainMenu.xib",
+      "lines": 343,
+      "suffix": ".xib",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/Runner/Configs/AppInfo.xcconfig",
+      "lines": 14,
+      "suffix": ".xcconfig",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/Runner/Configs/Debug.xcconfig",
+      "lines": 2,
+      "suffix": ".xcconfig",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/Runner/Configs/Release.xcconfig",
+      "lines": 2,
+      "suffix": ".xcconfig",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/Runner/Configs/Warnings.xcconfig",
+      "lines": 13,
+      "suffix": ".xcconfig",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/Runner/DebugProfile.entitlements",
+      "lines": 12,
+      "suffix": ".entitlements",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/Runner/Info.plist",
+      "lines": 32,
+      "suffix": ".plist",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/Runner/MainFlutterWindow.swift",
+      "lines": 15,
+      "suffix": ".swift",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/Runner/Release.entitlements",
+      "lines": 8,
+      "suffix": ".entitlements",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/Runner.xcodeproj/project.pbxproj",
+      "lines": 705,
+      "suffix": ".pbxproj",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/Runner.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist",
+      "lines": 8,
+      "suffix": ".plist",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme",
+      "lines": 99,
+      "suffix": ".xcscheme",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/Runner.xcworkspace/contents.xcworkspacedata",
+      "lines": 7,
+      "suffix": ".xcworkspacedata",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/Runner.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist",
+      "lines": 8,
+      "suffix": ".plist",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/macos/RunnerTests/RunnerTests.swift",
+      "lines": 12,
+      "suffix": ".swift",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/pubspec.lock",
+      "lines": 434,
+      "suffix": ".lock",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/pubspec.yaml",
+      "lines": 92,
+      "suffix": ".yaml",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/test/widget_test.dart",
+      "lines": 13,
+      "suffix": ".dart",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/web/index.html",
+      "lines": 38,
+      "suffix": ".html",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/web/manifest.json",
+      "lines": 35,
+      "suffix": ".json",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/windows/.gitignore",
+      "lines": 17,
+      "suffix": ".gitignore",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/windows/CMakeLists.txt",
+      "lines": 108,
+      "suffix": ".txt",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/windows/flutter/CMakeLists.txt",
+      "lines": 109,
+      "suffix": ".txt",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/windows/flutter/generated_plugin_registrant.cc",
+      "lines": 17,
+      "suffix": ".cc",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/windows/flutter/generated_plugin_registrant.h",
+      "lines": 15,
+      "suffix": ".h",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/windows/flutter/generated_plugins.cmake",
+      "lines": 25,
+      "suffix": ".cmake",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/windows/runner/CMakeLists.txt",
+      "lines": 40,
+      "suffix": ".txt",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/windows/runner/Runner.rc",
+      "lines": 121,
+      "suffix": ".rc",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/windows/runner/flutter_window.cpp",
+      "lines": 71,
+      "suffix": ".cpp",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/windows/runner/flutter_window.h",
+      "lines": 33,
+      "suffix": ".h",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/windows/runner/main.cpp",
+      "lines": 43,
+      "suffix": ".cpp",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/windows/runner/resource.h",
+      "lines": 16,
+      "suffix": ".h",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/windows/runner/runner.exe.manifest",
+      "lines": 14,
+      "suffix": ".manifest",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/windows/runner/utils.cpp",
+      "lines": 65,
+      "suffix": ".cpp",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/windows/runner/utils.h",
+      "lines": 19,
+      "suffix": ".h",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/windows/runner/win32_window.cpp",
+      "lines": 288,
+      "suffix": ".cpp",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "afrilux_sav_mobile/windows/runner/win32_window.h",
+      "lines": 102,
+      "suffix": ".h",
+      "classes": [],
+      "functions": []
+    },
+    {
+      "path": "main.py",
+      "lines": 16,
+      "suffix": ".py",
+      "classes": [],
+      "functions": [
+        {
+          "name": "print_hi",
+          "line": 7
+        }
+      ]
+    },
+    {
+      "path": "render.yaml",
+      "lines": 83,
+      "suffix": ".yaml",
+      "classes": [],
+      "functions": []
+    }
+  ],
+  "web_routes": [
+    {
+      "path": "",
+      "name": "home"
+    },
+    {
+      "path": "register/",
+      "name": "register"
+    },
+    {
+      "path": "logout/",
+      "name": "logout"
+    },
+    {
+      "path": "dashboard/",
+      "name": "dashboard"
+    },
+    {
+      "path": "technician-space/",
+      "name": "technician-space"
+    },
+    {
+      "path": "planning/",
+      "name": "planning-page"
+    },
+    {
+      "path": "administration/",
+      "name": "administration-page"
+    },
+    {
+      "path": "reporting/",
+      "name": "reporting-page"
+    },
+    {
+      "path": "support/",
+      "name": "support-page"
+    },
+    {
+      "path": "tickets/",
+      "name": "ticket-list"
+    },
+    {
+      "path": "tickets/new/",
+      "name": "ticket-create"
+    },
+    {
+      "path": "tickets/<int:pk>/",
+      "name": "ticket-detail"
+    },
+    {
+      "path": "tickets/<int:pk>/edit/",
+      "name": "ticket-update"
+    },
+    {
+      "path": "tickets/<int:pk>/message/",
+      "name": "ticket-message-create"
+    },
+    {
+      "path": "tickets/<int:pk>/attachments/",
+      "name": "ticket-attachment-create"
+    },
+    {
+      "path": "tickets/<int:pk>/confirm-resolution/",
+      "name": "ticket-confirm-resolution"
+    },
+    {
+      "path": "tickets/<int:pk>/reopen/",
+      "name": "ticket-reopen-web"
+    },
+    {
+      "path": "tickets/<int:pk>/escalate/",
+      "name": "ticket-escalate-web"
+    },
+    {
+      "path": "tickets/<int:pk>/interventions/",
+      "name": "ticket-intervention-create"
+    },
+    {
+      "path": "tickets/<int:pk>/agentic-resolution/",
+      "name": "ticket-agentic-web"
+    },
+    {
+      "path": "tickets/<int:pk>/run-automation/",
+      "name": "ticket-automation-web"
+    },
+    {
+      "path": "tickets/<int:pk>/credit-account/",
+      "name": "ticket-credit-account"
+    },
+    {
+      "path": "products/",
+      "name": "product-list"
+    },
+    {
+      "path": "products/new/",
+      "name": "product-create"
+    },
+    {
+      "path": "products/<int:pk>/edit/",
+      "name": "product-update"
+    },
+    {
+      "path": "products/<int:pk>/delete/",
+      "name": "product-delete"
+    },
+    {
+      "path": "products/<int:pk>/",
+      "name": "product-detail"
+    },
+    {
+      "path": "products/<int:pk>/predictive-analysis/",
+      "name": "product-predictive-web"
+    },
+    {
+      "path": "alerts/",
+      "name": "alert-list"
+    },
+    {
+      "path": "knowledge/",
+      "name": "knowledge-list"
+    },
+    {
+      "path": "knowledge/<slug:slug>/",
+      "name": "knowledge-detail"
+    },
+    {
+      "path": "notifications/",
+      "name": "notifications"
+    },
+    {
+      "path": "notifications/<int:pk>/read/",
+      "name": "notification-read"
+    },
+    {
+      "path": "analytics/",
+      "name": "analytics-page"
+    }
+  ],
+  "api_routes": [
+    {
+      "path": "health/",
+      "name": "health"
+    },
+    {
+      "path": "public/organizations/",
+      "name": "public-organizations"
+    },
+    {
+      "path": "public/register/",
+      "name": "public-register"
+    },
+    {
+      "path": "dashboard/",
+      "name": "dashboard"
+    },
+    {
+      "path": "rapports/journalier/",
+      "name": "report-daily"
+    },
+    {
+      "path": "rapports/hebdomadaire/",
+      "name": "report-weekly"
+    },
+    {
+      "path": "rapports/mensuel/",
+      "name": "report-monthly"
+    },
+    {
+      "path": "rapports/export/<str:report_type>/",
+      "name": "report-export"
+    },
+    {
+      "path": "analytics/ask/",
+      "name": "analytics-ask"
+    },
+    {
+      "path": "techniciens/<int:pk>/planning/",
+      "name": "technician-planning"
+    },
+    {
+      "path": "support/assistant/",
+      "name": "support-assistant"
+    },
+    {
+      "path": "webhook/email/",
+      "name": "email-webhook"
+    },
+    {
+      "path": "channels/email/inbound/",
+      "name": "email-inbound"
+    },
+    {
+      "path": "channels/twilio/inbound/",
+      "name": "twilio-inbound"
+    }
+  ],
+  "router_resources": [
+    {
+      "resource": "users",
+      "viewset": "UserViewSet"
+    },
+    {
+      "resource": "clients",
+      "viewset": "ClientViewSet"
+    },
+    {
+      "resource": "client-contacts",
+      "viewset": "ClientContactViewSet"
+    },
+    {
+      "resource": "equipment-categories",
+      "viewset": "EquipmentCategoryViewSet"
+    },
+    {
+      "resource": "products",
+      "viewset": "ProductViewSet"
+    },
+    {
+      "resource": "equipements",
+      "viewset": "EquipmentViewSet"
+    },
+    {
+      "resource": "tickets",
+      "viewset": "TicketViewSet"
+    },
+    {
+      "resource": "ticket-assignments",
+      "viewset": "TicketAssignmentViewSet"
+    },
+    {
+      "resource": "financial-transactions",
+      "viewset": "FinancialTransactionViewSet"
+    },
+    {
+      "resource": "messages",
+      "viewset": "MessageViewSet"
+    },
+    {
+      "resource": "ticket-attachments",
+      "viewset": "TicketAttachmentViewSet"
+    },
+    {
+      "resource": "ticket-feedbacks",
+      "viewset": "TicketFeedbackViewSet"
+    },
+    {
+      "resource": "interventions",
+      "viewset": "InterventionViewSet"
+    },
+    {
+      "resource": "intervention-media",
+      "viewset": "InterventionMediaViewSet"
+    },
+    {
+      "resource": "support-sessions",
+      "viewset": "SupportSessionViewSet"
+    },
+    {
+      "resource": "telemetry",
+      "viewset": "ProductTelemetryViewSet"
+    },
+    {
+      "resource": "predictive-alerts",
+      "viewset": "PredictiveAlertViewSet"
+    },
+    {
+      "resource": "knowledge-articles",
+      "viewset": "KnowledgeArticleViewSet"
+    },
+    {
+      "resource": "notifications",
+      "viewset": "NotificationViewSet"
+    },
+    {
+      "resource": "device-registrations",
+      "viewset": "DeviceRegistrationViewSet"
+    },
+    {
+      "resource": "offers",
+      "viewset": "OfferRecommendationViewSet"
+    },
+    {
+      "resource": "sla-rules",
+      "viewset": "SlaRuleViewSet"
+    },
+    {
+      "resource": "generated-reports",
+      "viewset": "GeneratedReportViewSet"
+    },
+    {
+      "resource": "automation-rules",
+      "viewset": "AutomationRuleViewSet"
+    },
+    {
+      "resource": "workflow-executions",
+      "viewset": "WorkflowExecutionViewSet"
+    },
+    {
+      "resource": "ai-actions",
+      "viewset": "AIActionLogViewSet"
+    },
+    {
+      "resource": "audit-logs",
+      "viewset": "AuditLogViewSet"
+    }
+  ]
+}

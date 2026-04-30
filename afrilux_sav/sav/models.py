@@ -109,6 +109,17 @@ class User(AbstractUser):
         (ROLE_MANAGER, "Responsable SAV (legacy)"),
     )
 
+    SUPPORT_ROLE_ALIASES = (
+        ROLE_SUPPORT,
+        ROLE_MANAGER,
+        ROLE_HEAD_SAV,
+        ROLE_SOFTWARE_OWNER,
+        ROLE_SUPERVISOR,
+        ROLE_QA,
+        ROLE_DISPATCHER,
+        ROLE_VIP_SUPPORT,
+        ROLE_AGENT,
+    )
     STANDARD_SUPPORT_ROLES = (
         ROLE_SUPPORT,
         ROLE_AGENT,
@@ -117,8 +128,7 @@ class User(AbstractUser):
         ROLE_VIP_SUPPORT,
     )
     FRONTLINE_ROLES = (
-        *STANDARD_SUPPORT_ROLES,
-        *SPECIAL_SUPPORT_ROLES,
+        *SUPPORT_ROLE_ALIASES,
     )
     TECHNICAL_ROLES = (
         ROLE_TECHNICIAN,
@@ -152,15 +162,15 @@ class User(AbstractUser):
         *BOT_ROLES,
     )
     MANAGER_ROLES = (
+        ROLE_SUPPORT,
         *LEADERSHIP_ROLES,
     )
     ASSIGNABLE_ROLES = (
-        *STANDARD_SUPPORT_ROLES,
-        *SPECIAL_SUPPORT_ROLES,
+        *SUPPORT_ROLE_ALIASES,
         ROLE_TECHNICIAN,
     )
     TECHNICIAN_SPACE_ROLES = (
-        *ASSIGNABLE_ROLES,
+        ROLE_TECHNICIAN,
         ROLE_EXPERT,
     )
     REPORTING_ROLES = (
@@ -249,9 +259,13 @@ class User(AbstractUser):
     def is_ticket_assignment_eligible(self):
         if not self.is_active:
             return False
-        if self.role in {*self.STANDARD_SUPPORT_ROLES, *self.SPECIAL_SUPPORT_ROLES}:
+        if self.role in set(self.SUPPORT_ROLE_ALIASES):
             return True
         return self.role == self.ROLE_TECHNICIAN and self.technician_status == "available"
+
+    @property
+    def has_support_role(self):
+        return self.role in set(self.SUPPORT_ROLE_ALIASES)
 
     @property
     def is_ticket_escalation_target(self):
@@ -342,7 +356,6 @@ class FinancialTransaction(TimeStampedModel):
     TYPE_DEPOSIT = "deposit"
     TYPE_WITHDRAWAL = "withdrawal"
     TYPE_PAYMENT = "payment"
-    TYPE_TRANSFER = "transfer"
     TYPE_REFUND = "refund"
     TYPE_ADJUSTMENT = "adjustment"
 
@@ -350,7 +363,6 @@ class FinancialTransaction(TimeStampedModel):
         (TYPE_DEPOSIT, "Depot"),
         (TYPE_WITHDRAWAL, "Retrait"),
         (TYPE_PAYMENT, "Paiement"),
-        (TYPE_TRANSFER, "Transfert"),
         (TYPE_REFUND, "Remboursement"),
         (TYPE_ADJUSTMENT, "Ajustement"),
     )
@@ -397,7 +409,6 @@ class FinancialTransaction(TimeStampedModel):
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     currency = models.CharField(max_length=10, default="XAF")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_COMPLETED)
-    suspected_fraud = models.BooleanField(default=False)
     description = models.TextField(blank=True)
     metadata = models.JSONField(default=dict, blank=True)
     occurred_at = models.DateTimeField(default=timezone.now)
@@ -602,10 +613,7 @@ class Ticket(TimeStampedModel):
         (CATEGORY_BREAKDOWN, "Panne"),
         (CATEGORY_INSTALLATION, "Installation"),
         (CATEGORY_MAINTENANCE, "Maintenance"),
-        (CATEGORY_COMPLAINT, "Reclamation"),
-        (CATEGORY_PAYMENT, "Paiement"),
         (CATEGORY_BUG, "Bug"),
-        (CATEGORY_ACCOUNT, "Compte"),
     )
 
     reference = models.CharField(max_length=32, unique=True, editable=False, blank=True)
@@ -637,13 +645,6 @@ class Ticket(TimeStampedModel):
         null=True,
         blank=True,
     )
-    related_transaction = models.ForeignKey(
-        "FinancialTransaction",
-        on_delete=models.SET_NULL,
-        related_name="tickets",
-        null=True,
-        blank=True,
-    )
     assigned_agent = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -659,7 +660,6 @@ class Ticket(TimeStampedModel):
     channel = models.CharField(max_length=20, choices=CHANNEL_CHOICES, default=CHANNEL_WEB)
     status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=STATUS_NEW)
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default=PRIORITY_NORMAL)
-    suspected_fraud = models.BooleanField(default=False)
     location = models.CharField(max_length=255, blank=True)
     sla_deadline = models.DateTimeField(null=True, blank=True)
     first_response_at = models.DateTimeField(null=True, blank=True)
@@ -698,6 +698,13 @@ class Ticket(TimeStampedModel):
             self.created_by = self.client
         if not self.reference:
             self.reference = self.generate_reference()
+        if self.assigned_agent_id and self.status in {
+            self.STATUS_NEW,
+            self.STATUS_QUALIFICATION,
+            self.STATUS_PENDING_CUSTOMER,
+            self.STATUS_WAITING,
+        }:
+            self.status = self.STATUS_ASSIGNED
         if self.status == self.STATUS_RESOLVED and not self.resolved_at:
             self.resolved_at = timezone.now()
         if self.status == self.STATUS_CLOSED and not self.closed_at:
@@ -810,6 +817,13 @@ class Message(models.Model):
 
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="messages")
     sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name="messages")
+    recipient = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="received_messages",
+        null=True,
+        blank=True,
+    )
     message_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default=TYPE_PUBLIC)
     channel = models.CharField(max_length=20, choices=CHANNEL_CHOICES, default=CHANNEL_PORTAL)
     direction = models.CharField(max_length=20, choices=DIRECTION_CHOICES, default=DIRECTION_INBOUND)
@@ -938,7 +952,6 @@ class Intervention(models.Model):
     client_signature_file = models.FileField(upload_to="interventions/signatures/%Y/%m/%d/", blank=True)
     report_pdf = models.FileField(upload_to="interventions/reports/%Y/%m/%d/", blank=True)
     report_generated_at = models.DateTimeField(null=True, blank=True)
-    cost = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db.models import Q
 from django.utils import timezone
 
-from .models import EquipmentCategory, FinancialTransaction, Intervention, InterventionMedia, Message, Organization, Product, Ticket, TicketAttachment, User
+from .models import EquipmentCategory, Intervention, InterventionMedia, Message, Organization, Product, Ticket, TicketAttachment, User
 from .services import (
     ESCALATION_TARGET_CFAO_MANAGER,
     ESCALATION_TARGET_CFAO_WORKS,
@@ -118,7 +118,6 @@ class TicketForm(forms.ModelForm):
             "client",
             "product_label",
             "product",
-            "related_transaction",
             "assigned_agent",
             "title",
             "description",
@@ -127,7 +126,6 @@ class TicketForm(forms.ModelForm):
             "channel",
             "status",
             "priority",
-            "suspected_fraud",
             "location",
             "sla_deadline",
         ]
@@ -150,20 +148,22 @@ class TicketForm(forms.ModelForm):
         self.fields["product"].widget = forms.HiddenInput()
         client_queryset = User.objects.filter(role=User.ROLE_CLIENT)
         agent_queryset = User.objects.filter(is_active=True).filter(
-            Q(role__in=User.STANDARD_SUPPORT_ROLES + User.SPECIAL_SUPPORT_ROLES)
+            Q(role__in=User.SUPPORT_ROLE_ALIASES)
             | Q(role=User.ROLE_TECHNICIAN, technician_status="available")
         )
-        transaction_queryset = FinancialTransaction.objects.select_related("client")
         if user and user.is_authenticated and not user.is_superuser and user.organization_id:
             client_queryset = client_queryset.filter(organization=user.organization)
             agent_queryset = agent_queryset.filter(organization=user.organization)
-            transaction_queryset = transaction_queryset.filter(organization=user.organization)
         if self.instance.pk and self.instance.assigned_agent_id:
             agent_queryset = (agent_queryset | User.objects.filter(pk=self.instance.assigned_agent_id)).distinct()
-        self.fields["client"].queryset = client_queryset.order_by("username")
-        self.fields["assigned_agent"].queryset = agent_queryset.order_by("username")
+        self.fields["client"].queryset = client_queryset.order_by("company_name", "first_name", "last_name", "username")
+        self.fields["assigned_agent"].queryset = agent_queryset.order_by("first_name", "last_name", "username")
         self.fields["assigned_agent"].help_text = "Affectation autorisee uniquement aux agents et techniciens disponibles."
-        self.fields["related_transaction"].queryset = transaction_queryset.order_by("-occurred_at", "-created_at")
+        self.fields["category"].choices = [
+            choice
+            for choice in self.fields["category"].choices
+            if choice[0] in {Ticket.CATEGORY_BREAKDOWN, Ticket.CATEGORY_INSTALLATION, Ticket.CATEGORY_MAINTENANCE, Ticket.CATEGORY_BUG}
+        ]
         if not self.instance.pk and not self.initial.get("sla_deadline"):
             base_priority = self.initial.get("priority") or self.fields["priority"].initial or Ticket.PRIORITY_NORMAL
             org = getattr(user, "organization", None) if user and user.is_authenticated else None
@@ -181,10 +181,10 @@ class TicketForm(forms.ModelForm):
             self.fields["status"].initial = Ticket.STATUS_NEW
             self.fields["status"].widget = forms.HiddenInput()
             self.fields["status"].required = False
-            self.fields["suspected_fraud"].widget = forms.HiddenInput()
-            self.fields["suspected_fraud"].required = False
+            self.fields["priority"].initial = Ticket.PRIORITY_NORMAL
+            self.fields["priority"].widget = forms.HiddenInput()
+            self.fields["priority"].required = False
             self.fields["product"].queryset = Product.objects.filter(client=user).order_by("name")
-            self.fields["related_transaction"].queryset = transaction_queryset.filter(client=user).order_by("-occurred_at", "-created_at")
         else:
             product_queryset = Product.objects.select_related("client")
             if user and user.is_authenticated and not user.is_superuser and user.organization_id:
@@ -195,13 +195,16 @@ class TicketForm(forms.ModelForm):
         cleaned_data = super().clean()
         client = cleaned_data.get("client")
         product = cleaned_data.get("product")
-        related_transaction = cleaned_data.get("related_transaction")
         assigned_agent = cleaned_data.get("assigned_agent")
         cleaned_data["business_domain"] = cleaned_data.get("business_domain") or Ticket.DOMAIN_OTHER
+        if self.user and self.user.is_authenticated and self.user.role == User.ROLE_CLIENT:
+            cleaned_data["client"] = self.user
+            cleaned_data["assigned_agent"] = None
+            cleaned_data["status"] = Ticket.STATUS_NEW
+            cleaned_data["priority"] = Ticket.PRIORITY_NORMAL
+            client = self.user
         if client and product and product.client_id != client.id:
             self.add_error("product", "Le produit selectionne n'appartient pas a ce client.")
-        if client and related_transaction and related_transaction.client_id != client.id:
-            self.add_error("related_transaction", "La transaction selectionnee n'appartient pas a ce client.")
         previous_assigned_agent = getattr(self.instance, "assigned_agent", None)
         if (
             assigned_agent
@@ -226,10 +229,11 @@ class TicketCreateForm(TicketForm):
         choices=CLIENT_MODE_CHOICES,
         initial=CLIENT_MODE_EXISTING,
     )
-    existing_client_email = forms.EmailField(
+    existing_client_email = forms.CharField(
         required=False,
-        label="Email du client existant",
-        widget=forms.EmailInput(attrs={"placeholder": "client.existant@example.com"}),
+        label="Client existant",
+        max_length=255,
+        widget=forms.TextInput(attrs={"placeholder": "Nom, entreprise, email ou telephone"}),
     )
     client_name = forms.CharField(
         required=False,
@@ -266,10 +270,8 @@ class TicketCreateForm(TicketForm):
         if self._uses_inline_client_creation():
             self.fields["client"].required = False
             self.fields["client"].widget = forms.HiddenInput()
-            self.fields["related_transaction"].widget = forms.HiddenInput()
-            self.fields["related_transaction"].required = False
-            self.fields["client_mode"].help_text = "Choisissez un client existant par email ou creez-en un nouveau."
-            self.fields["existing_client_email"].help_text = "Le ticket sera rattache automatiquement au client retrouve."
+            self.fields["client_mode"].help_text = "Choisissez un client existant par recherche ou creez-en un nouveau."
+            self.fields["existing_client_email"].help_text = "Recherchez par nom, entreprise, email, telephone ou identifiant."
             self.fields["client_name"].help_text = "Le compte client sera cree automatiquement a la validation du ticket."
             self.fields["client_email"].help_text = "Cet email servira d'identifiant de connexion du client."
             self.fields["client_password1"].help_text = "Definissez le mot de passe initial du compte client."
@@ -279,7 +281,11 @@ class TicketCreateForm(TicketForm):
                 self.fields[field_name].required = False
 
     def _uses_inline_client_creation(self):
-        return bool(self.user and self.user.is_authenticated and self.user.role != User.ROLE_CLIENT)
+        return bool(
+            self.user
+            and self.user.is_authenticated
+            and (self.user.is_superuser or self.user.role in set(User.SUPPORT_ROLE_ALIASES))
+        )
 
     def _inline_client_organization(self):
         return getattr(self.user, "organization", None)
@@ -291,15 +297,30 @@ class TicketCreateForm(TicketForm):
             return ""
         return mode
 
-    def _lookup_existing_client(self, email):
-        normalized_email = (email or "").strip().lower()
+    def _lookup_existing_client(self, search_value):
+        normalized_search = (search_value or "").strip()
+        normalized_email = normalized_search.lower()
         organization = self._inline_client_organization()
-        existing = User.objects.filter(email__iexact=normalized_email).order_by("id").first()
+        queryset = User.objects.filter(role=User.ROLE_CLIENT)
+        if organization is not None:
+            queryset = queryset.filter(Q(organization=organization) | Q(organization__slug="contacts-entrants"))
+        existing = (
+            queryset.filter(
+                Q(email__iexact=normalized_email)
+                | Q(username__icontains=normalized_search)
+                | Q(first_name__icontains=normalized_search)
+                | Q(last_name__icontains=normalized_search)
+                | Q(company_name__icontains=normalized_search)
+                | Q(phone__icontains=normalized_search)
+            )
+            .order_by("company_name", "first_name", "last_name", "username", "id")
+            .first()
+        )
 
         if not existing:
-            raise ValidationError("Aucun client existant ne correspond a cet email. Choisissez 'Nouveau client' pour le creer.")
+            raise ValidationError("Aucun client existant ne correspond a cette recherche. Choisissez 'Nouveau client' pour le creer.")
         if existing.role != User.ROLE_CLIENT:
-            raise ValidationError("Cet email est deja utilise par un compte interne.")
+            raise ValidationError("Cette recherche correspond a un compte interne.")
         if existing.organization_id and organization and existing.organization_id != organization.id:
             if existing.organization.slug != "contacts-entrants":
                 raise ValidationError("Cet email est deja rattache a une autre organisation.")
@@ -324,12 +345,11 @@ class TicketCreateForm(TicketForm):
 
         cleaned_data["client"] = None
         cleaned_data["product"] = None
-        cleaned_data["related_transaction"] = None
 
         if mode == self.CLIENT_MODE_EXISTING:
             existing_client_email = (cleaned_data.get("existing_client_email") or "").strip().lower()
             if not existing_client_email:
-                self.add_error("existing_client_email", "L'email du client existant est obligatoire.")
+                self.add_error("existing_client_email", "La recherche du client existant est obligatoire.")
             else:
                 try:
                     cleaned_data["client"] = self._lookup_existing_client(existing_client_email)
@@ -416,15 +436,42 @@ class TicketCreateForm(TicketForm):
 
 
 class MessageForm(forms.ModelForm):
+    recipient = forms.ModelChoiceField(
+        queryset=User.objects.none(),
+        required=False,
+        label="Destinataire",
+        empty_label="Tous les participants autorises",
+    )
+
     class Meta:
         model = Message
-        fields = ["message_type", "channel", "content"]
+        fields = ["recipient", "message_type", "channel", "content"]
         widgets = {
             "content": forms.Textarea(attrs={"rows": 4, "placeholder": "Ajoutez un message, une note interne ou une mise a jour..."}),
         }
 
-    def __init__(self, *args, user=None, **kwargs):
+    def __init__(self, *args, user=None, ticket=None, **kwargs):
         super().__init__(*args, **kwargs)
+        recipient_queryset = User.objects.none()
+        if user and user.is_authenticated and ticket:
+            participant_ids = {ticket.client_id}
+            if ticket.assigned_agent_id and ticket.assigned_agent.has_support_role:
+                participant_ids.add(ticket.assigned_agent_id)
+            if user.organization_id:
+                support_queryset = User.objects.filter(
+                    organization=user.organization,
+                    role__in=User.SUPPORT_ROLE_ALIASES,
+                    is_active=True,
+                )
+            else:
+                support_queryset = User.objects.filter(role__in=User.SUPPORT_ROLE_ALIASES, is_active=True)
+            participant_ids.update(support_queryset.values_list("id", flat=True))
+            recipient_queryset = User.objects.filter(pk__in=participant_ids).exclude(pk=user.pk).order_by(
+                "first_name",
+                "last_name",
+                "username",
+            )
+        self.fields["recipient"].queryset = recipient_queryset
         if not user or user.role == User.ROLE_CLIENT:
             self.fields["message_type"].widget = forms.HiddenInput()
             self.fields["message_type"].initial = Message.TYPE_PUBLIC
@@ -503,7 +550,6 @@ class InterventionForm(forms.ModelForm):
             "client_signed_by",
             "client_signed_at",
             "client_signature_file",
-            "cost",
             "intervention_media",
         ]
         widgets = {
@@ -519,12 +565,33 @@ class InterventionForm(forms.ModelForm):
             ),
         }
 
-    def __init__(self, *args, user=None, **kwargs):
+    TECHNICIAN_ALLOWED_FIELDS = {
+        "status",
+        "scheduled_for",
+        "started_at",
+        "finished_at",
+        "diagnosis",
+        "action_taken",
+        "parts_used",
+        "structured_parts_used",
+        "time_spent_minutes",
+        "technical_report",
+        "client_signed_at",
+        "client_signature_file",
+    }
+
+    def __init__(self, *args, user=None, ticket=None, **kwargs):
         super().__init__(*args, **kwargs)
         agent_queryset = User.objects.filter(role__in=User.ASSIGNABLE_ROLES, is_active=True)
         if user and user.is_authenticated and not user.is_superuser and user.organization_id:
             agent_queryset = agent_queryset.filter(organization=user.organization)
         self.fields["agent"].queryset = agent_queryset.order_by("first_name", "last_name", "username")
+        if user and user.is_authenticated and user.role == User.ROLE_TECHNICIAN:
+            for field_name in list(self.fields):
+                if field_name not in self.TECHNICIAN_ALLOWED_FIELDS:
+                    self.fields.pop(field_name)
+            if ticket and ticket.assigned_agent_id == user.id:
+                self.initial.setdefault("status", Intervention.STATUS_IN_PROGRESS)
 
     def clean_structured_parts_used(self):
         value = self.cleaned_data.get("structured_parts_used")

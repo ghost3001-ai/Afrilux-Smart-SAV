@@ -51,52 +51,6 @@ function initializeThemeToggle() {
   });
 }
 
-function initializeTicketWizard() {
-  const root = document.querySelector("[data-ticket-wizard]");
-  if (!root) {
-    return;
-  }
-  const panels = Array.from(root.querySelectorAll("[data-wizard-panel]"));
-  const steps = Array.from(root.querySelectorAll("[data-wizard-step]"));
-  const nextButton = root.querySelector("[data-wizard-next]");
-  const previousButton = root.querySelector("[data-wizard-prev]");
-  const submitButton = root.querySelector("[data-wizard-submit]");
-  let activeIndex = 0;
-
-  const sync = () => {
-    panels.forEach((panel, index) => {
-      panel.classList.toggle("is-active", index === activeIndex);
-    });
-    steps.forEach((step, index) => {
-      step.classList.toggle("is-active", index === activeIndex);
-    });
-    previousButton.hidden = activeIndex === 0;
-    nextButton.hidden = activeIndex === panels.length - 1;
-    submitButton.hidden = activeIndex !== panels.length - 1;
-  };
-
-  const validateCurrentStep = () => {
-    const currentPanel = panels[activeIndex];
-    const fields = Array.from(currentPanel.querySelectorAll("input, select, textarea")).filter(
-      (field) => field.type !== "hidden" && field.willValidate && !field.closest(".field--hidden"),
-    );
-    return fields.every((field) => field.reportValidity());
-  };
-
-  nextButton.addEventListener("click", () => {
-    if (!validateCurrentStep()) {
-      return;
-    }
-    activeIndex = Math.min(activeIndex + 1, panels.length - 1);
-    sync();
-  });
-  previousButton.addEventListener("click", () => {
-    activeIndex = Math.max(activeIndex - 1, 0);
-    sync();
-  });
-  sync();
-}
-
 function initializeTicketClientMode() {
   const root = document.querySelector("[data-ticket-client-mode]");
   if (!root) {
@@ -435,7 +389,6 @@ document.addEventListener("DOMContentLoaded", () => {
   initializeThemeToggle();
   initializeClientRegistration();
   initializeTicketClientMode();
-  initializeTicketWizard();
   initializeDashboardCharts();
   initializePlanningBoard();
   initializeSupportChat();

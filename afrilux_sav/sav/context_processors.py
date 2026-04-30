@@ -8,6 +8,7 @@ from .services import (
     has_technician_space_access,
     is_internal_user,
     is_manager_user,
+    is_support_user,
     role_workspace_name,
     scope_notification_queryset,
     scope_ticket_queryset,
@@ -18,15 +19,7 @@ def sav_shell(request):
     def _workspace_payload(current_user):
         workspace_name = role_workspace_name(current_user)
         workspace_url = reverse(workspace_name)
-        if workspace_name == "ticket-list" and current_user.role in {
-            current_user.ROLE_SUPPORT,
-            current_user.ROLE_AGENT,
-            current_user.ROLE_VIP_SUPPORT,
-            current_user.ROLE_CFAO_MANAGER,
-            current_user.ROLE_CFAO_WORKS,
-            current_user.ROLE_HVAC_MANAGER,
-            current_user.ROLE_SOFTWARE_OWNER,
-        }:
+        if workspace_name == "ticket-list" and is_support_user(current_user):
             workspace_url = f"{workspace_url}?assignment=mine"
         workspace_labels = {
             "support-page": "Espace client",

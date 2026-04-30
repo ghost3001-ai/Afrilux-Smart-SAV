@@ -35,8 +35,14 @@ Color _colorFromHex(String value, Color fallback) {
 }
 
 ThemeData _themeForSession(SavSession? session) {
-  final primary = _colorFromHex(session?.organizationPrimaryColor ?? "", const Color(0xFFD5671D));
-  final accent = _colorFromHex(session?.organizationAccentColor ?? "", const Color(0xFF1C7A6A));
+  final primary = _colorFromHex(
+    session?.organizationPrimaryColor ?? "",
+    const Color(0xFFD5671D),
+  );
+  final accent = _colorFromHex(
+    session?.organizationAccentColor ?? "",
+    const Color(0xFF1C7A6A),
+  );
   return ThemeData(
     useMaterial3: true,
     colorScheme: ColorScheme.fromSeed(
@@ -47,7 +53,10 @@ ThemeData _themeForSession(SavSession? session) {
       surface: const Color(0xFFF8F2E7),
     ),
     scaffoldBackgroundColor: const Color(0xFFF2EBDC),
-    appBarTheme: const AppBarTheme(centerTitle: false, backgroundColor: Colors.transparent),
+    appBarTheme: const AppBarTheme(
+      centerTitle: false,
+      backgroundColor: Colors.transparent,
+    ),
     cardTheme: CardThemeData(
       color: Colors.white.withValues(alpha: 0.88),
       elevation: 0,
@@ -68,28 +77,53 @@ class SavSession {
   final Map<String, dynamic> currentUser;
 
   String get role => (currentUser["role"] ?? "client").toString();
+  bool get isSupportRole => const {
+    "support",
+    "manager",
+    "head_sav",
+    "software_owner",
+    "supervisor",
+    "qa",
+    "dispatcher",
+    "vip_support",
+    "agent",
+  }.contains(role);
   bool get isInternal => const {
-        "agent",
-        "manager",
-        "support",
-        "technician",
-        "head_sav",
-        "admin",
-      }.contains(role);
-  bool get isManager => const {
-        "manager",
-        "head_sav",
-        "admin",
-      }.contains(role);
+    "agent",
+    "manager",
+    "support",
+    "technician",
+    "expert",
+    "head_sav",
+    "software_owner",
+    "supervisor",
+    "qa",
+    "dispatcher",
+    "vip_support",
+    "cfao_manager",
+    "cfao_works",
+    "hvac_manager",
+    "admin",
+  }.contains(role);
+  bool get isManager => isSupportRole || role == "admin";
+  bool get isAdmin => role == "admin";
+  bool get canCreateTicket => role == "client" || isSupportRole;
   int get userId => (currentUser["id"] ?? 0) as int;
-  String get organizationName => (currentUser["organization_name"] ?? "").toString();
-  String get organizationPrimaryColor => (currentUser["organization_primary_color"] ?? "").toString();
-  String get organizationAccentColor => (currentUser["organization_accent_color"] ?? "").toString();
-  String get organizationTagline => (currentUser["organization_portal_tagline"] ?? "").toString();
-  String get organizationSupportEmail => (currentUser["organization_support_email"] ?? "").toString();
-  String get organizationSupportPhone => (currentUser["organization_support_phone"] ?? "").toString();
+  String get organizationName =>
+      (currentUser["organization_name"] ?? "").toString();
+  String get organizationPrimaryColor =>
+      (currentUser["organization_primary_color"] ?? "").toString();
+  String get organizationAccentColor =>
+      (currentUser["organization_accent_color"] ?? "").toString();
+  String get organizationTagline =>
+      (currentUser["organization_portal_tagline"] ?? "").toString();
+  String get organizationSupportEmail =>
+      (currentUser["organization_support_email"] ?? "").toString();
+  String get organizationSupportPhone =>
+      (currentUser["organization_support_phone"] ?? "").toString();
   bool get isVerified => currentUser["is_verified"] == true;
-  String get accountBalance => (currentUser["account_balance"] ?? "0.00").toString();
+  String get accountBalance =>
+      (currentUser["account_balance"] ?? "0.00").toString();
   String get displayName {
     final firstName = (currentUser["first_name"] ?? "").toString();
     final lastName = (currentUser["last_name"] ?? "").toString();
@@ -103,7 +137,7 @@ class SavSession {
 
 class SessionController extends ChangeNotifier {
   SessionController({required GlobalKey<NavigatorState> navigatorKey})
-      : _pushNotifications = PushNotificationService(navigatorKey: navigatorKey);
+    : _pushNotifications = PushNotificationService(navigatorKey: navigatorKey);
 
   SavSession? session;
   bool loading = false;
@@ -120,15 +154,17 @@ class SessionController extends ChangeNotifier {
     notifyListeners();
 
     final normalizedServerUrl = _normalizeServerUrlValue(serverUrl);
-    final api = SavApiClient(
-      baseUrl: "${normalizedServerUrl}api/",
-    );
+    final api = SavApiClient(baseUrl: "${normalizedServerUrl}api/");
 
     try {
       await api.authenticate(identifier: username, password: password);
       final currentUser = await api.getMap("users/me/");
       await api.getMap("dashboard/");
-      session = SavSession(api: api, baseServerUrl: normalizedServerUrl, currentUser: currentUser);
+      session = SavSession(
+        api: api,
+        baseServerUrl: normalizedServerUrl,
+        currentUser: currentUser,
+      );
       await _pushNotifications.registerCurrentDevice(api);
     } catch (exc) {
       error = exc.toString();
@@ -157,7 +193,6 @@ class SessionController extends ChangeNotifier {
     unawaited(_pushNotifications.dispose());
     super.dispose();
   }
-
 }
 
 class AfriluxSavMobileApp extends StatefulWidget {
@@ -220,11 +255,17 @@ class _LoginPageState extends State<LoginPage> {
   @override
   void initState() {
     super.initState();
-    const definedHost = String.fromEnvironment("SAV_SERVER_URL", defaultValue: "");
-    final fallbackHost = !kIsWeb && defaultTargetPlatform == TargetPlatform.android
+    const definedHost = String.fromEnvironment(
+      "SAV_SERVER_URL",
+      defaultValue: "",
+    );
+    final fallbackHost =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.android
         ? "http://10.0.2.2:8000"
         : "http://127.0.0.1:8000";
-    _serverController = TextEditingController(text: definedHost.isNotEmpty ? definedHost : fallbackHost);
+    _serverController = TextEditingController(
+      text: definedHost.isNotEmpty ? definedHost : fallbackHost,
+    );
   }
 
   @override
@@ -246,7 +287,8 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _openRegistration() async {
     final registeredEmail = await Navigator.of(context).push<String>(
       MaterialPageRoute<String>(
-        builder: (_) => ClientRegistrationPage(initialServerUrl: _serverController.text),
+        builder: (_) =>
+            ClientRegistrationPage(initialServerUrl: _serverController.text),
       ),
     );
     if (registeredEmail != null && registeredEmail.isNotEmpty) {
@@ -289,15 +331,27 @@ class _LoginPageState extends State<LoginPage> {
                               children: [
                                 Text(
                                   "Afrilux SAV Mobile",
-                                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w700),
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .headlineMedium
+                                      ?.copyWith(fontWeight: FontWeight.w700),
                                 ),
                                 const SizedBox(height: 8),
                                 Text(
                                   "Tickets, predictive maintenance, notifications and AI actions in one mobile cockpit.",
-                                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.black54, height: 1.5),
+                                  style: Theme.of(context).textTheme.bodyLarge
+                                      ?.copyWith(
+                                        color: Colors.black54,
+                                        height: 1.5,
+                                      ),
                                 ),
                                 const SizedBox(height: 20),
-                                _LabeledField(label: "Serveur", child: TextField(controller: _serverController)),
+                                _LabeledField(
+                                  label: "Serveur",
+                                  child: TextField(
+                                    controller: _serverController,
+                                  ),
+                                ),
                                 const SizedBox(height: 14),
                                 _LabeledField(
                                   label: "Email ou identifiant",
@@ -317,22 +371,33 @@ class _LoginPageState extends State<LoginPage> {
                                 ),
                                 if (widget.controller.error != null) ...[
                                   const SizedBox(height: 14),
-                                  Text(widget.controller.error!, style: const TextStyle(color: Color(0xFFA33728))),
+                                  Text(
+                                    widget.controller.error!,
+                                    style: const TextStyle(
+                                      color: Color(0xFFA33728),
+                                    ),
+                                  ),
                                 ],
                                 const SizedBox(height: 20),
                                 FilledButton(
-                                  onPressed: widget.controller.loading ? null : _submit,
+                                  onPressed: widget.controller.loading
+                                      ? null
+                                      : _submit,
                                   child: widget.controller.loading
                                       ? const SizedBox(
                                           height: 18,
                                           width: 18,
-                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
                                         )
                                       : const Text("Connexion"),
                                 ),
                                 const SizedBox(height: 12),
                                 OutlinedButton(
-                                  onPressed: widget.controller.loading ? null : _openRegistration,
+                                  onPressed: widget.controller.loading
+                                      ? null
+                                      : _openRegistration,
                                   child: const Text("Creer un compte client"),
                                 ),
                               ],
@@ -343,7 +408,8 @@ class _LoginPageState extends State<LoginPage> {
                         Text(
                           "Astuce: sur emulateur Android, utilisez http://10.0.2.2:8000",
                           textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.black54),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: Colors.black54),
                         ),
                       ],
                     ),
@@ -375,7 +441,8 @@ class _ClientRegistrationPageState extends State<ClientRegistrationPage> {
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _companyController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  final TextEditingController _confirmPasswordController = TextEditingController();
+  final TextEditingController _confirmPasswordController =
+      TextEditingController();
 
   List<Map<String, dynamic>> _organizations = [];
   int? _selectedOrganizationId;
@@ -404,7 +471,9 @@ class _ClientRegistrationPageState extends State<ClientRegistrationPage> {
   }
 
   SavPublicApiClient _publicApi() {
-    final normalizedServerUrl = _normalizeServerUrlValue(_serverController.text);
+    final normalizedServerUrl = _normalizeServerUrlValue(
+      _serverController.text,
+    );
     return SavPublicApiClient(baseUrl: "${normalizedServerUrl}api/");
   }
 
@@ -420,7 +489,9 @@ class _ClientRegistrationPageState extends State<ClientRegistrationPage> {
       }
       setState(() {
         _organizations = organizations;
-        _selectedOrganizationId = organizations.isNotEmpty ? organizations.first["id"] as int : null;
+        _selectedOrganizationId = organizations.isNotEmpty
+            ? organizations.first["id"] as int
+            : null;
       });
     } catch (exc) {
       if (!mounted) {
@@ -458,7 +529,9 @@ class _ClientRegistrationPageState extends State<ClientRegistrationPage> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Compte cree. Connectez-vous avec votre email.")),
+        const SnackBar(
+          content: Text("Compte cree. Connectez-vous avec votre email."),
+        ),
       );
       Navigator.of(context).pop(_emailController.text.trim());
     } catch (exc) {
@@ -488,26 +561,36 @@ class _ClientRegistrationPageState extends State<ClientRegistrationPage> {
                 children: [
                   Text(
                     "Inscription",
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     "Renseignez manuellement vos informations pour creer votre acces client SAV.",
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.black54),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyLarge?.copyWith(color: Colors.black54),
                   ),
                   const SizedBox(height: 20),
-                  _LabeledField(label: "Serveur", child: TextField(controller: _serverController)),
+                  _LabeledField(
+                    label: "Serveur",
+                    child: TextField(controller: _serverController),
+                  ),
                   const SizedBox(height: 12),
                   Row(
                     children: [
                       Expanded(
                         child: Text(
                           "Organisation cliente",
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w700),
                         ),
                       ),
                       TextButton(
-                        onPressed: _loadingOrganizations ? null : _loadOrganizations,
+                        onPressed: _loadingOrganizations
+                            ? null
+                            : _loadOrganizations,
                         child: const Text("Actualiser"),
                       ),
                     ],
@@ -520,21 +603,35 @@ class _ClientRegistrationPageState extends State<ClientRegistrationPage> {
                   else
                     DropdownButtonFormField<int>(
                       initialValue: _selectedOrganizationId,
-                      decoration: const InputDecoration(labelText: "Organisation"),
+                      decoration: const InputDecoration(
+                        labelText: "Organisation",
+                      ),
                       items: _organizations
                           .map(
                             (organization) => DropdownMenuItem<int>(
                               value: organization["id"] as int,
-                              child: Text((organization["display_name"] ?? organization["slug"] ?? "").toString()),
+                              child: Text(
+                                (organization["display_name"] ??
+                                        organization["slug"] ??
+                                        "")
+                                    .toString(),
+                              ),
                             ),
                           )
                           .toList(),
-                      onChanged: (value) => setState(() => _selectedOrganizationId = value),
+                      onChanged: (value) =>
+                          setState(() => _selectedOrganizationId = value),
                     ),
                   const SizedBox(height: 12),
-                  _LabeledField(label: "Prenom", child: TextField(controller: _firstNameController)),
+                  _LabeledField(
+                    label: "Prenom",
+                    child: TextField(controller: _firstNameController),
+                  ),
                   const SizedBox(height: 12),
-                  _LabeledField(label: "Nom", child: TextField(controller: _lastNameController)),
+                  _LabeledField(
+                    label: "Nom",
+                    child: TextField(controller: _lastNameController),
+                  ),
                   const SizedBox(height: 12),
                   _LabeledField(
                     label: "Email",
@@ -544,13 +641,22 @@ class _ClientRegistrationPageState extends State<ClientRegistrationPage> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  _LabeledField(label: "Telephone", child: TextField(controller: _phoneController)),
+                  _LabeledField(
+                    label: "Telephone",
+                    child: TextField(controller: _phoneController),
+                  ),
                   const SizedBox(height: 12),
-                  _LabeledField(label: "Entreprise", child: TextField(controller: _companyController)),
+                  _LabeledField(
+                    label: "Entreprise",
+                    child: TextField(controller: _companyController),
+                  ),
                   const SizedBox(height: 12),
                   _LabeledField(
                     label: "Mot de passe",
-                    child: TextField(controller: _passwordController, obscureText: true),
+                    child: TextField(
+                      controller: _passwordController,
+                      obscureText: true,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   _LabeledField(
@@ -563,7 +669,10 @@ class _ClientRegistrationPageState extends State<ClientRegistrationPage> {
                   ),
                   if (_error != null) ...[
                     const SizedBox(height: 12),
-                    Text(_error!, style: const TextStyle(color: Color(0xFFA33728))),
+                    Text(
+                      _error!,
+                      style: const TextStyle(color: Color(0xFFA33728)),
+                    ),
                   ],
                   const SizedBox(height: 18),
                   FilledButton(
@@ -605,7 +714,10 @@ class _HomeShellState extends State<HomeShell> {
     final pages = session.isInternal
         ? [
             DashboardScreen(session: session),
-            TicketsScreen(key: ValueKey("tickets-$_ticketRevision"), session: session),
+            TicketsScreen(
+              key: ValueKey("tickets-$_ticketRevision"),
+              session: session,
+            ),
             ProductsScreen(session: session),
             KnowledgeScreen(session: session),
             OffersScreen(session: session),
@@ -613,14 +725,24 @@ class _HomeShellState extends State<HomeShell> {
           ]
         : [
             DashboardScreen(session: session),
-            SupportScreen(key: ValueKey("support-$_ticketRevision"), session: session),
+            SupportScreen(
+              key: ValueKey("support-$_ticketRevision"),
+              session: session,
+            ),
             ProductsScreen(session: session),
             KnowledgeScreen(session: session),
             OffersScreen(session: session),
             NotificationsScreen(session: session),
           ];
     final supportLabel = session.isInternal ? "Tickets" : "Support";
-    final titles = ["Dashboard", supportLabel, "Produits", "Knowledge", "Offres", "Inbox"];
+    final titles = [
+      "Dashboard",
+      supportLabel,
+      "Produits",
+      "Knowledge",
+      "Offres",
+      "Inbox",
+    ];
 
     return Scaffold(
       appBar: AppBar(
@@ -631,7 +753,9 @@ class _HomeShellState extends State<HomeShell> {
             if (session.organizationName.isNotEmpty)
               Text(
                 session.organizationName,
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(color: Colors.black54),
+                style: Theme.of(
+                  context,
+                ).textTheme.labelMedium?.copyWith(color: Colors.black54),
               ),
           ],
         ),
@@ -656,7 +780,7 @@ class _HomeShellState extends State<HomeShell> {
         ],
       ),
       body: SafeArea(child: pages[_index]),
-      floatingActionButton: _index == 1
+      floatingActionButton: _index == 1 && session.canCreateTicket
           ? FloatingActionButton.extended(
               onPressed: () async {
                 final created = await Navigator.of(context).push<bool>(
@@ -671,7 +795,9 @@ class _HomeShellState extends State<HomeShell> {
                   });
                 }
               },
-              label: Text(session.isInternal ? "Nouveau ticket" : "Demander de l'aide"),
+              label: Text(
+                session.isInternal ? "Nouveau ticket" : "Demander de l'aide",
+              ),
               icon: const Icon(Icons.add),
             )
           : null,
@@ -679,12 +805,30 @@ class _HomeShellState extends State<HomeShell> {
         selectedIndex: _index,
         onDestinationSelected: (value) => setState(() => _index = value),
         destinations: [
-          const NavigationDestination(icon: Icon(Icons.space_dashboard_outlined), label: "Dashboard"),
-          NavigationDestination(icon: const Icon(Icons.support_agent_outlined), label: supportLabel),
-          const NavigationDestination(icon: Icon(Icons.battery_charging_full_outlined), label: "Produits"),
-          const NavigationDestination(icon: Icon(Icons.menu_book_outlined), label: "Knowledge"),
-          const NavigationDestination(icon: Icon(Icons.local_offer_outlined), label: "Offres"),
-          const NavigationDestination(icon: Icon(Icons.notifications_outlined), label: "Inbox"),
+          const NavigationDestination(
+            icon: Icon(Icons.space_dashboard_outlined),
+            label: "Dashboard",
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.support_agent_outlined),
+            label: supportLabel,
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.battery_charging_full_outlined),
+            label: "Produits",
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.menu_book_outlined),
+            label: "Knowledge",
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.local_offer_outlined),
+            label: "Offres",
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.notifications_outlined),
+            label: "Inbox",
+          ),
         ],
       ),
     );
@@ -725,21 +869,53 @@ class _DashboardScreenState extends State<DashboardScreen> {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError) {
-          return _ErrorView(message: snapshot.error.toString(), onRetry: _refresh);
+          return _ErrorView(
+            message: snapshot.error.toString(),
+            onRetry: _refresh,
+          );
         }
 
         final data = snapshot.data ?? <String, dynamic>{};
         final stats = [
-          ("Tickets ouverts", "${data["tickets_open"] ?? 0}", Icons.confirmation_number_outlined),
-          ("Critiques", "${data["tickets_critical_open"] ?? 0}", Icons.priority_high_rounded),
-          ("Plaintes", "${data["complaints_total"] ?? 0}", Icons.report_problem_outlined),
-          ("Fraude", "${data["fraud_suspected_open"] ?? 0}", Icons.gpp_maybe_outlined),
-          ("Produits", "${data["products_total"] ?? 0}", Icons.battery_charging_full_outlined),
-          ("Alertes", "${data["predictive_alerts_open"] ?? 0}", Icons.sensors_outlined),
-          ("Notifications", "${data["notifications_unread"] ?? 0}", Icons.notifications_active_outlined),
-          ("IA executee", "${data["ai_actions_executed"] ?? 0}", Icons.auto_awesome_outlined),
+          (
+            "Tickets ouverts",
+            "${data["tickets_open"] ?? 0}",
+            Icons.confirmation_number_outlined,
+          ),
+          (
+            "Critiques",
+            "${data["tickets_critical_open"] ?? 0}",
+            Icons.priority_high_rounded,
+          ),
+          (
+            "Maintenance",
+            "${data["maintenance_total"] ?? 0}",
+            Icons.build_circle_outlined,
+          ),
+          ("Bugs", "${data["bug_total"] ?? 0}", Icons.bug_report_outlined),
+          (
+            "Produits",
+            "${data["products_total"] ?? 0}",
+            Icons.battery_charging_full_outlined,
+          ),
+          (
+            "Alertes",
+            "${data["predictive_alerts_open"] ?? 0}",
+            Icons.sensors_outlined,
+          ),
+          (
+            "Notifications",
+            "${data["notifications_unread"] ?? 0}",
+            Icons.notifications_active_outlined,
+          ),
+          (
+            "IA executee",
+            "${data["ai_actions_executed"] ?? 0}",
+            Icons.auto_awesome_outlined,
+          ),
         ];
-        final topAgents = (data["top_agents"] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+        final topAgents = (data["top_agents"] as List<dynamic>? ?? [])
+            .cast<Map<String, dynamic>>();
 
         return RefreshIndicator(
           onRefresh: _refresh,
@@ -753,8 +929,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 subtitle: widget.session.organizationTagline.isNotEmpty
                     ? "${widget.session.organizationTagline} · Connecte en tant que ${widget.session.displayName}."
                     : widget.session.isInternal
-                        ? "Bienvenue ${widget.session.displayName}. Supervisez les tickets, les SLA, les interventions et le reporting SAV."
-                        : "Bienvenue ${widget.session.displayName}. Suivez vos demandes SAV, vos equipements et les notifications de traitement.",
+                    ? "Bienvenue ${widget.session.displayName}. Supervisez les tickets, les SLA, les interventions et le reporting SAV."
+                    : "Bienvenue ${widget.session.displayName}. Suivez vos demandes SAV, vos equipements et les notifications de traitement.",
               ),
               const SizedBox(height: 20),
               Wrap(
@@ -780,22 +956,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text("Indicateurs SAV", style: Theme.of(context).textTheme.titleLarge),
+                      Text(
+                        "Indicateurs SAV",
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
                       const SizedBox(height: 12),
-                      _LineItem("Tickets hors SLA", "${data["tickets_overdue"] ?? 0}"),
-                      _LineItem("Produits sous garantie", "${data["products_under_warranty"] ?? 0}"),
-                      _LineItem("Sessions support actives", "${data["support_sessions_active"] ?? 0}"),
-                      _LineItem("Knowledge articles publies", "${data["knowledge_articles_published"] ?? 0}"),
+                      _LineItem(
+                        "Tickets hors SLA",
+                        "${data["tickets_overdue"] ?? 0}",
+                      ),
+                      _LineItem(
+                        "Produits sous garantie",
+                        "${data["products_under_warranty"] ?? 0}",
+                      ),
+                      _LineItem(
+                        "Sessions support actives",
+                        "${data["support_sessions_active"] ?? 0}",
+                      ),
+                      _LineItem(
+                        "Knowledge articles publies",
+                        "${data["knowledge_articles_published"] ?? 0}",
+                      ),
                       if (widget.session.isInternal) ...[
-                        _LineItem("Clients verifies", "${data["clients_verified"] ?? 0}"),
-                        _LineItem("Transactions contestees", "${data["transactions_disputed"] ?? 0}"),
+                        _LineItem(
+                          "Clients verifies",
+                          "${data["clients_verified"] ?? 0}",
+                        ),
                         _LineItem(
                           "Satisfaction moyenne",
-                          data["feedback_average_rating"] != null ? "${data["feedback_average_rating"]}/5" : "N/A",
+                          data["feedback_average_rating"] != null
+                              ? "${data["feedback_average_rating"]}/5"
+                              : "N/A",
                         ),
                       ] else ...[
-                        _LineItem("Compte verifie", widget.session.isVerified ? "Oui" : "En attente"),
-                        _LineItem("Solde", "${widget.session.accountBalance} XAF"),
+                        _LineItem(
+                          "Compte verifie",
+                          widget.session.isVerified ? "Oui" : "En attente",
+                        ),
                       ],
                       _LineItem(
                         "Premiere reponse moyenne",
@@ -805,7 +1002,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                       _LineItem(
                         "Resolution moyenne",
-                        data["average_resolution_hours"] != null ? "${data["average_resolution_hours"]} h" : "N/A",
+                        data["average_resolution_hours"] != null
+                            ? "${data["average_resolution_hours"]} h"
+                            : "N/A",
                       ),
                       if (topAgents.isNotEmpty)
                         _LineItem(
@@ -876,10 +1075,7 @@ class _SupportScreenState extends State<SupportScreen> {
     if (_selectedProductId == null && products.isNotEmpty) {
       _selectedProductId = products.first["id"] as int;
     }
-    return {
-      "tickets": tickets,
-      "products": products,
-    };
+    return {"tickets": tickets, "products": products};
   }
 
   Future<void> _refresh() async {
@@ -895,7 +1091,9 @@ class _SupportScreenState extends State<SupportScreen> {
 
     setState(() {
       _assistantBusy = true;
-      _conversation.add(_SupportConversationEntry(role: "user", message: question));
+      _conversation.add(
+        _SupportConversationEntry(role: "user", message: question),
+      );
     });
 
     try {
@@ -920,7 +1118,9 @@ class _SupportScreenState extends State<SupportScreen> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(exc.toString())));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(exc.toString())));
     } finally {
       if (mounted) {
         setState(() => _assistantBusy = false);
@@ -929,7 +1129,12 @@ class _SupportScreenState extends State<SupportScreen> {
   }
 
   Future<void> _openDraftTicket(Map<String, dynamic> payload) async {
-    final draft = Map<String, dynamic>.from(payload["draft_ticket"] as Map? ?? <String, dynamic>{});
+    if (!widget.session.canCreateTicket) {
+      return;
+    }
+    final draft = Map<String, dynamic>.from(
+      payload["draft_ticket"] as Map? ?? <String, dynamic>{},
+    );
     final created = await Navigator.of(context).push<bool>(
       MaterialPageRoute<bool>(
         builder: (_) => TicketCreatePage(
@@ -956,13 +1161,20 @@ class _SupportScreenState extends State<SupportScreen> {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError) {
-          return _ErrorView(message: snapshot.error.toString(), onRetry: _refresh);
+          return _ErrorView(
+            message: snapshot.error.toString(),
+            onRetry: _refresh,
+          );
         }
 
-        final products = (snapshot.data?["products"] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
-        final allTickets = (snapshot.data?["tickets"] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+        final products = (snapshot.data?["products"] as List<dynamic>? ?? [])
+            .cast<Map<String, dynamic>>();
+        final allTickets = (snapshot.data?["tickets"] as List<dynamic>? ?? [])
+            .cast<Map<String, dynamic>>();
         final selectedProductId =
-            products.any((product) => product["id"] == _selectedProductId) ? _selectedProductId : null;
+            products.any((product) => product["id"] == _selectedProductId)
+            ? _selectedProductId
+            : null;
         final openTickets = allTickets.where((ticket) {
           final status = (ticket["status"] ?? "").toString();
           return status != "resolved" && status != "closed";
@@ -985,29 +1197,41 @@ class _SupportScreenState extends State<SupportScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text("Chat SAV", style: Theme.of(context).textTheme.titleLarge),
+                      Text(
+                        "Chat SAV",
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
                       const SizedBox(height: 12),
                       if (products.isNotEmpty)
                         DropdownButtonFormField<int>(
                           initialValue: selectedProductId,
-                          decoration: const InputDecoration(labelText: "Produit concerne"),
+                          decoration: const InputDecoration(
+                            labelText: "Produit concerne",
+                          ),
                           items: products
                               .map(
                                 (product) => DropdownMenuItem<int>(
                                   value: product["id"] as int,
-                                  child: Text("${product["name"]} · ${product["serial_number"]}"),
+                                  child: Text(
+                                    "${product["name"]} · ${product["serial_number"]}",
+                                  ),
                                 ),
                               )
                               .toList(),
-                          onChanged: (value) => setState(() => _selectedProductId = value),
+                          onChanged: (value) =>
+                              setState(() => _selectedProductId = value),
                         ),
                       if (products.isNotEmpty) const SizedBox(height: 12),
                       ..._conversation.map((entry) {
                         final payload = entry.payload;
                         final matchedArticles =
-                            (payload?["matched_articles"] as List<dynamic>? ?? []).cast<dynamic>();
+                            (payload?["matched_articles"] as List<dynamic>? ??
+                                    [])
+                                .cast<dynamic>();
                         return Align(
-                          alignment: entry.role == "user" ? Alignment.centerRight : Alignment.centerLeft,
+                          alignment: entry.role == "user"
+                              ? Alignment.centerRight
+                              : Alignment.centerLeft,
                           child: Container(
                             margin: const EdgeInsets.only(bottom: 12),
                             padding: const EdgeInsets.all(16),
@@ -1022,8 +1246,12 @@ class _SupportScreenState extends State<SupportScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  entry.role == "user" ? "Vous" : "Assistant Afrilux",
-                                  style: const TextStyle(fontWeight: FontWeight.w700),
+                                  entry.role == "user"
+                                      ? "Vous"
+                                      : "Assistant Afrilux",
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
                                 const SizedBox(height: 6),
                                 Text(entry.message),
@@ -1034,10 +1262,16 @@ class _SupportScreenState extends State<SupportScreen> {
                                     runSpacing: 8,
                                     children: [
                                       _StateChip(
-                                        label: (payload["suggested_priority"] ?? "normal").toString(),
+                                        label:
+                                            (payload["suggested_priority"] ??
+                                                    "normal")
+                                                .toString(),
                                       ),
                                       _StateChip(
-                                        label: (payload["suggested_category"] ?? "breakdown").toString(),
+                                        label:
+                                            (payload["suggested_category"] ??
+                                                    "breakdown")
+                                                .toString(),
                                       ),
                                     ],
                                   ),
@@ -1048,21 +1282,31 @@ class _SupportScreenState extends State<SupportScreen> {
                                       style: Theme.of(context)
                                           .textTheme
                                           .titleSmall
-                                          ?.copyWith(fontWeight: FontWeight.w700),
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                          ),
                                     ),
                                     const SizedBox(height: 6),
                                     ...matchedArticles.map(
                                       (item) => Padding(
-                                        padding: const EdgeInsets.only(bottom: 4),
-                                        child: Text("• ${(Map<String, dynamic>.from(item as Map))["title"] ?? "Article"}"),
+                                        padding: const EdgeInsets.only(
+                                          bottom: 4,
+                                        ),
+                                        child: Text(
+                                          "• ${(Map<String, dynamic>.from(item as Map))["title"] ?? "Article"}",
+                                        ),
                                       ),
                                     ),
                                   ],
-                                  if (payload["should_create_ticket"] == true) ...[
+                                  if (payload["should_create_ticket"] == true &&
+                                      widget.session.canCreateTicket) ...[
                                     const SizedBox(height: 12),
                                     FilledButton.icon(
-                                      onPressed: () => _openDraftTicket(payload),
-                                      icon: const Icon(Icons.confirmation_number_outlined),
+                                      onPressed: () =>
+                                          _openDraftTicket(payload),
+                                      icon: const Icon(
+                                        Icons.confirmation_number_outlined,
+                                      ),
                                       label: const Text("Creer un ticket"),
                                     ),
                                   ],
@@ -1077,7 +1321,8 @@ class _SupportScreenState extends State<SupportScreen> {
                         minLines: 2,
                         maxLines: 4,
                         decoration: const InputDecoration(
-                          hintText: "Ex: mon equipement ne charge plus et affiche une erreur de cablage.",
+                          hintText:
+                              "Ex: mon equipement ne charge plus et affiche une erreur de cablage.",
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -1090,28 +1335,32 @@ class _SupportScreenState extends State<SupportScreen> {
                                 ? const SizedBox(
                                     height: 16,
                                     width: 16,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
                                   )
                                 : const Text("Envoyer"),
                           ),
                           const SizedBox(width: 12),
-                          OutlinedButton.icon(
-                            onPressed: () async {
-                              final created = await Navigator.of(context).push<bool>(
-                                MaterialPageRoute<bool>(
-                                  builder: (_) => TicketCreatePage(
-                                    session: widget.session,
-                                    initialProductId: _selectedProductId,
-                                  ),
-                                ),
-                              );
-                              if (created == true) {
-                                await _refresh();
-                              }
-                            },
-                            icon: const Icon(Icons.add),
-                            label: const Text("Nouveau ticket"),
-                          ),
+                          if (widget.session.canCreateTicket)
+                            OutlinedButton.icon(
+                              onPressed: () async {
+                                final created = await Navigator.of(context)
+                                    .push<bool>(
+                                      MaterialPageRoute<bool>(
+                                        builder: (_) => TicketCreatePage(
+                                          session: widget.session,
+                                          initialProductId: _selectedProductId,
+                                        ),
+                                      ),
+                                    );
+                                if (created == true) {
+                                  await _refresh();
+                                }
+                              },
+                              icon: const Icon(Icons.add),
+                              label: const Text("Nouveau ticket"),
+                            ),
                         ],
                       ),
                     ],
@@ -1125,13 +1374,22 @@ class _SupportScreenState extends State<SupportScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text("Mes dossiers", style: Theme.of(context).textTheme.titleLarge),
+                      Text(
+                        "Mes dossiers",
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
                       const SizedBox(height: 12),
                       _LineItem("Tickets ouverts", "${openTickets.length}"),
                       if (widget.session.organizationSupportEmail.isNotEmpty)
-                        _LineItem("Email SAV", widget.session.organizationSupportEmail),
+                        _LineItem(
+                          "Email SAV",
+                          widget.session.organizationSupportEmail,
+                        ),
                       if (widget.session.organizationSupportPhone.isNotEmpty)
-                        _LineItem("Telephone / WhatsApp", widget.session.organizationSupportPhone),
+                        _LineItem(
+                          "Telephone / WhatsApp",
+                          widget.session.organizationSupportPhone,
+                        ),
                       const SizedBox(height: 14),
                       ...allTickets.map(
                         (ticket) => Padding(
@@ -1139,8 +1397,13 @@ class _SupportScreenState extends State<SupportScreen> {
                           child: ListTile(
                             contentPadding: EdgeInsets.zero,
                             title: Text((ticket["title"] ?? "").toString()),
-                            subtitle: Text("${ticket["reference"]} · ${ticket["status"] ?? ""}"),
-                            trailing: _StateChip(label: (ticket["priority"] ?? "normal").toString()),
+                            subtitle: Text(
+                              "${ticket["reference"]} · ${ticket["status"] ?? ""}",
+                            ),
+                            trailing: _StateChip(
+                              label: (ticket["priority"] ?? "normal")
+                                  .toString(),
+                            ),
                             onTap: () async {
                               await Navigator.of(context).push(
                                 MaterialPageRoute<void>(
@@ -1156,7 +1419,9 @@ class _SupportScreenState extends State<SupportScreen> {
                         ),
                       ),
                       if (allTickets.isEmpty)
-                        const Text("Aucun ticket pour le moment. Le chat ci-dessus peut preparer le premier."),
+                        const Text(
+                          "Aucun ticket pour le moment. Le chat ci-dessus peut preparer le premier.",
+                        ),
                     ],
                   ),
                 ),
@@ -1213,7 +1478,9 @@ class _TicketsScreenState extends State<TicketsScreen> {
     }
     setState(() => _assistantBusy = true);
     try {
-      final result = await widget.session.api.post("support/assistant/", {"question": question});
+      final result = await widget.session.api.post("support/assistant/", {
+        "question": question,
+      });
       if (!mounted) {
         return;
       }
@@ -1222,7 +1489,9 @@ class _TicketsScreenState extends State<TicketsScreen> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(exc.toString())));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(exc.toString())));
     } finally {
       if (mounted) {
         setState(() => _assistantBusy = false);
@@ -1231,7 +1500,9 @@ class _TicketsScreenState extends State<TicketsScreen> {
   }
 
   Future<void> _openDraftTicket() async {
-    final draft = Map<String, dynamic>.from(_assistantResult?["draft_ticket"] as Map? ?? <String, dynamic>{});
+    final draft = Map<String, dynamic>.from(
+      _assistantResult?["draft_ticket"] as Map? ?? <String, dynamic>{},
+    );
     final created = await Navigator.of(context).push<bool>(
       MaterialPageRoute<bool>(
         builder: (_) => TicketCreatePage(
@@ -1257,7 +1528,10 @@ class _TicketsScreenState extends State<TicketsScreen> {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError) {
-          return _ErrorView(message: snapshot.error.toString(), onRetry: _refresh);
+          return _ErrorView(
+            message: snapshot.error.toString(),
+            onRetry: _refresh,
+          );
         }
 
         final allTickets = snapshot.data ?? <Map<String, dynamic>>[];
@@ -1266,11 +1540,14 @@ class _TicketsScreenState extends State<TicketsScreen> {
           return status != "resolved" && status != "closed";
         }).length;
         final tickets = allTickets.where((ticket) {
-          final probe = "${ticket["reference"]} ${ticket["title"]} ${ticket["client_name"]}".toLowerCase();
+          final probe =
+              "${ticket["reference"]} ${ticket["title"]} ${ticket["client_name"]}"
+                  .toLowerCase();
           final matchesQuery = probe.contains(_query.toLowerCase());
-          final isUrgent = ticket["priority"] == "high" || ticket["priority"] == "critical";
-          final isFraud = ticket["suspected_fraud"] == true;
-          final isMine = (ticket["assigned_agent"] ?? 0) == widget.session.userId;
+          final isUrgent =
+              ticket["priority"] == "high" || ticket["priority"] == "critical";
+          final isMine =
+              (ticket["assigned_agent"] ?? 0) == widget.session.userId;
           final isUnassigned = ticket["assigned_agent"] == null;
 
           if (!matchesQuery) {
@@ -1287,12 +1564,11 @@ class _TicketsScreenState extends State<TicketsScreen> {
           if (_focus == "urgent") {
             return isUrgent;
           }
-          if (_focus == "fraud") {
-            return isFraud;
-          }
           return true;
         }).toList();
-        final matchedArticles = (_assistantResult?["matched_articles"] as List<dynamic>? ?? []).cast<dynamic>();
+        final matchedArticles =
+            (_assistantResult?["matched_articles"] as List<dynamic>? ?? [])
+                .cast<dynamic>();
         final supportLabel = widget.session.isInternal ? "Tickets" : "Support";
 
         return RefreshIndicator(
@@ -1313,19 +1589,31 @@ class _TicketsScreenState extends State<TicketsScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text("Acces rapides", style: Theme.of(context).textTheme.titleLarge),
+                        Text(
+                          "Acces rapides",
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
                         const SizedBox(height: 12),
                         _LineItem("Tickets ouverts", "$openTickets"),
-                        _LineItem("Compte verifie", widget.session.isVerified ? "Oui" : "En attente"),
-                        _LineItem("Solde", "${widget.session.accountBalance} XAF"),
+                        _LineItem(
+                          "Compte verifie",
+                          widget.session.isVerified ? "Oui" : "En attente",
+                        ),
                         if (widget.session.organizationSupportEmail.isNotEmpty)
-                          _LineItem("Email SAV", widget.session.organizationSupportEmail),
+                          _LineItem(
+                            "Email SAV",
+                            widget.session.organizationSupportEmail,
+                          ),
                         if (widget.session.organizationSupportPhone.isNotEmpty)
-                          _LineItem("WhatsApp / Telephone", widget.session.organizationSupportPhone),
+                          _LineItem(
+                            "WhatsApp / Telephone",
+                            widget.session.organizationSupportPhone,
+                          ),
                         const SizedBox(height: 12),
                         Text(
                           "Chatbot IA",
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w700),
                         ),
                         const SizedBox(height: 8),
                         TextField(
@@ -1333,7 +1621,8 @@ class _TicketsScreenState extends State<TicketsScreen> {
                           minLines: 2,
                           maxLines: 4,
                           decoration: const InputDecoration(
-                            hintText: "Ex: mon equipement ne charge plus, que faire ?",
+                            hintText:
+                                "Ex: mon equipement ne charge plus, que faire ?",
                           ),
                         ),
                         const SizedBox(height: 12),
@@ -1346,16 +1635,23 @@ class _TicketsScreenState extends State<TicketsScreen> {
                                   ? const SizedBox(
                                       height: 16,
                                       width: 16,
-                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
                                     )
                                   : const Text("Demander a l'assistant"),
                             ),
                             const SizedBox(width: 12),
                             OutlinedButton.icon(
                               onPressed: () async {
-                                final created = await Navigator.of(context).push<bool>(
-                                  MaterialPageRoute<bool>(builder: (_) => TicketCreatePage(session: widget.session)),
-                                );
+                                final created = await Navigator.of(context)
+                                    .push<bool>(
+                                      MaterialPageRoute<bool>(
+                                        builder: (_) => TicketCreatePage(
+                                          session: widget.session,
+                                        ),
+                                      ),
+                                    );
                                 if (created == true) {
                                   await _refresh();
                                 }
@@ -1377,7 +1673,8 @@ class _TicketsScreenState extends State<TicketsScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  (_assistantResult?["answer"] ?? "").toString(),
+                                  (_assistantResult?["answer"] ?? "")
+                                      .toString(),
                                   style: Theme.of(context).textTheme.bodyLarge,
                                 ),
                                 const SizedBox(height: 12),
@@ -1385,11 +1682,24 @@ class _TicketsScreenState extends State<TicketsScreen> {
                                   spacing: 10,
                                   runSpacing: 10,
                                   children: [
-                                    _StateChip(label: (_assistantResult?["suggested_priority"] ?? "normal").toString()),
-                                    _StateChip(label: (_assistantResult?["suggested_category"] ?? "breakdown").toString()),
+                                    _StateChip(
+                                      label:
+                                          (_assistantResult?["suggested_priority"] ??
+                                                  "normal")
+                                              .toString(),
+                                    ),
+                                    _StateChip(
+                                      label:
+                                          (_assistantResult?["suggested_category"] ??
+                                                  "breakdown")
+                                              .toString(),
+                                    ),
                                   ],
                                 ),
-                                if ((_assistantResult?["recommended_next_step"] ?? "").toString().isNotEmpty) ...[
+                                if ((_assistantResult?["recommended_next_step"] ??
+                                        "")
+                                    .toString()
+                                    .isNotEmpty) ...[
                                   const SizedBox(height: 12),
                                   Text(
                                     "Prochaine etape: ${(_assistantResult?["recommended_next_step"] ?? "").toString()}",
@@ -1399,22 +1709,32 @@ class _TicketsScreenState extends State<TicketsScreen> {
                                   const SizedBox(height: 12),
                                   Text(
                                     "Articles utiles",
-                                    style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall
+                                        ?.copyWith(fontWeight: FontWeight.w700),
                                   ),
                                   const SizedBox(height: 8),
                                   ...matchedArticles.map(
                                     (item) => Padding(
                                       padding: const EdgeInsets.only(bottom: 6),
-                                      child: Text("• ${(Map<String, dynamic>.from(item as Map))["title"] ?? "Article"}"),
+                                      child: Text(
+                                        "• ${(Map<String, dynamic>.from(item as Map))["title"] ?? "Article"}",
+                                      ),
                                     ),
                                   ),
                                 ],
-                                if (_assistantResult?["should_create_ticket"] == true) ...[
+                                if (_assistantResult?["should_create_ticket"] ==
+                                    true) ...[
                                   const SizedBox(height: 12),
                                   FilledButton.icon(
                                     onPressed: _openDraftTicket,
-                                    icon: const Icon(Icons.confirmation_number_outlined),
-                                    label: const Text("Creer un ticket depuis cette analyse"),
+                                    icon: const Icon(
+                                      Icons.confirmation_number_outlined,
+                                    ),
+                                    label: const Text(
+                                      "Creer un ticket depuis cette analyse",
+                                    ),
                                   ),
                                 ],
                               ],
@@ -1429,7 +1749,9 @@ class _TicketsScreenState extends State<TicketsScreen> {
               ],
               Text(
                 supportLabel,
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               const SizedBox(height: 10),
               TextField(
@@ -1444,28 +1766,36 @@ class _TicketsScreenState extends State<TicketsScreen> {
                 spacing: 10,
                 runSpacing: 10,
                 children: [
-                  ChoiceChip(label: const Text("Tous"), selected: _focus == "all", onSelected: (_) => setState(() => _focus = "all")),
+                  ChoiceChip(
+                    label: const Text("Tous"),
+                    selected: _focus == "all",
+                    onSelected: (_) => setState(() => _focus = "all"),
+                  ),
                   ChoiceChip(
                     label: const Text("Urgents"),
                     selected: _focus == "urgent",
                     onSelected: (_) => setState(() => _focus = "urgent"),
                   ),
-                  ChoiceChip(
-                    label: const Text("Fraude"),
-                    selected: _focus == "fraud",
-                    onSelected: (_) => setState(() => _focus = "fraud"),
-                  ),
                   if (widget.session.isInternal)
                     ChoiceChip(
                       label: const Text("Mes tickets"),
                       selected: _assignmentFocus == "mine",
-                      onSelected: (_) => setState(() => _assignmentFocus = _assignmentFocus == "mine" ? "all" : "mine"),
+                      onSelected: (_) => setState(
+                        () => _assignmentFocus = _assignmentFocus == "mine"
+                            ? "all"
+                            : "mine",
+                      ),
                     ),
                   if (widget.session.isInternal)
                     ChoiceChip(
                       label: const Text("Non assignes"),
                       selected: _assignmentFocus == "unassigned",
-                      onSelected: (_) => setState(() => _assignmentFocus = _assignmentFocus == "unassigned" ? "all" : "unassigned"),
+                      onSelected: (_) => setState(
+                        () =>
+                            _assignmentFocus = _assignmentFocus == "unassigned"
+                            ? "all"
+                            : "unassigned",
+                      ),
                     ),
                 ],
               ),
@@ -1476,23 +1806,26 @@ class _TicketsScreenState extends State<TicketsScreen> {
                   child: Card(
                     child: ListTile(
                       title: Text((ticket["title"] ?? "").toString()),
-                      subtitle: Text("${ticket["reference"]} · ${ticket["client_name"] ?? ""}"),
+                      subtitle: Text(
+                        "${ticket["reference"]} · ${ticket["client_name"] ?? ""}",
+                      ),
                       trailing: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          _StateChip(label: (ticket["status"] ?? "").toString()),
+                          _StateChip(
+                            label: (ticket["status"] ?? "").toString(),
+                          ),
                           const SizedBox(height: 6),
                           Text((ticket["priority"] ?? "").toString()),
-                          if (ticket["suspected_fraud"] == true) ...[
-                            const SizedBox(height: 6),
-                            const _StateChip(label: "fraude"),
-                          ],
                         ],
                       ),
                       onTap: () async {
                         await Navigator.of(context).push(
                           MaterialPageRoute<void>(
-                            builder: (_) => TicketDetailPage(session: widget.session, ticketId: ticket["id"] as int),
+                            builder: (_) => TicketDetailPage(
+                              session: widget.session,
+                              ticketId: ticket["id"] as int,
+                            ),
                           ),
                         );
                         await _refresh();
@@ -1521,7 +1854,11 @@ class _TicketsScreenState extends State<TicketsScreen> {
 }
 
 class TicketDetailPage extends StatefulWidget {
-  const TicketDetailPage({super.key, required this.session, required this.ticketId});
+  const TicketDetailPage({
+    super.key,
+    required this.session,
+    required this.ticketId,
+  });
 
   final SavSession session;
   final int ticketId;
@@ -1550,7 +1887,9 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
   }
 
   Future<Map<String, dynamic>> _load() async {
-    final ticket = await widget.session.api.getMap("tickets/${widget.ticketId}/");
+    final ticket = await widget.session.api.getMap(
+      "tickets/${widget.ticketId}/",
+    );
     Map<String, dynamic>? insight;
     final clientId = ticket["client"] as int?;
     if (widget.session.isInternal && clientId != null) {
@@ -1560,10 +1899,7 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
         insight = null;
       }
     }
-    return {
-      "ticket": ticket,
-      "insight": insight,
-    };
+    return {"ticket": ticket, "insight": insight};
   }
 
   Future<void> _refresh() async {
@@ -1576,15 +1912,24 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
   Future<void> _runAgenticResolution() async {
     setState(() => _busy = true);
     try {
-      final result = await widget.session.api.post("tickets/${widget.ticketId}/agentic_resolution/", {});
+      final result = await widget.session.api.post(
+        "tickets/${widget.ticketId}/agentic_resolution/",
+        {},
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text((result["resolution_summary"] ?? "Analyse terminee.").toString())),
+        SnackBar(
+          content: Text(
+            (result["resolution_summary"] ?? "Analyse terminee.").toString(),
+          ),
+        ),
       );
       await _refresh();
     } catch (exc) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(exc.toString())));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(exc.toString())));
     } finally {
       if (mounted) {
         setState(() => _busy = false);
@@ -1595,7 +1940,10 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
   Future<void> _takeOwnership() async {
     setState(() => _busy = true);
     try {
-      await widget.session.api.post("tickets/${widget.ticketId}/take_ownership/", {});
+      await widget.session.api.post(
+        "tickets/${widget.ticketId}/take_ownership/",
+        {},
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Le ticket vous est maintenant assigne.")),
@@ -1603,7 +1951,9 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
       await _refresh();
     } catch (exc) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(exc.toString())));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(exc.toString())));
     } finally {
       if (mounted) {
         setState(() => _busy = false);
@@ -1616,13 +1966,15 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
     try {
       await widget.session.api.post("tickets/${widget.ticketId}/reopen/", {});
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Le ticket a ete rouvert.")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Le ticket a ete rouvert.")));
       await _refresh();
     } catch (exc) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(exc.toString())));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(exc.toString())));
     } finally {
       if (mounted) {
         setState(() => _busy = false);
@@ -1687,13 +2039,15 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
         "comment": commentController.text.trim(),
       });
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Merci pour votre retour.")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Merci pour votre retour.")));
       await _refresh();
     } catch (exc) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(exc.toString())));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(exc.toString())));
     } finally {
       commentController.dispose();
       if (mounted) {
@@ -1716,7 +2070,9 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
       await _refresh();
     } catch (exc) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(exc.toString())));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(exc.toString())));
     } finally {
       if (mounted) {
         setState(() => _busy = false);
@@ -1724,10 +2080,17 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
     }
   }
 
-  Future<void> _uploadAttachment(ImageSource source, String kind, String note) async {
+  Future<void> _uploadAttachment(
+    ImageSource source,
+    String kind,
+    String note,
+  ) async {
     setState(() => _busy = true);
     try {
-      final picked = await _imagePicker.pickImage(source: source, imageQuality: 88);
+      final picked = await _imagePicker.pickImage(
+        source: source,
+        imageQuality: 88,
+      );
       if (picked == null) {
         return;
       }
@@ -1744,13 +2107,17 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Preuve ajoutee au ticket.")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Preuve ajoutee au ticket.")),
+      );
       await _refresh();
     } catch (exc) {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(exc.toString())));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(exc.toString())));
     } finally {
       if (mounted) {
         setState(() => _busy = false);
@@ -1771,7 +2138,13 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
               subtitle: const Text("Depuis la galerie ou vos captures d'ecran"),
               onTap: () {
                 Navigator.of(context).pop();
-                unawaited(_uploadAttachment(ImageSource.gallery, "screenshot", "Capture ecran client"));
+                unawaited(
+                  _uploadAttachment(
+                    ImageSource.gallery,
+                    "screenshot",
+                    "Capture ecran client",
+                  ),
+                );
               },
             ),
             ListTile(
@@ -1780,7 +2153,13 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
               subtitle: const Text("Camera mobile"),
               onTap: () {
                 Navigator.of(context).pop();
-                unawaited(_uploadAttachment(ImageSource.camera, "receipt", "Recu ou justificatif client"));
+                unawaited(
+                  _uploadAttachment(
+                    ImageSource.camera,
+                    "receipt",
+                    "Recu ou justificatif client",
+                  ),
+                );
               },
             ),
             ListTile(
@@ -1789,7 +2168,13 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
               subtitle: const Text("Photo generale depuis la galerie"),
               onTap: () {
                 Navigator.of(context).pop();
-                unawaited(_uploadAttachment(ImageSource.gallery, "proof", "Preuve de transaction ou incident"));
+                unawaited(
+                  _uploadAttachment(
+                    ImageSource.gallery,
+                    "proof",
+                    "Preuve de l'incident",
+                  ),
+                );
               },
             ),
           ],
@@ -1814,7 +2199,9 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
               children: [
                 TextField(
                   controller: amountController,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                   decoration: const InputDecoration(labelText: "Montant"),
                 ),
                 const SizedBox(height: 12),
@@ -1832,7 +2219,9 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: externalReferenceController,
-                  decoration: const InputDecoration(labelText: "Reference externe"),
+                  decoration: const InputDecoration(
+                    labelText: "Reference externe",
+                  ),
                 ),
               ],
             ),
@@ -1855,13 +2244,14 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
       }
 
       setState(() => _busy = true);
-      await widget.session.api.post("tickets/${widget.ticketId}/credit_account/", {
-        "amount": amountController.text.trim(),
-        "currency": "XAF",
-        "reason": reasonController.text.trim(),
-        "note": noteController.text.trim(),
-        "external_reference": externalReferenceController.text.trim(),
-      });
+      await widget.session.api
+          .post("tickets/${widget.ticketId}/credit_account/", {
+            "amount": amountController.text.trim(),
+            "currency": "XAF",
+            "reason": reasonController.text.trim(),
+            "note": noteController.text.trim(),
+            "external_reference": externalReferenceController.text.trim(),
+          });
       if (!mounted) {
         return;
       }
@@ -1873,7 +2263,9 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(exc.toString())));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(exc.toString())));
     } finally {
       amountController.dispose();
       reasonController.dispose();
@@ -1896,23 +2288,41 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return _ErrorView(message: snapshot.error.toString(), onRetry: _refresh);
+            return _ErrorView(
+              message: snapshot.error.toString(),
+              onRetry: _refresh,
+            );
           }
 
           final payload = snapshot.data ?? <String, dynamic>{};
-          final ticket = Map<String, dynamic>.from(payload["ticket"] as Map? ?? <String, dynamic>{});
-          final insight = payload["insight"] is Map ? Map<String, dynamic>.from(payload["insight"] as Map) : null;
-          final messages = (ticket["messages"] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
-          final attachments = (ticket["attachments"] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
-          final interventions = (ticket["interventions"] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
-          final sessions = (ticket["support_sessions"] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
-          final accountCredits = (ticket["account_credits"] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+          final ticket = Map<String, dynamic>.from(
+            payload["ticket"] as Map? ?? <String, dynamic>{},
+          );
+          final insight = payload["insight"] is Map
+              ? Map<String, dynamic>.from(payload["insight"] as Map)
+              : null;
+          final messages = (ticket["messages"] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>();
+          final attachments = (ticket["attachments"] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>();
+          final interventions =
+              (ticket["interventions"] as List<dynamic>? ?? [])
+                  .cast<Map<String, dynamic>>();
+          final sessions = (ticket["support_sessions"] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>();
+          final accountCredits =
+              (ticket["account_credits"] as List<dynamic>? ?? [])
+                  .cast<Map<String, dynamic>>();
           final feedback = ticket["feedback"] is Map
               ? Map<String, dynamic>.from(ticket["feedback"] as Map)
               : null;
-          final canReopen = const {"resolved", "closed"}.contains((ticket["status"] ?? "").toString());
+          final canReopen = const {
+            "resolved",
+            "closed",
+          }.contains((ticket["status"] ?? "").toString());
           final canTakeOwnership =
-              widget.session.isInternal && (ticket["assigned_agent"] ?? 0) != widget.session.userId;
+              widget.session.isInternal &&
+              (ticket["assigned_agent"] ?? 0) != widget.session.userId;
 
           return RefreshIndicator(
             onRefresh: _refresh,
@@ -1925,35 +2335,51 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text((ticket["title"] ?? "").toString(), style: Theme.of(context).textTheme.headlineSmall),
+                        Text(
+                          (ticket["title"] ?? "").toString(),
+                          style: Theme.of(context).textTheme.headlineSmall,
+                        ),
                         const SizedBox(height: 10),
                         Wrap(
                           spacing: 10,
                           runSpacing: 10,
                           children: [
-                            _StateChip(label: (ticket["status"] ?? "").toString()),
-                            _StateChip(label: (ticket["priority"] ?? "").toString()),
-                            _StateChip(label: (ticket["channel"] ?? "").toString()),
-                            if (ticket["suspected_fraud"] == true) const _StateChip(label: "fraude"),
+                            _StateChip(
+                              label: (ticket["status"] ?? "").toString(),
+                            ),
+                            _StateChip(
+                              label: (ticket["priority"] ?? "").toString(),
+                            ),
+                            _StateChip(
+                              label: (ticket["channel"] ?? "").toString(),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 12),
                         Text((ticket["description"] ?? "").toString()),
                         const SizedBox(height: 12),
-                        _LineItem("Reference", (ticket["reference"] ?? "").toString()),
-                        _LineItem("Client", (ticket["client_name"] ?? "").toString()),
-                        _LineItem("Produit", (ticket["product_name"] ?? "Sans produit").toString()),
-                        if ((ticket["related_transaction_reference"] ?? "").toString().isNotEmpty)
-                          _LineItem(
-                            "Transaction",
-                            "${ticket["related_transaction_reference"]} · ${ticket["related_transaction_amount"] ?? ""} ${ticket["related_transaction_currency"] ?? ""}",
-                          ),
-                        if ((ticket["resolution_summary"] ?? "").toString().isNotEmpty)
+                        _LineItem(
+                          "Reference",
+                          (ticket["reference"] ?? "").toString(),
+                        ),
+                        _LineItem(
+                          "Client",
+                          (ticket["client_name"] ?? "").toString(),
+                        ),
+                        _LineItem(
+                          "Produit",
+                          (ticket["product_name"] ?? "Sans produit").toString(),
+                        ),
+                        if ((ticket["resolution_summary"] ?? "")
+                            .toString()
+                            .isNotEmpty)
                           Padding(
                             padding: const EdgeInsets.only(top: 12),
                             child: Text(
                               (ticket["resolution_summary"] ?? "").toString(),
-                              style: const TextStyle(fontWeight: FontWeight.w600),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
                         const SizedBox(height: 16),
@@ -1970,11 +2396,13 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                             label: const Text("Prendre le ticket"),
                           ),
                         ],
-                        if (widget.session.isManager) ...[
+                        if (widget.session.isAdmin) ...[
                           const SizedBox(height: 12),
                           OutlinedButton.icon(
                             onPressed: _busy ? null : _showCreditAccountDialog,
-                            icon: const Icon(Icons.account_balance_wallet_outlined),
+                            icon: const Icon(
+                              Icons.account_balance_wallet_outlined,
+                            ),
                             label: const Text("Crediter le compte"),
                           ),
                         ],
@@ -1997,14 +2425,20 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text("Actions metier", style: Theme.of(context).textTheme.titleLarge),
-                        const SizedBox(height: 12),
-                        ...accountCredits.map(
-                          (item) => _LineItem(
-                            "${item["amount"] ?? "0"} ${item["currency"] ?? "XAF"}",
-                            "${item["reason"] ?? ""} · ${item["executed_by_name"] ?? "Systeme"}",
-                          ),
+                        Text(
+                          widget.session.isAdmin
+                              ? "Actions metier"
+                              : "Feedback client",
+                          style: Theme.of(context).textTheme.titleLarge,
                         ),
+                        const SizedBox(height: 12),
+                        if (widget.session.isAdmin)
+                          ...accountCredits.map(
+                            (item) => _LineItem(
+                              "${item["amount"] ?? "0"} ${item["currency"] ?? "XAF"}",
+                              "${item["reason"] ?? ""} · ${item["executed_by_name"] ?? "Systeme"}",
+                            ),
+                          ),
                         if (feedback != null) ...[
                           const SizedBox(height: 12),
                           _LineItem(
@@ -2012,8 +2446,13 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                             "${feedback["rating"] ?? "?"}/5 · ${(feedback["comment"] ?? "Aucun commentaire").toString()}",
                           ),
                         ],
-                        if (accountCredits.isEmpty) const Text("Aucun credit compte execute sur ce ticket."),
-                        if (feedback == null && !widget.session.isInternal && canReopen) ...[
+                        if (widget.session.isAdmin && accountCredits.isEmpty)
+                          const Text(
+                            "Aucun credit compte execute sur ce ticket.",
+                          ),
+                        if (feedback == null &&
+                            !widget.session.isInternal &&
+                            canReopen) ...[
                           const SizedBox(height: 12),
                           FilledButton.icon(
                             onPressed: _busy ? null : _showFeedbackDialog,
@@ -2032,7 +2471,10 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text("Suivi du processus", style: Theme.of(context).textTheme.titleLarge),
+                        Text(
+                          "Suivi du processus",
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
                         const SizedBox(height: 12),
                         _ProcessStep(
                           title: "Ticket cree",
@@ -2041,8 +2483,13 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                         ),
                         _ProcessStep(
                           title: "Prise en charge",
-                          subtitle: (ticket["first_response_at"] ?? "En attente d'une premiere reponse").toString(),
-                          isDone: (ticket["first_response_at"] ?? "").toString().isNotEmpty,
+                          subtitle:
+                              (ticket["first_response_at"] ??
+                                      "En attente d'une premiere reponse")
+                                  .toString(),
+                          isDone: (ticket["first_response_at"] ?? "")
+                              .toString()
+                              .isNotEmpty,
                         ),
                         _ProcessStep(
                           title: "Traitement",
@@ -2057,13 +2504,21 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                         ),
                         _ProcessStep(
                           title: "Ticket resolu",
-                          subtitle: (ticket["resolved_at"] ?? "Pas encore resolu").toString(),
-                          isDone: (ticket["resolved_at"] ?? "").toString().isNotEmpty,
+                          subtitle:
+                              (ticket["resolved_at"] ?? "Pas encore resolu")
+                                  .toString(),
+                          isDone: (ticket["resolved_at"] ?? "")
+                              .toString()
+                              .isNotEmpty,
                         ),
                         _ProcessStep(
                           title: "Ticket ferme",
-                          subtitle: (ticket["closed_at"] ?? "Dossier encore actif").toString(),
-                          isDone: (ticket["closed_at"] ?? "").toString().isNotEmpty,
+                          subtitle:
+                              (ticket["closed_at"] ?? "Dossier encore actif")
+                                  .toString(),
+                          isDone: (ticket["closed_at"] ?? "")
+                              .toString()
+                              .isNotEmpty,
                           isLast: true,
                         ),
                       ],
@@ -2078,60 +2533,75 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text("Intelligence client", style: Theme.of(context).textTheme.titleLarge),
+                          Text(
+                            "Intelligence client",
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
                           const SizedBox(height: 12),
                           Wrap(
                             spacing: 10,
                             runSpacing: 10,
                             children: [
-                              _StateChip(label: "Risque ${insight["risk_level"] ?? "low"}"),
-                              _StateChip(label: "${insight["open_tickets"] ?? 0} ticket(s) ouverts"),
-                              _StateChip(label: "Sentiment ${insight["average_sentiment"] ?? "0.00"}"),
-                              _StateChip(label: "Verifie ${insight["is_verified"] == true ? "oui" : "non"}"),
+                              _StateChip(
+                                label:
+                                    "Risque ${insight["risk_level"] ?? "low"}",
+                              ),
+                              _StateChip(
+                                label:
+                                    "${insight["open_tickets"] ?? 0} ticket(s) ouverts",
+                              ),
+                              _StateChip(
+                                label:
+                                    "Sentiment ${insight["average_sentiment"] ?? "0.00"}",
+                              ),
+                              _StateChip(
+                                label:
+                                    "Verifie ${insight["is_verified"] == true ? "oui" : "non"}",
+                              ),
                             ],
                           ),
                           const SizedBox(height: 12),
                           Text((insight["summary"] ?? "").toString()),
-                          const SizedBox(height: 12),
-                          _LineItem("Solde client", "${insight["account_balance"] ?? "0.00"} XAF"),
-                          _LineItem("Transactions contestees", "${insight["disputed_transactions"] ?? 0}"),
-                          if ((insight["recent_transactions"] as List<dynamic>? ?? []).isNotEmpty) ...[
+                          if ((insight["suggested_actions"] as List<dynamic>? ??
+                                  [])
+                              .isNotEmpty) ...[
                             const SizedBox(height: 12),
-                            Text("Transactions recentes", style: Theme.of(context).textTheme.titleMedium),
+                            Text(
+                              "Actions suggerees",
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
                             const SizedBox(height: 8),
-                            ...((insight["recent_transactions"] as List<dynamic>? ?? []).take(4).map(
-                              (item) {
-                                final transaction = Map<String, dynamic>.from(item as Map);
-                                return Padding(
-                                  padding: const EdgeInsets.only(bottom: 6),
-                                  child: Text(
-                                    "• ${transaction["external_reference"] ?? "TX"} · ${transaction["amount"] ?? "0"} ${transaction["currency"] ?? "XAF"} · ${transaction["status"] ?? ""}",
+                            ...((insight["suggested_actions"]
+                                        as List<dynamic>? ??
+                                    [])
+                                .map(
+                                  (item) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 6),
+                                    child: Text("• ${item.toString()}"),
                                   ),
-                                );
-                              },
-                            )),
+                                )),
                           ],
-                          if ((insight["suggested_actions"] as List<dynamic>? ?? []).isNotEmpty) ...[
+                          if ((insight["recommended_offers"]
+                                      as List<dynamic>? ??
+                                  [])
+                              .isNotEmpty) ...[
                             const SizedBox(height: 12),
-                            Text("Actions suggerees", style: Theme.of(context).textTheme.titleMedium),
+                            Text(
+                              "Opportunites commerciales",
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
                             const SizedBox(height: 8),
-                            ...((insight["suggested_actions"] as List<dynamic>? ?? []).map(
-                              (item) => Padding(
-                                padding: const EdgeInsets.only(bottom: 6),
-                                child: Text("• ${item.toString()}"),
-                              ),
-                            )),
-                          ],
-                          if ((insight["recommended_offers"] as List<dynamic>? ?? []).isNotEmpty) ...[
-                            const SizedBox(height: 12),
-                            Text("Opportunites commerciales", style: Theme.of(context).textTheme.titleMedium),
-                            const SizedBox(height: 8),
-                            ...((insight["recommended_offers"] as List<dynamic>? ?? []).map(
-                              (item) => Padding(
-                                padding: const EdgeInsets.only(bottom: 6),
-                                child: Text("• ${(Map<String, dynamic>.from(item as Map))["title"] ?? "Offre"}"),
-                              ),
-                            )),
+                            ...((insight["recommended_offers"]
+                                        as List<dynamic>? ??
+                                    [])
+                                .map(
+                                  (item) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 6),
+                                    child: Text(
+                                      "• ${(Map<String, dynamic>.from(item as Map))["title"] ?? "Offre"}",
+                                    ),
+                                  ),
+                                )),
                           ],
                         ],
                       ),
@@ -2147,7 +2617,12 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                       children: [
                         Row(
                           children: [
-                            Expanded(child: Text("Pieces jointes", style: Theme.of(context).textTheme.titleLarge)),
+                            Expanded(
+                              child: Text(
+                                "Pieces jointes",
+                                style: Theme.of(context).textTheme.titleLarge,
+                              ),
+                            ),
                             FilledButton.icon(
                               onPressed: _busy ? null : _showAttachmentOptions,
                               icon: const Icon(Icons.attach_file),
@@ -2160,13 +2635,16 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                           (attachment) => Padding(
                             padding: const EdgeInsets.only(bottom: 12),
                             child: _LineItem(
-                              (attachment["original_name"] ?? "Fichier").toString(),
+                              (attachment["original_name"] ?? "Fichier")
+                                  .toString(),
                               "${attachment["kind"] ?? "proof"} · ${attachment["note"] ?? ""}",
                             ),
                           ),
                         ),
                         if (attachments.isEmpty)
-                          const Text("Aucune preuve chargee. Ajoutez une capture, un recu ou une photo du probleme."),
+                          const Text(
+                            "Aucune preuve chargee. Ajoutez une capture, un recu ou une photo du probleme.",
+                          ),
                       ],
                     ),
                   ),
@@ -2178,7 +2656,10 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text("Messages", style: Theme.of(context).textTheme.titleLarge),
+                        Text(
+                          "Messages",
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
                         const SizedBox(height: 12),
                         ...messages.map(
                           (message) => Container(
@@ -2195,11 +2676,17 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                                   children: [
                                     Expanded(
                                       child: Text(
-                                        (message["sender_name"] ?? "").toString(),
-                                        style: const TextStyle(fontWeight: FontWeight.w700),
+                                        (message["sender_name"] ?? "")
+                                            .toString(),
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
                                       ),
                                     ),
-                                    _StateChip(label: (message["channel"] ?? "portal").toString()),
+                                    _StateChip(
+                                      label: (message["channel"] ?? "portal")
+                                          .toString(),
+                                    ),
                                   ],
                                 ),
                                 const SizedBox(height: 4),
@@ -2212,14 +2699,30 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                           const SizedBox(height: 8),
                           DropdownButtonFormField<String>(
                             initialValue: _messageChannel,
-                            decoration: const InputDecoration(labelText: "Canal de reponse"),
+                            decoration: const InputDecoration(
+                              labelText: "Canal de reponse",
+                            ),
                             items: const [
-                              DropdownMenuItem(value: "portal", child: Text("Portail / in-app")),
-                              DropdownMenuItem(value: "email", child: Text("Email")),
-                              DropdownMenuItem(value: "whatsapp", child: Text("WhatsApp")),
-                              DropdownMenuItem(value: "sms", child: Text("SMS")),
+                              DropdownMenuItem(
+                                value: "portal",
+                                child: Text("Portail / in-app"),
+                              ),
+                              DropdownMenuItem(
+                                value: "email",
+                                child: Text("Email"),
+                              ),
+                              DropdownMenuItem(
+                                value: "whatsapp",
+                                child: Text("WhatsApp"),
+                              ),
+                              DropdownMenuItem(
+                                value: "sms",
+                                child: Text("SMS"),
+                              ),
                             ],
-                            onChanged: (value) => setState(() => _messageChannel = value ?? "portal"),
+                            onChanged: (value) => setState(
+                              () => _messageChannel = value ?? "portal",
+                            ),
                           ),
                           const SizedBox(height: 12),
                         ],
@@ -2227,10 +2730,15 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                           controller: _messageController,
                           minLines: 2,
                           maxLines: 4,
-                          decoration: const InputDecoration(hintText: "Ajouter un message"),
+                          decoration: const InputDecoration(
+                            hintText: "Ajouter un message",
+                          ),
                         ),
                         const SizedBox(height: 12),
-                        FilledButton(onPressed: _busy ? null : _sendMessage, child: const Text("Envoyer")),
+                        FilledButton(
+                          onPressed: _busy ? null : _sendMessage,
+                          child: const Text("Envoyer"),
+                        ),
                       ],
                     ),
                   ),
@@ -2242,7 +2750,10 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text("Interventions", style: Theme.of(context).textTheme.titleLarge),
+                        Text(
+                          "Interventions",
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
                         const SizedBox(height: 12),
                         ...interventions.map(
                           (item) => _LineItem(
@@ -2250,7 +2761,8 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                             "${item["agent_name"] ?? ""} · ${item["status"] ?? ""}",
                           ),
                         ),
-                        if (interventions.isEmpty) const Text("Aucune intervention rattachee."),
+                        if (interventions.isEmpty)
+                          const Text("Aucune intervention rattachee."),
                       ],
                     ),
                   ),
@@ -2262,7 +2774,10 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text("Sessions support", style: Theme.of(context).textTheme.titleLarge),
+                        Text(
+                          "Sessions support",
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
                         const SizedBox(height: 12),
                         ...sessions.map(
                           (item) => _LineItem(
@@ -2270,7 +2785,8 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                             "${item["status"] ?? ""} · ${item["scheduled_for"] ?? ""}",
                           ),
                         ),
-                        if (sessions.isEmpty) const Text("Aucune session support."),
+                        if (sessions.isEmpty)
+                          const Text("Aucune session support."),
                       ],
                     ),
                   ),
@@ -2325,23 +2841,30 @@ class _TicketCreatePageState extends State<TicketCreatePage> {
 
   List<Map<String, dynamic>> _users = [];
   List<Map<String, dynamic>> _products = [];
-  List<Map<String, dynamic>> _transactions = [];
   List<_DraftAttachment> _draftAttachments = [];
   bool _loading = true;
   bool _saving = false;
   int? _selectedClientId;
   int? _selectedProductId;
-  int? _selectedTransactionId;
   late String _category;
   late String _priority;
-  bool _suspectedFraud = false;
 
   @override
   void initState() {
     super.initState();
     _titleController = TextEditingController(text: widget.initialTitle);
-    _descriptionController = TextEditingController(text: widget.initialDescription);
-    _category = widget.initialCategory;
+    _descriptionController = TextEditingController(
+      text: widget.initialDescription,
+    );
+    _category =
+        const {
+          "breakdown",
+          "installation",
+          "maintenance",
+          "bug",
+        }.contains(widget.initialCategory)
+        ? widget.initialCategory
+        : "breakdown";
     _priority = widget.initialPriority;
     unawaited(_bootstrap());
   }
@@ -2359,22 +2882,29 @@ class _TicketCreatePageState extends State<TicketCreatePage> {
           ? await widget.session.api.getList("users/")
           : [await widget.session.api.getMap("users/me/")];
       final products = await widget.session.api.getList("products/");
-      final transactions = await widget.session.api.getList("financial-transactions/");
-      final clientUsers = users.where((user) => (user["role"] ?? "client") == "client").toList();
+      final clientUsers = users
+          .where((user) => (user["role"] ?? "client") == "client")
+          .toList();
       if (!mounted) return;
       setState(() {
         _users = clientUsers;
         _products = products;
-        _transactions = transactions;
-        _selectedClientId = clientUsers.isNotEmpty ? clientUsers.first["id"] as int : widget.session.userId;
+        _selectedClientId = clientUsers.isNotEmpty
+            ? clientUsers.first["id"] as int
+            : widget.session.userId;
         final visibleProducts = _visibleProducts();
-        final visibleTransactions = _visibleTransactions();
-        final matchingInitial = widget.initialProductId != null &&
-                visibleProducts.any((product) => product["id"] == widget.initialProductId)
+        final matchingInitial =
+            widget.initialProductId != null &&
+                visibleProducts.any(
+                  (product) => product["id"] == widget.initialProductId,
+                )
             ? widget.initialProductId
             : null;
-        _selectedProductId = matchingInitial ?? (visibleProducts.isNotEmpty ? visibleProducts.first["id"] as int : null);
-        _selectedTransactionId = visibleTransactions.isNotEmpty ? visibleTransactions.first["id"] as int : null;
+        _selectedProductId =
+            matchingInitial ??
+            (visibleProducts.isNotEmpty
+                ? visibleProducts.first["id"] as int
+                : null);
         _loading = false;
       });
     } catch (_) {
@@ -2385,12 +2915,9 @@ class _TicketCreatePageState extends State<TicketCreatePage> {
 
   List<Map<String, dynamic>> _visibleProducts() {
     if (_selectedClientId == null) return _products;
-    return _products.where((product) => product["client"] == _selectedClientId).toList();
-  }
-
-  List<Map<String, dynamic>> _visibleTransactions() {
-    if (_selectedClientId == null) return _transactions;
-    return _transactions.where((item) => item["client"] == _selectedClientId).toList();
+    return _products
+        .where((product) => product["client"] == _selectedClientId)
+        .toList();
   }
 
   Future<void> _pickAttachment({
@@ -2398,7 +2925,10 @@ class _TicketCreatePageState extends State<TicketCreatePage> {
     required String kind,
     required String note,
   }) async {
-    final picked = await _imagePicker.pickImage(source: source, imageQuality: 88);
+    final picked = await _imagePicker.pickImage(
+      source: source,
+      imageQuality: 88,
+    );
     if (picked == null || !mounted) {
       return;
     }
@@ -2469,21 +2999,22 @@ class _TicketCreatePageState extends State<TicketCreatePage> {
   }
 
   Future<void> _save() async {
-    if (_titleController.text.trim().isEmpty || _descriptionController.text.trim().isEmpty) return;
+    if (_titleController.text.trim().isEmpty ||
+        _descriptionController.text.trim().isEmpty) {
+      return;
+    }
     setState(() => _saving = true);
     try {
       final payload = <String, dynamic>{
         "client": _selectedClientId ?? widget.session.userId,
         "product": _selectedProductId,
-        "related_transaction": _selectedTransactionId,
         "title": _titleController.text.trim(),
         "description": _descriptionController.text.trim(),
         "category": _category,
         "channel": "web",
-        "priority": _priority,
       };
       if (widget.session.isInternal) {
-        payload["suspected_fraud"] = _suspectedFraud;
+        payload["priority"] = _priority;
       }
       final createdTicket = await widget.session.api.post("tickets/", payload);
       final ticketId = createdTicket["id"] as int?;
@@ -2505,7 +3036,9 @@ class _TicketCreatePageState extends State<TicketCreatePage> {
       Navigator.of(context).pop(true);
     } catch (exc) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(exc.toString())));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(exc.toString())));
     } finally {
       if (mounted) {
         setState(() => _saving = false);
@@ -2527,18 +3060,20 @@ class _TicketCreatePageState extends State<TicketCreatePage> {
                     initialValue: _selectedClientId,
                     decoration: const InputDecoration(labelText: "Client"),
                     items: _users
-                        .map((user) => DropdownMenuItem<int>(
-                              value: user["id"] as int,
-                              child: Text((user["username"] ?? "").toString()),
-                            ))
+                        .map(
+                          (user) => DropdownMenuItem<int>(
+                            value: user["id"] as int,
+                            child: Text((user["username"] ?? "").toString()),
+                          ),
+                        )
                         .toList(),
                     onChanged: (value) {
                       setState(() {
                         _selectedClientId = value;
                         final products = _visibleProducts();
-                        final transactions = _visibleTransactions();
-                        _selectedProductId = products.isNotEmpty ? products.first["id"] as int : null;
-                        _selectedTransactionId = transactions.isNotEmpty ? transactions.first["id"] as int : null;
+                        _selectedProductId = products.isNotEmpty
+                            ? products.first["id"] as int
+                            : null;
                       });
                     },
                   ),
@@ -2547,32 +3082,23 @@ class _TicketCreatePageState extends State<TicketCreatePage> {
                   initialValue: _selectedProductId,
                   decoration: const InputDecoration(labelText: "Produit"),
                   items: _visibleProducts()
-                      .map((product) => DropdownMenuItem<int?>(
-                            value: product["id"] as int,
-                            child: Text("${product["name"]} · ${product["serial_number"]}"),
-                          ))
-                      .toList(),
-                  onChanged: (value) => setState(() => _selectedProductId = value),
-                ),
-                const SizedBox(height: 14),
-                DropdownButtonFormField<int?>(
-                  initialValue: _selectedTransactionId,
-                  decoration: const InputDecoration(labelText: "Transaction liee"),
-                  items: [
-                    const DropdownMenuItem<int?>(value: null, child: Text("Aucune")),
-                    ..._visibleTransactions().map(
-                      (item) => DropdownMenuItem<int?>(
-                        value: item["id"] as int,
-                        child: Text(
-                          "${item["external_reference"] ?? item["provider_reference"] ?? "Transaction"} · ${item["amount"] ?? "0"} ${item["currency"] ?? "XAF"}",
+                      .map(
+                        (product) => DropdownMenuItem<int?>(
+                          value: product["id"] as int,
+                          child: Text(
+                            "${product["name"]} · ${product["serial_number"]}",
+                          ),
                         ),
-                      ),
-                    ),
-                  ],
-                  onChanged: (value) => setState(() => _selectedTransactionId = value),
+                      )
+                      .toList(),
+                  onChanged: (value) =>
+                      setState(() => _selectedProductId = value),
                 ),
                 const SizedBox(height: 14),
-                TextField(controller: _titleController, decoration: const InputDecoration(labelText: "Titre")),
+                TextField(
+                  controller: _titleController,
+                  decoration: const InputDecoration(labelText: "Titre"),
+                ),
                 const SizedBox(height: 14),
                 TextField(
                   controller: _descriptionController,
@@ -2586,31 +3112,38 @@ class _TicketCreatePageState extends State<TicketCreatePage> {
                   decoration: const InputDecoration(labelText: "Categorie"),
                   items: const [
                     DropdownMenuItem(value: "breakdown", child: Text("Panne")),
-                    DropdownMenuItem(value: "installation", child: Text("Installation")),
-                    DropdownMenuItem(value: "maintenance", child: Text("Maintenance")),
-                    DropdownMenuItem(value: "return", child: Text("Retour")),
-                    DropdownMenuItem(value: "refund", child: Text("Remboursement")),
-                    DropdownMenuItem(value: "payment", child: Text("Paiement")),
-                    DropdownMenuItem(value: "withdrawal", child: Text("Retrait")),
+                    DropdownMenuItem(
+                      value: "installation",
+                      child: Text("Installation"),
+                    ),
+                    DropdownMenuItem(
+                      value: "maintenance",
+                      child: Text("Maintenance"),
+                    ),
                     DropdownMenuItem(value: "bug", child: Text("Bug")),
-                    DropdownMenuItem(value: "account", child: Text("Compte")),
-                    DropdownMenuItem(value: "complaint", child: Text("Reclamation")),
                   ],
-                  onChanged: (value) => setState(() => _category = value ?? "breakdown"),
+                  onChanged: (value) =>
+                      setState(() => _category = value ?? "breakdown"),
                 ),
                 const SizedBox(height: 14),
-                DropdownButtonFormField<String>(
-                  initialValue: _priority,
-                  decoration: const InputDecoration(labelText: "Priorite"),
-                  items: const [
-                    DropdownMenuItem(value: "low", child: Text("Faible")),
-                    DropdownMenuItem(value: "normal", child: Text("Normale")),
-                    DropdownMenuItem(value: "high", child: Text("Haute")),
-                    DropdownMenuItem(value: "critical", child: Text("Critique")),
-                  ],
-                  onChanged: (value) => setState(() => _priority = value ?? "normal"),
-                ),
-                const SizedBox(height: 14),
+                if (widget.session.isInternal) ...[
+                  DropdownButtonFormField<String>(
+                    initialValue: _priority,
+                    decoration: const InputDecoration(labelText: "Priorite"),
+                    items: const [
+                      DropdownMenuItem(value: "low", child: Text("Faible")),
+                      DropdownMenuItem(value: "normal", child: Text("Normale")),
+                      DropdownMenuItem(value: "high", child: Text("Haute")),
+                      DropdownMenuItem(
+                        value: "critical",
+                        child: Text("Critique"),
+                      ),
+                    ],
+                    onChanged: (value) =>
+                        setState(() => _priority = value ?? "normal"),
+                  ),
+                  const SizedBox(height: 14),
+                ],
                 Card(
                   margin: EdgeInsets.zero,
                   child: Padding(
@@ -2623,14 +3156,14 @@ class _TicketCreatePageState extends State<TicketCreatePage> {
                             Expanded(
                               child: Text(
                                 "Preuves / captures / recus",
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleMedium
+                                style: Theme.of(context).textTheme.titleMedium
                                     ?.copyWith(fontWeight: FontWeight.w700),
                               ),
                             ),
                             TextButton.icon(
-                              onPressed: _saving ? null : _showAttachmentOptions,
+                              onPressed: _saving
+                                  ? null
+                                  : _showAttachmentOptions,
                               icon: const Icon(Icons.attach_file),
                               label: const Text("Ajouter"),
                             ),
@@ -2638,7 +3171,9 @@ class _TicketCreatePageState extends State<TicketCreatePage> {
                         ),
                         const SizedBox(height: 8),
                         if (_draftAttachments.isEmpty)
-                          const Text("Aucune piece jointe. Vous pourrez aussi en ajouter plus tard depuis le detail ticket."),
+                          const Text(
+                            "Aucune piece jointe. Vous pourrez aussi en ajouter plus tard depuis le detail ticket.",
+                          ),
                         ..._draftAttachments.asMap().entries.map(
                           (entry) => Padding(
                             padding: const EdgeInsets.only(bottom: 8),
@@ -2656,9 +3191,14 @@ class _TicketCreatePageState extends State<TicketCreatePage> {
                                       ? null
                                       : () {
                                           setState(() {
-                                            _draftAttachments = _draftAttachments
-                                                .where((attachment) => attachment != entry.value)
-                                                .toList();
+                                            _draftAttachments =
+                                                _draftAttachments
+                                                    .where(
+                                                      (attachment) =>
+                                                          attachment !=
+                                                          entry.value,
+                                                    )
+                                                    .toList();
                                           });
                                         },
                                 ),
@@ -2670,20 +3210,12 @@ class _TicketCreatePageState extends State<TicketCreatePage> {
                     ),
                   ),
                 ),
-                if (widget.session.isInternal) ...[
-                  const SizedBox(height: 14),
-                  SwitchListTile(
-                    value: _suspectedFraud,
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text("Fraude suspectee"),
-                    subtitle: const Text("Active un suivi renforce sur ce dossier."),
-                    onChanged: (value) => setState(() => _suspectedFraud = value),
-                  ),
-                ],
                 const SizedBox(height: 22),
                 FilledButton(
                   onPressed: _saving ? null : _save,
-                  child: _saving ? const CircularProgressIndicator() : const Text("Creer le ticket"),
+                  child: _saving
+                      ? const CircularProgressIndicator()
+                      : const Text("Creer le ticket"),
                 ),
               ],
             ),
@@ -2723,7 +3255,10 @@ class _ProductsScreenState extends State<ProductsScreen> {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError) {
-          return _ErrorView(message: snapshot.error.toString(), onRetry: _refresh);
+          return _ErrorView(
+            message: snapshot.error.toString(),
+            onRetry: _refresh,
+          );
         }
 
         final products = snapshot.data ?? <Map<String, dynamic>>[];
@@ -2738,11 +3273,16 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     child: Card(
                       child: ListTile(
                         title: Text((product["name"] ?? "").toString()),
-                        subtitle: Text("${product["serial_number"]} · ${product["client_name"] ?? ""}"),
+                        subtitle: Text(
+                          "${product["serial_number"]} · ${product["client_name"] ?? ""}",
+                        ),
                         trailing: Text("Sante ${product["health_score"]}"),
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute<void>(
-                            builder: (_) => ProductDetailPage(session: widget.session, product: product),
+                            builder: (_) => ProductDetailPage(
+                              session: widget.session,
+                              product: product,
+                            ),
                           ),
                         ),
                       ),
@@ -2758,7 +3298,11 @@ class _ProductsScreenState extends State<ProductsScreen> {
 }
 
 class ProductDetailPage extends StatefulWidget {
-  const ProductDetailPage({super.key, required this.session, required this.product});
+  const ProductDetailPage({
+    super.key,
+    required this.session,
+    required this.product,
+  });
 
   final SavSession session;
   final Map<String, dynamic> product;
@@ -2781,19 +3325,28 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
     final alerts = await widget.session.api.getList("predictive-alerts/");
     final tickets = await widget.session.api.getList("tickets/");
     return {
-      "alerts": alerts.where((item) => item["product"] == widget.product["id"]).toList(),
-      "tickets": tickets.where((item) => item["product"] == widget.product["id"]).toList(),
+      "alerts": alerts
+          .where((item) => item["product"] == widget.product["id"])
+          .toList(),
+      "tickets": tickets
+          .where((item) => item["product"] == widget.product["id"])
+          .toList(),
     };
   }
 
   Future<void> _runPredictive() async {
     setState(() => _busy = true);
     try {
-      await widget.session.api.post("products/${widget.product["id"]}/predictive_analysis/", {});
+      await widget.session.api.post(
+        "products/${widget.product["id"]}/predictive_analysis/",
+        {},
+      );
       await _refresh();
     } catch (exc) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(exc.toString())));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(exc.toString())));
     } finally {
       if (mounted) {
         setState(() => _busy = false);
@@ -2817,11 +3370,16 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return _ErrorView(message: snapshot.error.toString(), onRetry: _refresh);
+            return _ErrorView(
+              message: snapshot.error.toString(),
+              onRetry: _refresh,
+            );
           }
 
-          final alerts = (snapshot.data?["alerts"] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
-          final tickets = (snapshot.data?["tickets"] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+          final alerts = (snapshot.data?["alerts"] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>();
+          final tickets = (snapshot.data?["tickets"] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>();
 
           return ListView(
             padding: const EdgeInsets.all(20),
@@ -2834,9 +3392,14 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                     children: [
                       Text((widget.product["serial_number"] ?? "").toString()),
                       const SizedBox(height: 8),
-                      Text("Sante ${widget.product["health_score"]}/100", style: Theme.of(context).textTheme.titleLarge),
+                      Text(
+                        "Sante ${widget.product["health_score"]}/100",
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
                       const SizedBox(height: 8),
-                      Text("Garantie jusqu'au ${widget.product["warranty_end"] ?? "N/A"}"),
+                      Text(
+                        "Garantie jusqu'au ${widget.product["warranty_end"] ?? "N/A"}",
+                      ),
                       if (widget.session.isInternal) ...[
                         const SizedBox(height: 16),
                         FilledButton.icon(
@@ -2856,10 +3419,19 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text("Alertes", style: Theme.of(context).textTheme.titleLarge),
+                      Text(
+                        "Alertes",
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
                       const SizedBox(height: 12),
-                      ...alerts.map((alert) => _LineItem((alert["title"] ?? "").toString(), (alert["severity"] ?? "").toString())),
-                      if (alerts.isEmpty) const Text("Aucune alerte predictive."),
+                      ...alerts.map(
+                        (alert) => _LineItem(
+                          (alert["title"] ?? "").toString(),
+                          (alert["severity"] ?? "").toString(),
+                        ),
+                      ),
+                      if (alerts.isEmpty)
+                        const Text("Aucune alerte predictive."),
                     ],
                   ),
                 ),
@@ -2871,9 +3443,17 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text("Tickets lies", style: Theme.of(context).textTheme.titleLarge),
+                      Text(
+                        "Tickets lies",
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
                       const SizedBox(height: 12),
-                      ...tickets.map((ticket) => _LineItem((ticket["reference"] ?? "").toString(), (ticket["title"] ?? "").toString())),
+                      ...tickets.map(
+                        (ticket) => _LineItem(
+                          (ticket["reference"] ?? "").toString(),
+                          (ticket["title"] ?? "").toString(),
+                        ),
+                      ),
                       if (tickets.isEmpty) const Text("Aucun ticket rattache."),
                     ],
                   ),
@@ -2933,7 +3513,10 @@ class _OffersScreenState extends State<OffersScreen> {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError) {
-          return _ErrorView(message: snapshot.error.toString(), onRetry: _refresh);
+          return _ErrorView(
+            message: snapshot.error.toString(),
+            onRetry: _refresh,
+          );
         }
 
         final offers = snapshot.data ?? <Map<String, dynamic>>[];
@@ -2946,7 +3529,9 @@ class _OffersScreenState extends State<OffersScreen> {
                 const Card(
                   child: Padding(
                     padding: EdgeInsets.all(24),
-                    child: Text("Aucune offre disponible pour le perimetre courant."),
+                    child: Text(
+                      "Aucune offre disponible pour le perimetre courant.",
+                    ),
                   ),
                 ),
               ...offers.map(
@@ -2965,16 +3550,26 @@ class _OffersScreenState extends State<OffersScreen> {
                             children: [
                               Text(
                                 (offer["title"] ?? "").toString(),
-                                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.w700),
                               ),
-                              _StateChip(label: (offer["status"] ?? "proposed").toString()),
+                              _StateChip(
+                                label: (offer["status"] ?? "proposed")
+                                    .toString(),
+                              ),
                             ],
                           ),
                           const SizedBox(height: 8),
                           Text((offer["description"] ?? "").toString()),
                           const SizedBox(height: 10),
-                          _LineItem("Client", (offer["client_name"] ?? "").toString()),
-                          _LineItem("Produit", (offer["product_name"] ?? "N/A").toString()),
+                          _LineItem(
+                            "Client",
+                            (offer["client_name"] ?? "").toString(),
+                          ),
+                          _LineItem(
+                            "Produit",
+                            (offer["product_name"] ?? "N/A").toString(),
+                          ),
                           _LineItem("Prix", "${offer["price"] ?? "0"} FCFA"),
                           if ((offer["rationale"] ?? "").toString().isNotEmpty)
                             Padding(
@@ -2984,20 +3579,27 @@ class _OffersScreenState extends State<OffersScreen> {
                                 style: const TextStyle(color: Colors.black54),
                               ),
                             ),
-                          if (!widget.session.isInternal && offer["status"] == "proposed") ...[
+                          if (!widget.session.isInternal &&
+                              offer["status"] == "proposed") ...[
                             const SizedBox(height: 14),
                             Row(
                               children: [
                                 Expanded(
                                   child: FilledButton(
-                                    onPressed: () => _updateOffer(offer["id"] as int, "accept"),
+                                    onPressed: () => _updateOffer(
+                                      offer["id"] as int,
+                                      "accept",
+                                    ),
                                     child: const Text("Accepter"),
                                   ),
                                 ),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: OutlinedButton(
-                                    onPressed: () => _updateOffer(offer["id"] as int, "reject"),
+                                    onPressed: () => _updateOffer(
+                                      offer["id"] as int,
+                                      "reject",
+                                    ),
                                     child: const Text("Refuser"),
                                   ),
                                 ),
@@ -3041,7 +3643,10 @@ class _KnowledgeScreenState extends State<KnowledgeScreen> {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError) {
-          return _ErrorView(message: snapshot.error.toString(), onRetry: _refresh);
+          return _ErrorView(
+            message: snapshot.error.toString(),
+            onRetry: _refresh,
+          );
         }
 
         final articles = snapshot.data ?? <Map<String, dynamic>>[];
@@ -3056,10 +3661,14 @@ class _KnowledgeScreenState extends State<KnowledgeScreen> {
                     child: Card(
                       child: ListTile(
                         title: Text((article["title"] ?? "").toString()),
-                        subtitle: Text((article["summary"] ?? article["category"] ?? "").toString()),
+                        subtitle: Text(
+                          (article["summary"] ?? article["category"] ?? "")
+                              .toString(),
+                        ),
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute<void>(
-                            builder: (_) => KnowledgeDetailPage(article: article),
+                            builder: (_) =>
+                                KnowledgeDetailPage(article: article),
                           ),
                         ),
                       ),
@@ -3092,7 +3701,10 @@ class KnowledgeDetailPage extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text((article["title"] ?? "").toString(), style: Theme.of(context).textTheme.headlineSmall),
+                  Text(
+                    (article["title"] ?? "").toString(),
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
                   const SizedBox(height: 10),
                   Text((article["summary"] ?? "").toString()),
                   const SizedBox(height: 20),
@@ -3144,7 +3756,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError) {
-          return _ErrorView(message: snapshot.error.toString(), onRetry: _refresh);
+          return _ErrorView(
+            message: snapshot.error.toString(),
+            onRetry: _refresh,
+          );
         }
 
         final notifications = snapshot.data ?? <Map<String, dynamic>>[];
@@ -3188,7 +3803,9 @@ class AnalyticsSheet extends StatefulWidget {
 }
 
 class _AnalyticsSheetState extends State<AnalyticsSheet> {
-  final TextEditingController _controller = TextEditingController(text: "Combien de tickets critiques avons-nous ?");
+  final TextEditingController _controller = TextEditingController(
+    text: "Combien de tickets critiques avons-nous ?",
+  );
   bool _loading = false;
   Map<String, dynamic>? _result;
 
@@ -3201,12 +3818,16 @@ class _AnalyticsSheetState extends State<AnalyticsSheet> {
   Future<void> _submit() async {
     setState(() => _loading = true);
     try {
-      final result = await widget.session.api.post("analytics/ask/", {"question": _controller.text.trim()});
+      final result = await widget.session.api.post("analytics/ask/", {
+        "question": _controller.text.trim(),
+      });
       if (!mounted) return;
       setState(() => _result = result);
     } catch (exc) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(exc.toString())));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(exc.toString())));
     } finally {
       if (mounted) {
         setState(() => _loading = false);
@@ -3227,22 +3848,34 @@ class _AnalyticsSheetState extends State<AnalyticsSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("BI conversationnelle", style: Theme.of(context).textTheme.headlineSmall),
+          Text(
+            "BI conversationnelle",
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
           const SizedBox(height: 12),
           TextField(
             controller: _controller,
             minLines: 2,
             maxLines: 4,
-            decoration: const InputDecoration(hintText: "Posez une question metier au SAV"),
+            decoration: const InputDecoration(
+              hintText: "Posez une question metier au SAV",
+            ),
           ),
           const SizedBox(height: 12),
-          FilledButton(onPressed: _loading ? null : _submit, child: const Text("Analyser")),
+          FilledButton(
+            onPressed: _loading ? null : _submit,
+            child: const Text("Analyser"),
+          ),
           if (_result != null) ...[
             const SizedBox(height: 14),
-            Text((_result!["answer"] ?? "").toString(), style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              (_result!["answer"] ?? "").toString(),
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 10),
             Text((_result!["data"] ?? {}).toString()),
-            if ((_result!["highlights"] as List<dynamic>? ?? []).isNotEmpty) ...[
+            if ((_result!["highlights"] as List<dynamic>? ?? [])
+                .isNotEmpty) ...[
               const SizedBox(height: 12),
               ...((_result!["highlights"] as List<dynamic>).map(
                 (item) => Padding(
@@ -3306,7 +3939,10 @@ class _ProcessStep extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
                 const SizedBox(height: 4),
                 Text(subtitle, style: const TextStyle(color: Colors.black54)),
               ],
@@ -3339,9 +3975,21 @@ class _HeroPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w700)),
+          Text(
+            title,
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
           const SizedBox(height: 10),
-          Text(subtitle, style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.white.withValues(alpha: 0.92), height: 1.5)),
+          Text(
+            subtitle,
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+              color: Colors.white.withValues(alpha: 0.92),
+              height: 1.5,
+            ),
+          ),
         ],
       ),
     );
@@ -3349,7 +3997,11 @@ class _HeroPanel extends StatelessWidget {
 }
 
 class _MetricCard extends StatelessWidget {
-  const _MetricCard({required this.label, required this.value, required this.icon});
+  const _MetricCard({
+    required this.label,
+    required this.value,
+    required this.icon,
+  });
 
   final String label;
   final String value;
@@ -3365,7 +4017,12 @@ class _MetricCard extends StatelessWidget {
           children: [
             Icon(icon),
             const SizedBox(height: 12),
-            Text(value, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
+            Text(
+              value,
+              style: Theme.of(
+                context,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 4),
             Text(label, style: const TextStyle(color: Colors.black54)),
           ],
@@ -3385,18 +4042,23 @@ class _StateChip extends StatelessWidget {
     final lowered = label.toLowerCase();
     final color = lowered.contains("critical") || lowered.contains("failed")
         ? const Color(0xFFA33728)
-        : lowered.contains("high") || lowered.contains("warning") || lowered.contains("progress")
-            ? const Color(0xFFBE7C17)
-            : lowered.contains("resolved") || lowered.contains("read")
-                ? const Color(0xFF2F7A55)
-                : const Color(0xFF1C7A6A);
+        : lowered.contains("high") ||
+              lowered.contains("warning") ||
+              lowered.contains("progress")
+        ? const Color(0xFFBE7C17)
+        : lowered.contains("resolved") || lowered.contains("read")
+        ? const Color(0xFF2F7A55)
+        : const Color(0xFF1C7A6A);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(999),
       ),
-      child: Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+      child: Text(
+        label,
+        style: TextStyle(color: color, fontWeight: FontWeight.w600),
+      ),
     );
   }
 }
@@ -3414,7 +4076,12 @@ class _LineItem extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(child: Text(label, style: const TextStyle(fontWeight: FontWeight.w600))),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
           const SizedBox(width: 16),
           Expanded(child: Text(value, textAlign: TextAlign.right)),
         ],
