@@ -11,11 +11,13 @@ from email.utils import parseaddr
 from urllib import error, parse, request
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.mail import send_mail
 from django.utils import timezone
 from google.auth.transport.requests import Request as GoogleAuthRequest
 
+from .file_validation import validate_ticket_attachment_file
 from .models import AuditLog, DeviceRegistration, Message, Notification, Organization, Ticket, TicketAttachment, User
 
 
@@ -514,7 +516,13 @@ def handle_email_inbound(payload: dict[str, str], uploaded_files=None) -> dict:
     )
 
     created_attachments = []
+    rejected_attachments = []
     for uploaded_file in uploaded_files:
+        try:
+            validate_ticket_attachment_file(uploaded_file)
+        except ValidationError as exc:
+            rejected_attachments.append({"name": getattr(uploaded_file, "name", ""), "error": "; ".join(exc.messages)})
+            continue
         attachment = TicketAttachment.objects.create(
             ticket=ticket,
             uploaded_by=None,
@@ -536,6 +544,7 @@ def handle_email_inbound(payload: dict[str, str], uploaded_files=None) -> dict:
             "from": sender_email,
             "subject": subject,
             "attachments": created_attachments,
+            "rejected_attachments": rejected_attachments,
             "created_ticket": created_ticket,
         },
     )
@@ -546,6 +555,7 @@ def handle_email_inbound(payload: dict[str, str], uploaded_files=None) -> dict:
         "ticket_reference": ticket.reference,
         "message_id": message.id,
         "attachment_count": len(created_attachments),
+        "rejected_attachment_count": len(rejected_attachments),
         "organization_slug": organization.slug if organization else "",
         "client_id": client.id,
     }

@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
 class ApiException implements Exception {
   const ApiException(this.statusCode, this.message);
 
@@ -11,12 +13,81 @@ class ApiException implements Exception {
   String toString() => "ApiException($statusCode): $message";
 }
 
+class StoredAuthTokens {
+  const StoredAuthTokens({
+    required this.accessToken,
+    required this.refreshToken,
+  });
+
+  final String accessToken;
+  final String refreshToken;
+}
+
+abstract class AuthTokenStore {
+  Future<StoredAuthTokens?> read();
+  Future<void> write({
+    required String accessToken,
+    required String refreshToken,
+  });
+  Future<void> clear();
+}
+
+class SecureAuthTokenStore implements AuthTokenStore {
+  const SecureAuthTokenStore({FlutterSecureStorage? storage})
+    : _storage = storage ?? const FlutterSecureStorage();
+
+  static const _accessTokenKey = "afrilux_sav_access_token";
+  static const _refreshTokenKey = "afrilux_sav_refresh_token";
+
+  final FlutterSecureStorage _storage;
+
+  @override
+  Future<StoredAuthTokens?> read() async {
+    final accessToken = await _storage.read(key: _accessTokenKey) ?? "";
+    final refreshToken = await _storage.read(key: _refreshTokenKey) ?? "";
+    if (accessToken.isEmpty || refreshToken.isEmpty) {
+      return null;
+    }
+    return StoredAuthTokens(
+      accessToken: accessToken,
+      refreshToken: refreshToken,
+    );
+  }
+
+  @override
+  Future<void> write({
+    required String accessToken,
+    required String refreshToken,
+  }) async {
+    await _storage.write(key: _accessTokenKey, value: accessToken);
+    await _storage.write(key: _refreshTokenKey, value: refreshToken);
+  }
+
+  @override
+  Future<void> clear() async {
+    await _storage.delete(key: _accessTokenKey);
+    await _storage.delete(key: _refreshTokenKey);
+  }
+}
+
 class SavApiClient {
-  SavApiClient({required this.baseUrl});
+  SavApiClient({required this.baseUrl, AuthTokenStore? tokenStore})
+    : _tokenStore = tokenStore ?? const SecureAuthTokenStore();
 
   final String baseUrl;
+  final AuthTokenStore _tokenStore;
   String? _accessToken;
   String? _refreshToken;
+
+  Future<bool> restoreStoredSession() async {
+    final tokens = await _tokenStore.read();
+    if (tokens == null) {
+      return false;
+    }
+    _accessToken = tokens.accessToken;
+    _refreshToken = tokens.refreshToken;
+    return true;
+  }
 
   Future<void> authenticate({
     required String identifier,
@@ -25,10 +96,7 @@ class SavApiClient {
     final payload = await _requestRaw(
       "POST",
       "token/",
-      body: {
-        "username": identifier.trim(),
-        "password": password,
-      },
+      body: {"username": identifier.trim(), "password": password},
       authenticated: false,
       allowRefresh: false,
     );
@@ -40,11 +108,16 @@ class SavApiClient {
     }
     _accessToken = accessToken;
     _refreshToken = refreshToken;
+    await _tokenStore.write(
+      accessToken: accessToken,
+      refreshToken: refreshToken,
+    );
   }
 
-  void clearTokens() {
+  Future<void> clearTokens() async {
     _accessToken = null;
     _refreshToken = null;
+    await _tokenStore.clear();
   }
 
   Future<Map<String, dynamic>> getMap(String path) async {
@@ -58,12 +131,18 @@ class SavApiClient {
     return list.map((item) => Map<String, dynamic>.from(item as Map)).toList();
   }
 
-  Future<Map<String, dynamic>> post(String path, Map<String, dynamic> body) async {
+  Future<Map<String, dynamic>> post(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
     final dynamic data = await _request("POST", path, body: body);
     return Map<String, dynamic>.from(data as Map);
   }
 
-  Future<Map<String, dynamic>> patch(String path, Map<String, dynamic> body) async {
+  Future<Map<String, dynamic>> patch(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
     final dynamic data = await _request("PATCH", path, body: body);
     return Map<String, dynamic>.from(data as Map);
   }
@@ -82,10 +161,16 @@ class SavApiClient {
     final request = await client.postUrl(uri);
     final boundary = "----afrilux-${DateTime.now().microsecondsSinceEpoch}";
     if ((_accessToken ?? "").isNotEmpty) {
-      request.headers.set(HttpHeaders.authorizationHeader, "Bearer ${_accessToken!}");
+      request.headers.set(
+        HttpHeaders.authorizationHeader,
+        "Bearer ${_accessToken!}",
+      );
     }
     request.headers.set(HttpHeaders.acceptHeader, "application/json");
-    request.headers.set(HttpHeaders.contentTypeHeader, "multipart/form-data; boundary=$boundary");
+    request.headers.set(
+      HttpHeaders.contentTypeHeader,
+      "multipart/form-data; boundary=$boundary",
+    );
 
     void writeText(String value) => request.add(utf8.encode(value));
 
@@ -98,11 +183,14 @@ class SavApiClient {
 
     final file = File(filePath);
     final resolvedFilename = filename ?? file.uri.pathSegments.last;
-    final resolvedContentType = contentType ?? _inferContentType(resolvedFilename);
+    final resolvedContentType =
+        contentType ?? _inferContentType(resolvedFilename);
     final fileBytes = await file.readAsBytes();
 
     writeText("--$boundary\r\n");
-    writeText('Content-Disposition: form-data; name="$fileField"; filename="$resolvedFilename"\r\n');
+    writeText(
+      'Content-Disposition: form-data; name="$fileField"; filename="$resolvedFilename"\r\n',
+    );
     writeText("Content-Type: $resolvedContentType\r\n\r\n");
     request.add(fileBytes);
     writeText("\r\n--$boundary--\r\n");
@@ -110,8 +198,12 @@ class SavApiClient {
     final response = await request.close();
     final responseText = await utf8.decoder.bind(response).join();
     client.close(force: true);
-    final dynamic decoded = responseText.isEmpty ? <String, dynamic>{} : jsonDecode(responseText);
-    if (response.statusCode == 401 && allowRefresh && (_refreshToken ?? "").isNotEmpty) {
+    final dynamic decoded = responseText.isEmpty
+        ? <String, dynamic>{}
+        : jsonDecode(responseText);
+    if (response.statusCode == 401 &&
+        allowRefresh &&
+        (_refreshToken ?? "").isNotEmpty) {
       await _refreshAccessToken();
       return postMultipart(
         path,
@@ -134,8 +226,18 @@ class SavApiClient {
     return trimmed;
   }
 
-  Future<dynamic> _request(String method, String path, {Map<String, dynamic>? body}) async {
-    return _requestRaw(method, path, body: body, authenticated: true, allowRefresh: true);
+  Future<dynamic> _request(
+    String method,
+    String path, {
+    Map<String, dynamic>? body,
+  }) async {
+    return _requestRaw(
+      method,
+      path,
+      body: body,
+      authenticated: true,
+      allowRefresh: true,
+    );
   }
 
   Future<dynamic> _requestRaw(
@@ -150,7 +252,10 @@ class SavApiClient {
     final request = await client.openUrl(method, uri);
     request.headers.set(HttpHeaders.acceptHeader, "application/json");
     if (authenticated && (_accessToken ?? "").isNotEmpty) {
-      request.headers.set(HttpHeaders.authorizationHeader, "Bearer ${_accessToken!}");
+      request.headers.set(
+        HttpHeaders.authorizationHeader,
+        "Bearer ${_accessToken!}",
+      );
     }
     if (body != null) {
       request.headers.set(HttpHeaders.contentTypeHeader, "application/json");
@@ -160,10 +265,13 @@ class SavApiClient {
     final response = await request.close();
     final responseText = await utf8.decoder.bind(response).join();
     client.close(force: true);
-    final dynamic decoded = responseText.isEmpty ? <String, dynamic>{} : jsonDecode(responseText);
+    final dynamic decoded = responseText.isEmpty
+        ? <String, dynamic>{}
+        : jsonDecode(responseText);
 
     final normalizedPathValue = normalizedPath(path);
-    final canRefresh = authenticated &&
+    final canRefresh =
+        authenticated &&
         allowRefresh &&
         response.statusCode == 401 &&
         (_refreshToken ?? "").isNotEmpty &&
@@ -190,7 +298,7 @@ class SavApiClient {
   Future<void> _refreshAccessToken() async {
     final refreshToken = (_refreshToken ?? "").trim();
     if (refreshToken.isEmpty) {
-      clearTokens();
+      await clearTokens();
       throw const ApiException(401, "Session expiree. Reconnectez-vous.");
     }
 
@@ -204,7 +312,7 @@ class SavApiClient {
     final tokens = Map<String, dynamic>.from(payload as Map);
     final nextAccessToken = (tokens["access"] ?? "").toString();
     if (nextAccessToken.isEmpty) {
-      clearTokens();
+      await clearTokens();
       throw const ApiException(401, "Session expiree. Reconnectez-vous.");
     }
     _accessToken = nextAccessToken;
@@ -212,6 +320,10 @@ class SavApiClient {
     if (nextRefreshToken.isNotEmpty) {
       _refreshToken = nextRefreshToken;
     }
+    await _tokenStore.write(
+      accessToken: _accessToken!,
+      refreshToken: _refreshToken!,
+    );
   }
 
   String _inferContentType(String filename) {
@@ -247,12 +359,19 @@ class SavPublicApiClient {
     return list.map((item) => Map<String, dynamic>.from(item as Map)).toList();
   }
 
-  Future<Map<String, dynamic>> post(String path, Map<String, dynamic> body) async {
+  Future<Map<String, dynamic>> post(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
     final dynamic data = await _request("POST", path, body: body);
     return Map<String, dynamic>.from(data as Map);
   }
 
-  Future<dynamic> _request(String method, String path, {Map<String, dynamic>? body}) async {
+  Future<dynamic> _request(
+    String method,
+    String path, {
+    Map<String, dynamic>? body,
+  }) async {
     final client = HttpClient();
     final trimmed = path.startsWith("/") ? path.substring(1) : path;
     final uri = Uri.parse("$baseUrl$trimmed");
@@ -266,7 +385,9 @@ class SavPublicApiClient {
     final response = await request.close();
     final responseText = await utf8.decoder.bind(response).join();
     client.close(force: true);
-    final dynamic decoded = responseText.isEmpty ? <String, dynamic>{} : jsonDecode(responseText);
+    final dynamic decoded = responseText.isEmpty
+        ? <String, dynamic>{}
+        : jsonDecode(responseText);
     if (response.statusCode >= 400) {
       throw ApiException(response.statusCode, _extractMessage(decoded));
     }

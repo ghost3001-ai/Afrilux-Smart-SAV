@@ -2,7 +2,7 @@ import uuid
 from decimal import Decimal
 
 from django.contrib.auth.models import AbstractUser
-from django.db import models
+from django.db import IntegrityError, models, transaction
 from django.db.models import Sum
 from django.utils import timezone
 from django.utils.text import slugify
@@ -111,13 +111,12 @@ class User(AbstractUser):
 
     SUPPORT_ROLE_ALIASES = (
         ROLE_SUPPORT,
-        ROLE_MANAGER,
-        ROLE_HEAD_SAV,
         ROLE_SOFTWARE_OWNER,
         ROLE_SUPERVISOR,
-        ROLE_QA,
         ROLE_DISPATCHER,
         ROLE_VIP_SUPPORT,
+        ROLE_MANAGER,
+        ROLE_HEAD_SAV,
         ROLE_AGENT,
     )
     STANDARD_SUPPORT_ROLES = (
@@ -162,8 +161,11 @@ class User(AbstractUser):
         *BOT_ROLES,
     )
     MANAGER_ROLES = (
-        ROLE_SUPPORT,
-        *LEADERSHIP_ROLES,
+        ROLE_SOFTWARE_OWNER,
+        ROLE_SUPERVISOR,
+        ROLE_HEAD_SAV,
+        ROLE_ADMIN,
+        ROLE_MANAGER,
     )
     ASSIGNABLE_ROLES = (
         *SUPPORT_ROLE_ALIASES,
@@ -469,7 +471,7 @@ class Product(TimeStampedModel):
     )
     name = models.CharField(max_length=255)
     sku = models.CharField(max_length=100, blank=True)
-    serial_number = models.CharField(max_length=100, unique=True)
+    serial_number = models.CharField(max_length=100)
     equipment_type = models.CharField(
         max_length=20,
         choices=(
@@ -501,6 +503,12 @@ class Product(TimeStampedModel):
 
     class Meta:
         ordering = ["name", "serial_number"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "serial_number"],
+                name="sav_product_unique_serial_per_organization",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.name} ({self.serial_number})"
@@ -696,7 +704,8 @@ class Ticket(TimeStampedModel):
             self.organization = self.product.organization
         if not self.created_by_id and self.client_id:
             self.created_by = self.client
-        if not self.reference:
+        should_generate_reference = not self.reference
+        if should_generate_reference:
             self.reference = self.generate_reference()
         if self.assigned_agent_id and self.status in {
             self.STATUS_NEW,
@@ -709,7 +718,22 @@ class Ticket(TimeStampedModel):
             self.resolved_at = timezone.now()
         if self.status == self.STATUS_CLOSED and not self.closed_at:
             self.closed_at = timezone.now()
-        super().save(*args, **kwargs)
+        try:
+            with transaction.atomic():
+                super().save(*args, **kwargs)
+        except IntegrityError:
+            if not should_generate_reference:
+                raise
+            self.reference = ""
+            for _ in range(10):
+                self.reference = self.generate_reference()
+                try:
+                    with transaction.atomic():
+                        super().save(*args, **kwargs)
+                    return
+                except IntegrityError:
+                    self.reference = ""
+            raise
 
     @staticmethod
     def generate_reference():
@@ -1214,7 +1238,7 @@ class KnowledgeArticle(TimeStampedModel):
         if self.product_id and self.product.organization_id:
             self.organization = self.product.organization
         if not self.slug:
-            self.slug = slugify(self.title)
+            self.slug = _generate_unique_slug(self.__class__, self.title, self.pk)
         super().save(*args, **kwargs)
 
 

@@ -669,7 +669,17 @@ class TicketUpdateView(LoginRequiredMixin, InternalRequiredMixin, UpdateView):
     def form_valid(self, form):
         previous_status = self.get_object().status
         previous_assigned_agent_id = self.get_object().assigned_agent_id
-        if form.instance.assigned_agent_id:
+        if (
+            form.instance.assigned_agent_id
+            and not previous_assigned_agent_id
+            and form.instance.status
+            in {
+                Ticket.STATUS_NEW,
+                Ticket.STATUS_QUALIFICATION,
+                Ticket.STATUS_PENDING_CUSTOMER,
+                Ticket.STATUS_WAITING,
+            }
+        ):
             form.instance.status = Ticket.STATUS_ASSIGNED
         response = super().form_valid(form)
         if self.object.is_open:
@@ -999,7 +1009,7 @@ class TicketInterventionPdfView(LoginRequiredMixin, InternalRequiredMixin, View)
     def get(self, request, ticket_pk, intervention_pk):
         ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=ticket_pk)
         intervention = get_object_or_404(ticket.interventions.select_related("agent"), pk=intervention_pk)
-        content = generate_intervention_pdf(intervention)
+        content = generate_intervention_pdf(intervention, persist=False)
         response = HttpResponse(content, content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="intervention-{ticket.reference}-{intervention.pk}.pdf"'
         return response

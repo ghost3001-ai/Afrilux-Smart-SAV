@@ -193,6 +193,12 @@ if "postgresql" in DATABASE_ENGINE:
     if sslmode:
         DATABASES["default"]["OPTIONS"]["sslmode"] = sslmode
 
+if "test" in sys.argv:
+    DATABASES["default"] = {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": os.getenv("DJANGO_TEST_DB_NAME", str(BASE_DIR / "test.sqlite3")),
+    }
+
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
@@ -293,6 +299,10 @@ TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
 TWILIO_SMS_FROM = os.getenv("TWILIO_SMS_FROM", "")
 TWILIO_WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "")
 TWILIO_STATUS_CALLBACK_URL = os.getenv("TWILIO_STATUS_CALLBACK_URL", "")
+INBOUND_EMAIL_WEBHOOK_SECRET = os.getenv("INBOUND_EMAIL_WEBHOOK_SECRET", "")
+INBOUND_EMAIL_WEBHOOK_TOKEN = os.getenv("INBOUND_EMAIL_WEBHOOK_TOKEN", "")
+SAV_REQUIRE_WEBHOOK_SIGNATURES = _env_bool("SAV_REQUIRE_WEBHOOK_SIGNATURES", not DEBUG and "test" not in sys.argv)
+SAV_WEBHOOK_RATE_LIMIT_PER_MINUTE = int(os.getenv("SAV_WEBHOOK_RATE_LIMIT_PER_MINUTE", "60"))
 
 FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID", "")
 FIREBASE_CREDENTIALS_FILE = os.getenv("FIREBASE_CREDENTIALS_FILE", "")

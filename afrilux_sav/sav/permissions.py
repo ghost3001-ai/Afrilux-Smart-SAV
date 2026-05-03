@@ -15,11 +15,7 @@ def is_manager(user):
     return bool(
         user
         and user.is_authenticated
-        and (
-            user.is_superuser
-            or getattr(user, "role", "") in set(User.MANAGER_ROLES)
-            or getattr(user, "role", "") in set(User.SUPPORT_ROLE_ALIASES)
-        )
+        and (user.is_superuser or getattr(user, "role", "") in set(User.MANAGER_ROLES))
     )
 
 

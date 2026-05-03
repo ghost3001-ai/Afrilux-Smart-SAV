@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db.models import Q
 from django.utils import timezone
 
+from .file_validation import MAX_TICKET_ATTACHMENT_BYTES, validate_ticket_attachment_file
 from .models import EquipmentCategory, Intervention, InterventionMedia, Message, Organization, Product, Ticket, TicketAttachment, User
 from .services import (
     ESCALATION_TARGET_CFAO_MANAGER,
@@ -15,9 +16,6 @@ from .services import (
     compute_ticket_sla_deadline,
     provision_client_account,
 )
-
-MAX_TICKET_ATTACHMENT_BYTES = 10 * 1024 * 1024
-
 
 def _split_full_name(value):
     normalized = " ".join((value or "").split())
@@ -432,6 +430,8 @@ class TicketCreateForm(TicketForm):
         total_size = sum(getattr(item, "size", 0) or 0 for item in attachments)
         if total_size > MAX_TICKET_ATTACHMENT_BYTES:
             raise ValidationError("Le total des pieces jointes ne peut pas depasser 10 Mo par ticket.")
+        for uploaded in attachments:
+            validate_ticket_attachment_file(uploaded)
         return attachments
 
 
@@ -518,9 +518,7 @@ class TicketAttachmentForm(forms.ModelForm):
 
     def clean_file(self):
         uploaded = self.cleaned_data["file"]
-        if getattr(uploaded, "size", 0) > MAX_TICKET_ATTACHMENT_BYTES:
-            raise ValidationError("La piece jointe ne peut pas depasser 10 Mo.")
-        return uploaded
+        return validate_ticket_attachment_file(uploaded)
 
 
 class InterventionForm(forms.ModelForm):

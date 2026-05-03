@@ -1,5 +1,10 @@
+import base64
+import hashlib
+import hmac
 from datetime import datetime, time, timedelta
+from urllib.parse import urlparse
 
+from django.conf import settings
 from django.core.cache import cache
 from django.db import connections
 from django.http import HttpResponse
@@ -8,7 +13,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import filters, mixins, parsers, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, Throttled
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -1031,7 +1036,7 @@ class InterventionViewSet(AuditedModelViewSet):
     @action(detail=True, methods=["get"], url_path="report-pdf")
     def report_pdf(self, request, pk=None):
         intervention = self.get_object()
-        content = generate_intervention_pdf(intervention)
+        content = generate_intervention_pdf(intervention, persist=False)
         response = HttpResponse(content, content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="intervention-{intervention.ticket.reference}-{intervention.pk}.pdf"'
         return response
@@ -1345,29 +1350,7 @@ class NotificationViewSet(AuditedModelViewSet):
         self.audit("notification_created", instance)
 
     def perform_update(self, serializer):
-        recipient = serializer.validated_data.get("recipient", serializer.instance.recipient)
-        ticket = serializer.validated_data.get("ticket", serializer.instance.ticket)
-        if (
-            is_internal_user(self.request.user)
-            and not self.request.user.is_superuser
-            and self.request.user.organization_id
-            and recipient.organization_id != self.request.user.organization_id
-        ):
-            raise PermissionDenied("Vous ne pouvez pas reaffecter cette notification a une autre organisation.")
-        if (
-            ticket
-            and is_internal_user(self.request.user)
-            and not self.request.user.is_superuser
-            and self.request.user.organization_id
-            and ticket.organization_id != self.request.user.organization_id
-        ):
-            raise PermissionDenied("Vous ne pouvez pas rattacher cette notification a un ticket d'une autre organisation.")
-        instance = serializer.save()
-        if not is_internal_user(self.request.user):
-            instance.status = Notification.STATUS_READ
-            instance.read_at = timezone.now()
-            instance.save(update_fields=["status", "read_at"])
-        self.audit("notification_updated", instance)
+        raise PermissionDenied("Les notifications ne peuvent etre modifiees que via l'action mark_read.")
 
     @action(detail=True, methods=["post"])
     def mark_read(self, request, pk=None):
@@ -1798,8 +1781,8 @@ class TechnicianPlanningView(APIView):
     permission_classes = [IsAuthenticatedSavUser]
 
     def get(self, request, pk):
-        if not is_manager_user(request.user):
-            raise PermissionDenied("Le planning technicien est reserve aux profils de supervision.")
+        if not (is_manager_user(request.user) or is_support_user(request.user)):
+            raise PermissionDenied("Le planning technicien est reserve aux profils de supervision et de dispatch.")
 
         technician = get_object_or_404(
             scope_user_queryset(
@@ -1910,11 +1893,73 @@ class SupportAssistantView(APIView):
         return Response(answer_support_question(question, request.user, product=product, ticket=ticket))
 
 
+def _webhook_client_ip(request):
+    forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip()
+    return request.META.get("REMOTE_ADDR", "")
+
+
+def _enforce_webhook_rate_limit(request, namespace):
+    limit = int(getattr(settings, "SAV_WEBHOOK_RATE_LIMIT_PER_MINUTE", 60))
+    if limit <= 0:
+        return
+    cache_key = f"sav:webhook:{namespace}:{_webhook_client_ip(request) or 'unknown'}"
+    count = cache.get(cache_key, 0) + 1
+    cache.set(cache_key, count, 60)
+    if count > limit:
+        raise Throttled(detail="Trop de requetes webhook.")
+
+
+def _require_webhook_signatures():
+    return bool(getattr(settings, "SAV_REQUIRE_WEBHOOK_SIGNATURES", True))
+
+
+def _validate_twilio_signature(request):
+    if not _require_webhook_signatures():
+        return True
+    auth_token = getattr(settings, "TWILIO_AUTH_TOKEN", "").strip()
+    received_signature = request.META.get("HTTP_X_TWILIO_SIGNATURE", "").strip()
+    if not auth_token or not received_signature:
+        return False
+
+    url = request.build_absolute_uri()
+    public_base_url = getattr(settings, "SAV_PUBLIC_BASE_URL", "").strip()
+    if public_base_url:
+        parsed_request = urlparse(url)
+        url = public_base_url.rstrip("/") + parsed_request.path
+        if parsed_request.query:
+            url = f"{url}?{parsed_request.query}"
+
+    payload = "".join(f"{key}{value}" for key, value in sorted(request.data.items()))
+    expected = base64.b64encode(hmac.new(auth_token.encode(), f"{url}{payload}".encode(), hashlib.sha1).digest()).decode()
+    return hmac.compare_digest(expected, received_signature)
+
+
+def _validate_email_webhook_signature(request):
+    if not _require_webhook_signatures():
+        return True
+    secret = getattr(settings, "INBOUND_EMAIL_WEBHOOK_SECRET", "").strip()
+    token = getattr(settings, "INBOUND_EMAIL_WEBHOOK_TOKEN", "").strip()
+    received_token = request.META.get("HTTP_X_SAV_WEBHOOK_TOKEN", "").strip()
+    if token and hmac.compare_digest(token, received_token):
+        return True
+    received_signature = request.META.get("HTTP_X_SAV_WEBHOOK_SIGNATURE", "").strip()
+    if not secret or not received_signature:
+        return False
+    expected_digest = hmac.new(secret.encode(), request.body, hashlib.sha256).hexdigest()
+    expected_signature = f"sha256={expected_digest}"
+    return hmac.compare_digest(expected_digest, received_signature) or hmac.compare_digest(expected_signature, received_signature)
+
+
 class TwilioInboundWebhookView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
 
     def post(self, request):
+        _enforce_webhook_rate_limit(request, "twilio")
+        if not _validate_twilio_signature(request):
+            return Response({"detail": "Signature Twilio invalide."}, status=status.HTTP_403_FORBIDDEN)
         payload = {key: value for key, value in request.data.items()}
         result = handle_twilio_inbound(payload)
         return Response(result)
@@ -1926,6 +1971,9 @@ class EmailInboundWebhookView(APIView):
     parser_classes = [parsers.JSONParser, parsers.MultiPartParser, parsers.FormParser]
 
     def post(self, request):
+        _enforce_webhook_rate_limit(request, "email")
+        if not _validate_email_webhook_signature(request):
+            return Response({"detail": "Signature email invalide."}, status=status.HTTP_403_FORBIDDEN)
         payload = {key: value for key, value in request.data.items()}
         files = []
         for key in request.FILES:

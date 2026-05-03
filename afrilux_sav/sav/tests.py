@@ -473,6 +473,21 @@ class SavPlatformTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_qa_and_support_are_not_manager_profiles(self):
+        for user in [self.qa_user, self.agent, self.dispatcher]:
+            self.api.force_authenticate(user=user)
+            response = self.api.post(
+                reverse("sav_api:user-list"),
+                {
+                    "username": f"created_by_{user.username}",
+                    "password": "secret123",
+                    "role": User.ROLE_SUPPORT,
+                    "organization": self.organization.id,
+                },
+                format="json",
+            )
+            self.assertEqual(response.status_code, 403)
+
     def test_twilio_inbound_webhook_creates_message(self):
         self.client_user.phone = "+237690000000"
         self.client_user.save(update_fields=["phone"])
@@ -500,6 +515,18 @@ class SavPlatformTests(TestCase):
             Message.objects.filter(ticket=ticket, channel=Message.CHANNEL_WHATSAPP, content__icontains="persiste").exists()
         )
 
+    @override_settings(SAV_REQUIRE_WEBHOOK_SIGNATURES=True, TWILIO_AUTH_TOKEN="")
+    def test_twilio_inbound_webhook_rejects_unsigned_requests_when_required(self):
+        response = self.client.post(
+            reverse("sav_api:twilio-inbound"),
+            {
+                "From": "whatsapp:+237690000000",
+                "Body": "Demande non signee",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+
     def test_email_inbound_webhook_creates_ticket_and_attachment(self):
         payload = SimpleUploadedFile("capture-erreur.txt", b"preuve ticket email", content_type="text/plain")
 
@@ -522,6 +549,37 @@ class SavPlatformTests(TestCase):
         self.assertTrue(
             TicketAttachment.objects.filter(ticket=created_ticket, original_name="capture-erreur.txt").exists()
         )
+
+    @override_settings(SAV_REQUIRE_WEBHOOK_SIGNATURES=True, INBOUND_EMAIL_WEBHOOK_TOKEN="secret-webhook-token")
+    def test_email_inbound_webhook_requires_token_when_signatures_are_enabled(self):
+        response = self.client.post(
+            reverse("sav_api:email-inbound"),
+            {
+                "from": "unsigned@example.com",
+                "subject": "Email non signe",
+                "body": "Ce message doit etre refuse.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_email_inbound_webhook_rejects_unsafe_attachment_type(self):
+        payload = SimpleUploadedFile("payload.exe", b"binary", content_type="application/octet-stream")
+
+        response = self.client.post(
+            reverse("sav_api:email-inbound"),
+            {
+                "from": "nouveau.client@example.com",
+                "subject": "Piece jointe dangereuse",
+                "body": "Bonjour, voir la piece jointe.",
+                "to": self.organization.support_email,
+                "attachments": payload,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["attachment_count"], 0)
+        self.assertEqual(response.json()["rejected_attachment_count"], 1)
 
     def test_ticket_attachment_api_allows_client_upload(self):
         self.api.force_authenticate(user=self.client_user)

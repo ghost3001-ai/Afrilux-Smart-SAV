@@ -165,7 +165,7 @@ def is_manager_user(user):
     return bool(
         user
         and user.is_authenticated
-        and (user.is_superuser or getattr(user, "role", "") in set(User.MANAGER_ROLES) or is_support_user(user))
+        and (user.is_superuser or getattr(user, "role", "") in set(User.MANAGER_ROLES))
     )
 
 
@@ -1194,7 +1194,14 @@ def parse_reporting_recipients(organization):
     return sorted(recipients)
 
 
-def generate_intervention_pdf(intervention, persist=True):
+def generate_intervention_pdf(intervention, persist=True, force=False):
+    if persist and not force and getattr(intervention, "report_pdf", None):
+        try:
+            with intervention.report_pdf.open("rb") as existing_report:
+                return existing_report.read()
+        except OSError:
+            pass
+
     buffer = BytesIO()
     document = SimpleDocTemplate(buffer, pagesize=A4)
     styles = getSampleStyleSheet()
@@ -1253,7 +1260,7 @@ def send_intervention_assignment_email(intervention, pdf_content=None):
     if not recipient:
         return False
 
-    pdf_content = pdf_content or generate_intervention_pdf(intervention)
+    pdf_content = pdf_content or generate_intervention_pdf(intervention, persist=False)
     message = EmailMessage(
         subject=f"Bon d'intervention {intervention.ticket.reference}",
         body=(

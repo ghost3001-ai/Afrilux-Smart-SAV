@@ -184,7 +184,7 @@ class SessionController extends ChangeNotifier {
       try {
         await _pushNotifications.unregisterCurrentDevice(activeSession.api);
       } catch (_) {}
-      activeSession.api.clearTokens();
+      await activeSession.api.clearTokens();
     }
   }
 

@@ -1,6 +1,7 @@
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
+from .file_validation import MAX_TICKET_ATTACHMENT_BYTES, validate_ticket_attachment_file
 from .models import (
     AccountCredit,
     AIActionLog,
@@ -31,8 +32,6 @@ from .models import (
     WorkflowExecution,
 )
 from .services import generate_client_username, is_admin_user, provision_client_account, scope_message_queryset
-
-MAX_TICKET_ATTACHMENT_BYTES = 10 * 1024 * 1024
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
@@ -347,6 +346,7 @@ class ClientRegistrationSerializer(serializers.Serializer):
         attrs = super().validate(attrs)
         if attrs["password"] != attrs["password_confirm"]:
             raise serializers.ValidationError({"password_confirm": "Les mots de passe ne correspondent pas."})
+        validate_password(attrs["password"])
         client_type = (attrs.get("client_type") or "").strip().lower()
         company_name = (attrs.get("company_name") or "").strip()
         if client_type == "enterprise" and not company_name:
@@ -528,9 +528,10 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
         return obj.file.url
 
     def validate_file(self, value):
-        if getattr(value, "size", 0) > MAX_TICKET_ATTACHMENT_BYTES:
-            raise serializers.ValidationError("La piece jointe ne peut pas depasser 10 Mo.")
-        return value
+        try:
+            return validate_ticket_attachment_file(value)
+        except Exception as exc:
+            raise serializers.ValidationError(str(exc)) from exc
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
