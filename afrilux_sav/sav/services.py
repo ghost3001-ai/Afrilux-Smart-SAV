@@ -73,6 +73,12 @@ ESCALATION_ALLOWED_TARGETS = {
     ESCALATION_TARGET_HVAC_MANAGER,
     ESCALATION_TARGET_CHIEF_TECHNICIAN,
 }
+ESCALATION_TARGET_ROLE_MAP = {
+    ESCALATION_TARGET_CFAO_MANAGER: [User.ROLE_CFAO_MANAGER],
+    ESCALATION_TARGET_CFAO_WORKS: [User.ROLE_CFAO_WORKS],
+    ESCALATION_TARGET_HVAC_MANAGER: [User.ROLE_HVAC_MANAGER],
+    ESCALATION_TARGET_CHIEF_TECHNICIAN: [User.ROLE_CHIEF_TECHNICIAN],
+}
 
 TICKET_CREATOR_ROLES = {
     User.ROLE_CLIENT,
@@ -529,13 +535,7 @@ def select_escalation_agent(ticket, *, target=ESCALATION_TARGET_CHIEF_TECHNICIAN
     current_agent = getattr(ticket, "assigned_agent", None)
     exclude_ids = [getattr(current_agent, "id", None)]
     normalized_target = (target or ESCALATION_TARGET_CHIEF_TECHNICIAN).strip().lower()
-    target_roles = {
-        ESCALATION_TARGET_CFAO_MANAGER: [User.ROLE_CFAO_MANAGER],
-        ESCALATION_TARGET_CFAO_WORKS: [User.ROLE_CFAO_WORKS],
-        ESCALATION_TARGET_HVAC_MANAGER: [User.ROLE_HVAC_MANAGER],
-        ESCALATION_TARGET_CHIEF_TECHNICIAN: [User.ROLE_CHIEF_TECHNICIAN],
-    }
-    roles = target_roles.get(normalized_target)
+    roles = ESCALATION_TARGET_ROLE_MAP.get(normalized_target)
     if roles:
         return _select_least_loaded_agent_for_roles(
             roles=roles,
@@ -1312,7 +1312,15 @@ def sync_ticket_assignment(ticket, *, assigned_by=None, note="", release_status=
     return current_assignment, created, released_ids
 
 
-def escalate_ticket(ticket, *, actor=None, note="", target=ESCALATION_TARGET_CHIEF_TECHNICIAN):
+def escalate_ticket(
+    ticket,
+    *,
+    actor=None,
+    note="",
+    target=ESCALATION_TARGET_CHIEF_TECHNICIAN,
+    increase_priority=True,
+    notification_event_type="ticket_escalated",
+):
     if ticket.status not in OPEN_TICKET_STATUSES:
         raise ValueError("Seuls les tickets ouverts peuvent etre escalades.")
 
@@ -1330,7 +1338,8 @@ def escalate_ticket(ticket, *, actor=None, note="", target=ESCALATION_TARGET_CHI
     if escalation_target is None:
         raise ValueError("Aucun utilisateur disponible pour recevoir cette escalade.")
 
-    ticket.priority = next_ticket_priority(ticket.priority)
+    if increase_priority:
+        ticket.priority = next_ticket_priority(ticket.priority)
     ticket.assigned_agent = escalation_target
     if previous_assigned_agent is None or previous_assigned_agent.id != escalation_target.id:
         ticket.status = Ticket.STATUS_ASSIGNED
@@ -1360,7 +1369,7 @@ def escalate_ticket(ticket, *, actor=None, note="", target=ESCALATION_TARGET_CHI
         direction=Message.DIRECTION_INTERNAL,
         content=(
             "Le ticket a ete escalade."
-            f" Priorite: {previous_priority} -> {ticket.priority}."
+            f"{' Priorite: ' + previous_priority + ' -> ' + ticket.priority + '.' if previous_priority != ticket.priority else ''}"
             f"{' Nouveau referent: ' + str(ticket.assigned_agent) + '.' if ticket.assigned_agent else ''}"
         ),
         sentiment_score=calculate_sentiment("Le ticket a ete escalade."),
@@ -1378,7 +1387,7 @@ def escalate_ticket(ticket, *, actor=None, note="", target=ESCALATION_TARGET_CHI
         create_external_channel_notifications(
             recipient=recipient,
             ticket=ticket,
-            event_type="ticket_escalated",
+            event_type=notification_event_type,
             subject=f"Ticket escalade {ticket.reference}",
             message=(
                 f"Le ticket '{ticket.title}' a ete escalade avec une priorite {ticket.get_priority_display().lower()}."

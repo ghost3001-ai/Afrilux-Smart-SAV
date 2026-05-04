@@ -12,6 +12,7 @@ from .services import (
     ESCALATION_TARGET_CFAO_WORKS,
     ESCALATION_TARGET_CHIEF_TECHNICIAN,
     ESCALATION_TARGET_HVAC_MANAGER,
+    ESCALATION_TARGET_ROLE_MAP,
     compute_ticket_sla_deadline,
     provision_client_account,
 )
@@ -264,6 +265,18 @@ class TicketCreateForm(TicketForm):
         help_text="Optionnel: ajoutez des pieces jointes des la creation du dossier.",
         widget=MultipleFileInput(attrs={"accept": "image/*,.pdf,.txt"}),
     )
+    initial_escalation_target = forms.ChoiceField(
+        required=False,
+        label="Escalade initiale si technicien inconnu",
+        choices=(
+            ("", "Ne pas escalader maintenant"),
+            (ESCALATION_TARGET_CFAO_MANAGER, "Responsable CFAO / Projet Technique CFAO"),
+            (ESCALATION_TARGET_CFAO_WORKS, "Conducteur de travaux CFAO"),
+            (ESCALATION_TARGET_HVAC_MANAGER, "Responsable Froid et climatisation"),
+            (ESCALATION_TARGET_CHIEF_TECHNICIAN, "Chef Technicien Froid & Climatisation"),
+        ),
+        help_text="A utiliser quand le Responsable SAV ne sait pas encore quel technicien affecter.",
+    )
 
     class Meta(TicketForm.Meta):
         fields = [*TicketForm.Meta.fields, "initial_attachments"]
@@ -282,6 +295,9 @@ class TicketCreateForm(TicketForm):
             for field_name in ["client_mode", "existing_client_email", "client_name", "client_email", "client_password1", "client_password2"]:
                 self.fields[field_name].widget = forms.HiddenInput()
                 self.fields[field_name].required = False
+        if not (self.user and self.user.is_authenticated and self.user.role == User.ROLE_HEAD_SAV):
+            self.fields["initial_escalation_target"].widget = forms.HiddenInput()
+            self.fields["initial_escalation_target"].required = False
 
     def _uses_inline_client_creation(self):
         return bool(
@@ -302,6 +318,20 @@ class TicketCreateForm(TicketForm):
         if mode not in {self.CLIENT_MODE_EXISTING, self.CLIENT_MODE_NEW}:
             return ""
         return mode
+
+    def _validate_initial_escalation_target_available(self, cleaned_data):
+        target = (cleaned_data.get("initial_escalation_target") or "").strip()
+        if not target or self.errors.get("initial_escalation_target"):
+            return
+        roles = ESCALATION_TARGET_ROLE_MAP.get(target, [])
+        if not roles:
+            return
+        organization = self._inline_client_organization() or getattr(cleaned_data.get("client"), "organization", None)
+        queryset = User.objects.filter(role__in=roles, technician_status="available", is_active=True)
+        if organization:
+            queryset = queryset.filter(organization=organization)
+        if not queryset.exists():
+            self.add_error("initial_escalation_target", "Aucun utilisateur disponible pour cette cible d'escalade.")
 
     def _lookup_existing_client(self, search_value):
         normalized_search = (search_value or "").strip()
@@ -341,7 +371,14 @@ class TicketCreateForm(TicketForm):
 
     def clean(self):
         cleaned_data = super().clean()
+        initial_target = (cleaned_data.get("initial_escalation_target") or "").strip()
+        if initial_target:
+            if not (self.user and self.user.is_authenticated and self.user.role == User.ROLE_HEAD_SAV):
+                self.add_error("initial_escalation_target", "Seul le Responsable SAV peut escalader un ticket a la creation.")
+            if cleaned_data.get("assigned_agent"):
+                self.add_error("initial_escalation_target", "Choisissez soit une affectation directe, soit une escalade initiale.")
         if not self._uses_inline_client_creation():
+            self._validate_initial_escalation_target_available(cleaned_data)
             return cleaned_data
 
         mode = self._selected_client_mode(cleaned_data)
@@ -366,6 +403,7 @@ class TicketCreateForm(TicketForm):
             cleaned_data["client_email"] = ""
             cleaned_data["client_password1"] = ""
             cleaned_data["client_password2"] = ""
+            self._validate_initial_escalation_target_available(cleaned_data)
             return cleaned_data
 
         client_name = (cleaned_data.get("client_name") or "").strip()
@@ -401,6 +439,7 @@ class TicketCreateForm(TicketForm):
                 elif existing.has_usable_password():
                     self.add_error("client_email", "Un compte client existe deja avec cet email. Utilisez le mode 'Client existant'.")
 
+        self._validate_initial_escalation_target_available(cleaned_data)
         return cleaned_data
 
     def resolve_ticket_client(self):

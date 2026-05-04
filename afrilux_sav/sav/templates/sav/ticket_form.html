@@ -52,7 +52,7 @@
 
         <div class="form-grid form-grid--two">
             {% for field in form %}
-                {% if not field.is_hidden and field.name == 'assigned_agent' or not field.is_hidden and field.name == 'status' or not field.is_hidden and field.name == 'priority' or not field.is_hidden and field.name == 'sla_deadline' or not field.is_hidden and field.name == 'initial_attachments' %}
+                {% if not field.is_hidden and field.name == 'assigned_agent' or not field.is_hidden and field.name == 'initial_escalation_target' or not field.is_hidden and field.name == 'status' or not field.is_hidden and field.name == 'priority' or not field.is_hidden and field.name == 'sla_deadline' or not field.is_hidden and field.name == 'initial_attachments' %}
                     <label class="field {% if field.name == 'initial_attachments' %}field--full{% endif %}">
                         <span>{{ field.label }}{% if field.field.required %} <strong>*</strong>{% endif %}</span>
                         {{ field }}

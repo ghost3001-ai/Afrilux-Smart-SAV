@@ -31,7 +31,16 @@ from .models import (
     User,
     WorkflowExecution,
 )
-from .services import generate_client_username, is_admin_user, provision_client_account, scope_message_queryset
+from .services import (
+    ESCALATION_TARGET_CFAO_MANAGER,
+    ESCALATION_TARGET_CFAO_WORKS,
+    ESCALATION_TARGET_CHIEF_TECHNICIAN,
+    ESCALATION_TARGET_HVAC_MANAGER,
+    generate_client_username,
+    is_admin_user,
+    provision_client_account,
+    scope_message_queryset,
+)
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
@@ -1067,6 +1076,17 @@ class TicketSerializer(serializers.ModelSerializer):
     account_credits = serializers.SerializerMethodField()
     assignment_history = TicketAssignmentSerializer(many=True, read_only=True)
     feedback = TicketFeedbackSerializer(read_only=True)
+    initial_escalation_target = serializers.ChoiceField(
+        choices=[
+            (ESCALATION_TARGET_CFAO_MANAGER, "Responsable CFAO / Projet Technique CFAO"),
+            (ESCALATION_TARGET_CFAO_WORKS, "Conducteur de travaux CFAO"),
+            (ESCALATION_TARGET_HVAC_MANAGER, "Responsable Froid et climatisation"),
+            (ESCALATION_TARGET_CHIEF_TECHNICIAN, "Chef Technicien Froid & Climatisation"),
+        ],
+        required=False,
+        allow_blank=True,
+        write_only=True,
+    )
 
     class Meta:
         model = Ticket
@@ -1082,6 +1102,7 @@ class TicketSerializer(serializers.ModelSerializer):
             "product_name",
             "assigned_agent",
             "assigned_agent_name",
+            "initial_escalation_target",
             "title",
             "description",
             "business_domain",
@@ -1169,6 +1190,18 @@ class TicketSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"assigned_agent": "Affectation autorisee uniquement aux responsables d'escalade ou techniciens disponibles."}
             )
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        initial_target = (attrs.get("initial_escalation_target") or "").strip()
+        if initial_target:
+            if not user or not user.is_authenticated or user.role != User.ROLE_HEAD_SAV:
+                raise serializers.ValidationError(
+                    {"initial_escalation_target": "Seul le Responsable SAV peut escalader un ticket a la creation."}
+                )
+            if assigned_agent:
+                raise serializers.ValidationError(
+                    {"initial_escalation_target": "Choisissez soit une affectation directe, soit une escalade initiale."}
+                )
         return attrs
 
 

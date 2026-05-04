@@ -512,6 +512,7 @@ class TicketViewSet(AuditedModelViewSet):
             client = self.request.user
         else:
             client = serializer.validated_data.get("client")
+        initial_escalation_target = serializer.validated_data.pop("initial_escalation_target", "")
         if (
             client
             and is_internal_user(self.request.user)
@@ -533,6 +534,21 @@ class TicketViewSet(AuditedModelViewSet):
             instance.save(update_fields=[*update_fields, "updated_at"])
         if instance.assigned_agent_id:
             ensure_assignment_intervention(instance, actor=self.request.user, note="Affectation initiale a la creation du ticket.")
+        elif self.request.user.role == User.ROLE_HEAD_SAV and initial_escalation_target:
+            previous_status = instance.status
+            try:
+                escalate_ticket(
+                    instance,
+                    actor=self.request.user,
+                    target=initial_escalation_target,
+                    note="Escalade initiale depuis la creation du ticket.",
+                    increase_priority=False,
+                    notification_event_type="ticket_initial_escalation",
+                )
+            except ValueError as exc:
+                raise PermissionDenied(str(exc)) from exc
+            if instance.status != previous_status:
+                notify_ticket_status_change(instance, previous_status, actor=self.request.user)
 
         self.audit("ticket_created", instance)
         run_automation_rules_for_ticket(instance, actor=self.request.user, trigger_event=AutomationRule.TRIGGER_TICKET_CREATED)

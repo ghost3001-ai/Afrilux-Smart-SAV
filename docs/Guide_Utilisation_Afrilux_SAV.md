@@ -61,11 +61,11 @@ python3 manage.py runserver
 
 1. Ouvrir le dashboard pour surveiller les tickets ouverts, critiques, non assignés, les produits, alertes et notifications.
 2. Créer un ticket interne depuis `/tickets/new/` en choisissant soit `Client existant` (recherche par email), soit `Nouveau client` (création inline avec nom/email/mot de passe).
-3. Garder la visibilité responsable SAV sur tous les tickets de l'organisation et laisser chaque client voir uniquement ses propres tickets.
-4. Répondre par message interne ou public, joindre des fichiers et déclencher la résolution agentique si besoin.
-5. Planifier une intervention, documenter le diagnostic, les actions, les pièces utilisées et générer le PDF d’intervention.
-6. Escalader le ticket uniquement vers : Responsable CFAO / Responsable de Projet Technique CFAO, Conducteur de travaux CFAO, Responsable froid & climatisation / responsable technique froid, ou Chef Technicien Froid & Climatisation.
-7. La cible d'escalade peut ensuite affecter le ticket a un technicien disponible de la meme organisation.
+3. Si le technicien est connu, l'affecter directement; sinon utiliser `Escalade initiale si technicien inconnu`.
+4. Escalader le ticket uniquement vers : Responsable CFAO / Responsable de Projet Technique CFAO, Conducteur de travaux CFAO, Responsable froid & climatisation / responsable technique froid, ou Chef Technicien Froid & Climatisation.
+5. La cible d'escalade peut ensuite affecter le ticket a un technicien disponible de la meme organisation.
+6. Répondre par message interne ou public, joindre des fichiers et déclencher la résolution agentique si besoin.
+7. Planifier une intervention, documenter le diagnostic, les actions, les pièces utilisées et générer le PDF d’intervention.
 8. Déclencher un crédit de compte client si le workflow le justifie.
 9. Exécuter un workflow d’automatisation ou la maintenance prédictive sur un produit.
 

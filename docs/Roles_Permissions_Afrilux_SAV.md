@@ -34,6 +34,7 @@ Les anciens roles sont convertis par migration:
 - Le `technician` voit uniquement les tickets qui lui sont affectes ou les interventions qui le concernent.
 - `auditor` consulte les tableaux de bord et rapports en lecture seule.
 - L'escalade se fait uniquement vers un utilisateur actif et disponible appartenant a l'une des quatre cibles d'escalade; l'affectation terrain se fait uniquement vers un `technician` actif et disponible.
+- Chaque utilisateur voit uniquement les notifications dont il est le destinataire.
 
 ## 3) Espaces apres connexion
 
@@ -78,7 +79,7 @@ Les anciens statuts etendus sont normalises par migration:
 1. Le client cree sa demande depuis le portail ou le responsable SAV cree le ticket pour le compte d'un client.
 2. Le ticket est visible par le client createur et par le responsable SAV de l'organisation.
 3. Le responsable SAV qualifie le ticket, suit les SLA et choisit si une escalade est necessaire.
-4. Le responsable SAV escalade uniquement vers `cfao_manager`, `cfao_works`, `hvac_manager` ou `chief_technician` lorsqu'il ne sait pas quel technicien choisir.
+4. Le responsable SAV peut escalader des la creation vers `cfao_manager`, `cfao_works`, `hvac_manager` ou `chief_technician` lorsqu'il ne sait pas quel technicien choisir.
 5. La cible d'escalade affectee voit le ticket puis peut l'assigner a un `technician` disponible.
 6. Le technicien affecte renseigne le diagnostic, les actions et les rapports d'intervention.
 7. Le client suit les messages visibles client, confirme la resolution ou demande une reouverture.

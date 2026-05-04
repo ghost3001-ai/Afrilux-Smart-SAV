@@ -635,6 +635,22 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
             self.object.save(update_fields=["sla_deadline", "updated_at"])
         if self.object.assigned_agent_id:
             ensure_assignment_intervention(self.object, actor=self.request.user, note="Affectation initiale depuis le portail.")
+        elif self.request.user.role == User.ROLE_HEAD_SAV and form.cleaned_data.get("initial_escalation_target"):
+            previous_status = self.object.status
+            try:
+                escalate_ticket(
+                    self.object,
+                    actor=self.request.user,
+                    target=form.cleaned_data["initial_escalation_target"],
+                    note="Escalade initiale depuis la creation du ticket.",
+                    increase_priority=False,
+                    notification_event_type="ticket_initial_escalation",
+                )
+            except ValueError as exc:
+                form.add_error("initial_escalation_target", str(exc))
+                return self.form_invalid(form)
+            if self.object.status != previous_status:
+                notify_ticket_status_change(self.object, previous_status, actor=self.request.user)
 
         for uploaded_file in form.cleaned_data.get("initial_attachments", []):
             attachment = TicketAttachment.objects.create(
