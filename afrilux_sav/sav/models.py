@@ -96,13 +96,13 @@ class User(AbstractUser):
         (ROLE_CFAO_WORKS, "Conducteur de travaux CFAO"),
         (ROLE_HVAC_MANAGER, "Responsable Froid et climatisation / Responsable technique froid"),
         (ROLE_CHIEF_TECHNICIAN, "Chef Technicien Froid & Climatisation"),
+        (ROLE_TECHNICIAN, "Technicien de maintenance"),
         (ROLE_CLIENT, "Client"),
         (ROLE_AUDITOR, "Auditeur / Direction"),
     )
 
     LEGACY_ROLE_CHOICES = (
         (ROLE_SUPPORT, "Agent support / Hotliner"),
-        (ROLE_TECHNICIAN, "Technicien"),
         (ROLE_EXPERT, "Chef technicien / Expert (Niveau 3)"),
         (ROLE_SOFTWARE_OWNER, "Gestionnaire principal du logiciel"),
         (ROLE_SUPERVISOR, "Superviseur / Team Leader"),
@@ -118,17 +118,21 @@ class User(AbstractUser):
     STANDARD_SUPPORT_ROLES = ()
     SPECIAL_SUPPORT_ROLES = ()
     FRONTLINE_ROLES = (*SUPPORT_ROLE_ALIASES,)
-    TECHNICAL_ROLES = (
-        ROLE_CHIEF_TECHNICIAN,
+    ESCALATION_TARGET_ROLES = (
         ROLE_CFAO_MANAGER,
         ROLE_CFAO_WORKS,
         ROLE_HVAC_MANAGER,
+        ROLE_CHIEF_TECHNICIAN,
+    )
+    FIELD_TECHNICIAN_ROLES = (
+        ROLE_TECHNICIAN,
+    )
+    TECHNICAL_ROLES = (
+        *ESCALATION_TARGET_ROLES,
+        *FIELD_TECHNICIAN_ROLES,
     )
     SPECIALIST_ROLES = (
-        ROLE_CHIEF_TECHNICIAN,
-        ROLE_CFAO_MANAGER,
-        ROLE_CFAO_WORKS,
-        ROLE_HVAC_MANAGER,
+        *ESCALATION_TARGET_ROLES,
     )
     LEADERSHIP_ROLES = (
         ROLE_HEAD_SAV,
@@ -152,10 +156,8 @@ class User(AbstractUser):
         ROLE_MANAGER,
     )
     ASSIGNABLE_ROLES = (
-        ROLE_CFAO_MANAGER,
-        ROLE_CFAO_WORKS,
-        ROLE_HVAC_MANAGER,
-        ROLE_CHIEF_TECHNICIAN,
+        *ESCALATION_TARGET_ROLES,
+        *FIELD_TECHNICIAN_ROLES,
     )
     TECHNICIAN_SPACE_ROLES = ASSIGNABLE_ROLES
     REPORTING_ROLES = (
@@ -228,10 +230,10 @@ class User(AbstractUser):
 
     def save(self, *args, **kwargs):
         if self.role == self.ROLE_FIELD_TECHNICIAN:
-            self.role = self.ROLE_CHIEF_TECHNICIAN
+            self.role = self.ROLE_TECHNICIAN
         if self.role in {self.ROLE_SUPPORT, self.ROLE_AGENT, self.ROLE_VIP_SUPPORT, self.ROLE_SYSTEM_BOT}:
             self.role = self.ROLE_HEAD_SAV
-        if self.role == self.ROLE_TECHNICIAN or self.role == self.ROLE_EXPERT:
+        if self.role == self.ROLE_EXPERT:
             self.role = self.ROLE_CHIEF_TECHNICIAN
         if self.role in {self.ROLE_SUPERVISOR, self.ROLE_DISPATCHER, self.ROLE_SOFTWARE_OWNER, self.ROLE_MANAGER}:
             self.role = self.ROLE_HEAD_SAV
@@ -260,7 +262,7 @@ class User(AbstractUser):
 
     @property
     def is_ticket_escalation_target(self):
-        return self.role in set(self.ASSIGNABLE_ROLES)
+        return self.role in set(self.ESCALATION_TARGET_ROLES)
 
     @property
     def account_balance(self):

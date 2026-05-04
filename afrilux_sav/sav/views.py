@@ -110,6 +110,7 @@ from .services import (
     compute_ticket_monthly_series,
     compute_ticket_sla_deadline,
     compute_ticket_volume_series,
+    assign_ticket_to_technician,
     credit_account_for_ticket,
     dispatch_due_reports,
     ensure_assignment_intervention,
@@ -582,7 +583,7 @@ class TicketViewSet(AuditedModelViewSet):
         ticket = self.get_object()
         if not request.user.is_ticket_assignment_eligible:
             return Response(
-                {"detail": "Prise en charge autorisee uniquement pour les roles d'escalade disponibles."},
+                {"detail": "Prise en charge autorisee uniquement pour les responsables d'escalade ou techniciens disponibles."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         previous_status = ticket.status
@@ -595,15 +596,13 @@ class TicketViewSet(AuditedModelViewSet):
         notify_ticket_status_change(ticket, previous_status, actor=request.user)
         return Response(self.get_serializer(ticket).data)
 
-    @action(detail=True, methods=["post"], permission_classes=[IsManagerUser], url_path="assign")
+    @action(detail=True, methods=["post"], permission_classes=[IsInternalUser], url_path="assign")
     def assign(self, request, pk=None):
         ticket = self.get_object()
         previous_status = ticket.status
         technician_id = request.data.get("technician") or request.data.get("assigned_agent")
         if not technician_id:
-            return Response({"detail": "La cible d'escalade est obligatoire."}, status=status.HTTP_400_BAD_REQUEST)
-        if request.user.role != User.ROLE_HEAD_SAV:
-            raise PermissionDenied("Seul le responsable SAV peut affecter ou escalader un ticket.")
+            return Response({"detail": "La cible d'affectation est obligatoire."}, status=status.HTTP_400_BAD_REQUEST)
         assignment_queryset = User.objects.filter(
             role__in=User.ASSIGNABLE_ROLES,
             technician_status="available",
@@ -613,6 +612,23 @@ class TicketViewSet(AuditedModelViewSet):
             scope_user_queryset(assignment_queryset, request.user),
             pk=technician_id,
         )
+        if technician.role == User.ROLE_TECHNICIAN:
+            try:
+                assign_ticket_to_technician(
+                    ticket,
+                    technician,
+                    actor=request.user,
+                    note=str(request.data.get("note", "")).strip() or "Affectation depuis l'API.",
+                )
+            except ValueError as exc:
+                raise PermissionDenied(str(exc)) from exc
+            self.audit("ticket_assigned_to_technician", ticket, {"assigned_agent": technician.id})
+            notify_ticket_status_change(ticket, previous_status, actor=request.user)
+            return Response(self.get_serializer(ticket).data)
+        if request.user.role != User.ROLE_HEAD_SAV:
+            raise PermissionDenied("Seul le responsable SAV peut affecter une cible d'escalade.")
+        if technician.role not in set(User.ESCALATION_TARGET_ROLES):
+            raise PermissionDenied("La cible doit etre un responsable d'escalade ou un technicien.")
         ticket.assigned_agent = technician
         if ticket.status in {Ticket.STATUS_NEW, Ticket.STATUS_WAITING}:
             ticket.status = Ticket.STATUS_ASSIGNED

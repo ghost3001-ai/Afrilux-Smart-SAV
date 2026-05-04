@@ -43,6 +43,19 @@
                 <button class="button button--ghost" type="submit">Escalader</button>
             </form>
         {% endif %}
+        {% if can_assign_technician %}
+            <form method="post" action="{% url 'ticket-assign-technician-web' ticket.pk %}" class="form-grid" style="min-width: 20rem;">
+                {% csrf_token %}
+                {% for field in technician_assignment_form %}
+                    <label class="field {% if field.name == 'note' %}field--full{% endif %}">
+                        <span>{{ field.label }}</span>
+                        {{ field }}
+                        {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
+                    </label>
+                {% endfor %}
+                <button class="button button--primary" type="submit">Affecter technicien</button>
+            </form>
+        {% endif %}
         {% if sav_shell.is_internal %}
             <form method="post" action="{% url 'ticket-agentic-web' ticket.pk %}">
                 {% csrf_token %}

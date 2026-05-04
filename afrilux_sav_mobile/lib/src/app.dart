@@ -91,6 +91,7 @@ class SavSession {
     "cfao_works",
     "hvac_manager",
     "chief_technician",
+    "technician",
   }.contains(role);
   bool get isManager => role == "head_sav";
   bool get isAdmin => role == "admin";

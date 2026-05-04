@@ -21,6 +21,7 @@ from .forms import (
     ProductForm,
     SupportAssistantQuestionForm,
     TicketEscalationForm,
+    TicketTechnicianAssignmentForm,
     TicketAttachmentForm,
     TicketCreateForm,
     TicketForm,
@@ -59,6 +60,8 @@ from .services import (
     compute_ticket_monthly_series,
     compute_ticket_sla_deadline,
     compute_ticket_volume_series,
+    assign_ticket_to_technician,
+    can_assign_ticket_technician,
     credit_account_for_ticket,
     create_notification,
     ensure_assignment_intervention,
@@ -395,6 +398,7 @@ class AdministrationPageView(LoginRequiredMixin, AdminRequiredMixin, TemplateVie
             User.ROLE_CFAO_WORKS,
             User.ROLE_HVAC_MANAGER,
             User.ROLE_CHIEF_TECHNICIAN,
+            User.ROLE_TECHNICIAN,
             User.ROLE_AUDITOR,
         ]
         internal_users = users.filter(role__in=cdc_internal_roles).order_by("role", "first_name", "last_name", "username")
@@ -425,6 +429,7 @@ class AdministrationPageView(LoginRequiredMixin, AdminRequiredMixin, TemplateVie
                     "travaux_cfao": internal_users.filter(role=User.ROLE_CFAO_WORKS).count(),
                     "froid_clim": internal_users.filter(role=User.ROLE_HVAC_MANAGER).count(),
                     "chefs_techniciens": internal_users.filter(role=User.ROLE_CHIEF_TECHNICIAN).count(),
+                    "techniciens": internal_users.filter(role=User.ROLE_TECHNICIAN).count(),
                     "auditeurs": internal_users.filter(role=User.ROLE_AUDITOR).count(),
                     "clients": clients.count(),
                 },
@@ -755,6 +760,8 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         context["can_credit_account"] = is_admin_user(user)
         context["can_escalate"] = can_support_edit and ticket.status in OPEN_TICKET_STATUSES
         context["escalation_form"] = TicketEscalationForm()
+        context["can_assign_technician"] = can_assign_ticket_technician(user, ticket) and ticket.status in OPEN_TICKET_STATUSES
+        context["technician_assignment_form"] = TicketTechnicianAssignmentForm(user=user, ticket=ticket)
         context["can_confirm_resolution"] = (
             ticket.status == Ticket.STATUS_RESOLVED
             and (user.role == User.ROLE_CLIENT and ticket.client_id == user.id)
@@ -885,6 +892,32 @@ class TicketEscalateView(LoginRequiredMixin, View):
                 request,
                 f"Le ticket a ete escalade avec priorite {ticket.get_priority_display().lower()}.",
             )
+        return redirect("ticket-detail", pk=pk)
+
+
+class TicketAssignTechnicianView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
+        form = TicketTechnicianAssignmentForm(request.POST, user=request.user, ticket=ticket)
+        if not form.is_valid():
+            django_messages.error(request, "Choisissez un technicien disponible.")
+            return redirect("ticket-detail", pk=pk)
+
+        previous_status = ticket.status
+        try:
+            result = assign_ticket_to_technician(
+                ticket,
+                form.cleaned_data["technician"],
+                actor=request.user,
+                note=form.cleaned_data.get("note", ""),
+            )
+        except ValueError as exc:
+            django_messages.error(request, str(exc))
+            return redirect("ticket-detail", pk=pk)
+
+        if ticket.status != previous_status:
+            notify_ticket_status_change(ticket, previous_status, actor=request.user)
+        django_messages.success(request, f"Le ticket a ete affecte a {result['assigned_agent']}.")
         return redirect("ticket-detail", pk=pk)
 
 

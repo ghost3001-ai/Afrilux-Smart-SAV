@@ -24,6 +24,7 @@ from .web_views import (
     SupportPageView,
     TechnicianSpaceView,
     TicketAgenticResolutionView,
+    TicketAssignTechnicianView,
     TicketAttachmentCreateView,
     TicketAutomationRunView,
     TicketConfirmResolutionView,
@@ -69,6 +70,7 @@ urlpatterns = [
     path("tickets/<int:pk>/confirm-resolution/", TicketConfirmResolutionView.as_view(), name="ticket-confirm-resolution"),
     path("tickets/<int:pk>/reopen/", TicketReopenView.as_view(), name="ticket-reopen-web"),
     path("tickets/<int:pk>/escalate/", TicketEscalateView.as_view(), name="ticket-escalate-web"),
+    path("tickets/<int:pk>/assign-technician/", TicketAssignTechnicianView.as_view(), name="ticket-assign-technician-web"),
     path("tickets/<int:pk>/interventions/", TicketInterventionCreateView.as_view(), name="ticket-intervention-create"),
     path(
         "tickets/<int:ticket_pk>/interventions/<int:intervention_pk>/pdf/",

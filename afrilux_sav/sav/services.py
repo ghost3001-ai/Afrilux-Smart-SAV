@@ -476,6 +476,20 @@ def assignment_eligible_queryset_for_organization(organization=None):
     return queryset.filter(organization__isnull=True)
 
 
+def field_technician_queryset_for_organization(organization=None):
+    queryset = User.objects.filter(
+        role=User.ROLE_TECHNICIAN,
+        technician_status="available",
+        is_active=True,
+    )
+    if organization is None:
+        return queryset
+    scoped_queryset = queryset.filter(organization=organization)
+    if scoped_queryset.exists():
+        return scoped_queryset
+    return queryset.filter(organization__isnull=True)
+
+
 def _select_least_loaded_agent_for_roles(*, roles, organization=None, exclude_user_ids=None):
     exclude_user_ids = [user_id for user_id in (exclude_user_ids or []) if user_id]
     queryset = User.objects.filter(is_active=True, role__in=roles)
@@ -1352,11 +1366,13 @@ def escalate_ticket(ticket, *, actor=None, note="", target=ESCALATION_TARGET_CHI
         sentiment_score=calculate_sentiment("Le ticket a ete escalade."),
     )
 
-    recipients = list(manager_queryset_for_organization(ticket.organization))
+    recipients = []
     if ticket.assigned_agent_id:
         recipients.append(ticket.assigned_agent)
     if previous_assigned_agent is not None:
         recipients.append(previous_assigned_agent)
+    if getattr(actor, "is_authenticated", False):
+        recipients.append(actor)
     deduped_recipients = {recipient.id: recipient for recipient in recipients if getattr(recipient, "id", None)}
     for recipient in deduped_recipients.values():
         create_external_channel_notifications(
@@ -1400,6 +1416,87 @@ def escalate_ticket(ticket, *, actor=None, note="", target=ESCALATION_TARGET_CHI
         "released_assignment_ids": released_ids,
         "created_assignment": created_assignment,
         "assignment_id": getattr(assignment, "id", None),
+    }
+
+
+def can_assign_ticket_technician(user, ticket):
+    if not user or not user.is_authenticated or is_read_only_user(user):
+        return False
+    if user.role == User.ROLE_HEAD_SAV:
+        return True
+    return bool(user.role in set(User.ESCALATION_TARGET_ROLES) and ticket.assigned_agent_id == user.id)
+
+
+def assign_ticket_to_technician(ticket, technician, *, actor=None, note=""):
+    if ticket.status not in OPEN_TICKET_STATUSES:
+        raise ValueError("Seuls les tickets ouverts peuvent etre affectes.")
+    if not can_assign_ticket_technician(actor, ticket):
+        raise ValueError("Seul le Responsable SAV ou le responsable escalade sur ce ticket peut affecter un technicien.")
+    if not technician or technician.role != User.ROLE_TECHNICIAN:
+        raise ValueError("La cible doit etre un technicien de maintenance.")
+    if not technician.is_ticket_assignment_eligible:
+        raise ValueError("Le technicien doit etre actif et disponible.")
+    if ticket.organization_id and technician.organization_id and ticket.organization_id != technician.organization_id:
+        raise ValueError("Le technicien doit appartenir a la meme organisation que le ticket.")
+
+    previous_status = ticket.status
+    previous_assigned_agent = ticket.assigned_agent
+    assignment_note = (note or "Affectation du ticket a un technicien de maintenance.").strip()[:500]
+
+    ticket.assigned_agent = technician
+    if ticket.status in {Ticket.STATUS_NEW, Ticket.STATUS_WAITING, Ticket.STATUS_ASSIGNED}:
+        ticket.status = Ticket.STATUS_ASSIGNED
+    ticket.save(update_fields=["assigned_agent", "status", "updated_at"])
+    intervention_result = ensure_assignment_intervention(ticket, actor=actor, note=assignment_note)
+
+    Message.objects.create(
+        ticket=ticket,
+        sender=actor if getattr(actor, "is_authenticated", False) else technician,
+        message_type=Message.TYPE_INTERNAL,
+        channel=Message.CHANNEL_PORTAL,
+        direction=Message.DIRECTION_INTERNAL,
+        content=f"Le ticket a ete affecte au technicien {technician}.",
+        sentiment_score=calculate_sentiment("Le ticket a ete affecte a un technicien."),
+    )
+
+    recipients = [technician]
+    if previous_assigned_agent is not None and previous_assigned_agent.id != technician.id:
+        recipients.append(previous_assigned_agent)
+    if getattr(actor, "is_authenticated", False):
+        recipients.append(actor)
+    deduped_recipients = {recipient.id: recipient for recipient in recipients if getattr(recipient, "id", None)}
+    for recipient in deduped_recipients.values():
+        create_external_channel_notifications(
+            recipient=recipient,
+            ticket=ticket,
+            event_type="ticket_technician_assigned",
+            subject=f"Technicien affecte {ticket.reference}",
+            message=f"Le ticket '{ticket.title}' est maintenant affecte au technicien {technician}.",
+        )
+
+    log_audit_event(
+        actor,
+        "ticket_technician_assigned",
+        ticket,
+        {
+            "previous_status": previous_status,
+            "new_status": ticket.status,
+            "previous_assigned_agent": getattr(previous_assigned_agent, "id", None),
+            "technician": technician.id,
+            "created_assignment": intervention_result.get("created_assignment", False),
+            "assignment_id": getattr(intervention_result.get("assignment"), "id", None),
+        },
+    )
+
+    return {
+        "ticket_id": ticket.id,
+        "reference": ticket.reference,
+        "previous_status": previous_status,
+        "status": ticket.status,
+        "previous_assigned_agent": str(previous_assigned_agent) if previous_assigned_agent else None,
+        "assigned_agent": str(ticket.assigned_agent) if ticket.assigned_agent else None,
+        "assignment_id": getattr(intervention_result.get("assignment"), "id", None),
+        "created_assignment": intervention_result.get("created_assignment", False),
     }
 
 

@@ -44,6 +44,7 @@ python3 manage.py runserver
 - Conducteur de travaux CFAO : cible d'escalade pour la gestion opérationnelle des chantiers et interventions lourdes.
 - Responsable froid & climatisation / responsable technique froid : cible d'escalade pour l'expertise CVC, froid, fluides et conformité technique.
 - Chef Technicien Froid & Climatisation : cible d'escalade terrain pour le diagnostic complexe, l'organisation des interventions et le support aux techniciens.
+- Technicien de maintenance : execute l'intervention lorsqu'un responsable d'escalade lui affecte directement le ticket.
 - QA / auditeur : consultation, qualité, contrôle et suivi sans capacité d’action métier complète.
 - Administrateur : accès back-office, gestion structurelle et administration Django.
 
@@ -64,8 +65,9 @@ python3 manage.py runserver
 4. Répondre par message interne ou public, joindre des fichiers et déclencher la résolution agentique si besoin.
 5. Planifier une intervention, documenter le diagnostic, les actions, les pièces utilisées et générer le PDF d’intervention.
 6. Escalader le ticket uniquement vers : Responsable CFAO / Responsable de Projet Technique CFAO, Conducteur de travaux CFAO, Responsable froid & climatisation / responsable technique froid, ou Chef Technicien Froid & Climatisation.
-7. Déclencher un crédit de compte client si le workflow le justifie.
-8. Exécuter un workflow d’automatisation ou la maintenance prédictive sur un produit.
+7. La cible d'escalade peut ensuite affecter le ticket a un technicien disponible de la meme organisation.
+8. Déclencher un crédit de compte client si le workflow le justifie.
+9. Exécuter un workflow d’automatisation ou la maintenance prédictive sur un produit.
 
 ## 7. Gestion des tickets
 

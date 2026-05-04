@@ -156,7 +156,7 @@ class TicketForm(forms.ModelForm):
             agent_queryset = (agent_queryset | User.objects.filter(pk=self.instance.assigned_agent_id)).distinct()
         self.fields["client"].queryset = client_queryset.order_by("company_name", "first_name", "last_name", "username")
         self.fields["assigned_agent"].queryset = agent_queryset.order_by("first_name", "last_name", "username")
-        self.fields["assigned_agent"].help_text = "Affectation autorisee uniquement aux techniciens disponibles."
+        self.fields["assigned_agent"].help_text = "Affectation autorisee uniquement aux responsables d'escalade ou techniciens disponibles."
         self.fields["category"].choices = [
             choice
             for choice in self.fields["category"].choices
@@ -214,7 +214,7 @@ class TicketForm(forms.ModelForm):
             and not assigned_agent.is_ticket_assignment_eligible
             and (not previous_assigned_agent or previous_assigned_agent.id != assigned_agent.id)
         ):
-            self.add_error("assigned_agent", "Affectation autorisee uniquement aux techniciens disponibles.")
+            self.add_error("assigned_agent", "Affectation autorisee uniquement aux responsables d'escalade ou techniciens disponibles.")
         return cleaned_data
 
 
@@ -512,6 +512,31 @@ class TicketEscalationForm(forms.Form):
         label="Note d'escalade",
         widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Optionnel: motif ou contexte de l'escalade."}),
     )
+
+
+class TicketTechnicianAssignmentForm(forms.Form):
+    technician = forms.ModelChoiceField(
+        label="Technicien",
+        queryset=User.objects.none(),
+        empty_label="Choisir un technicien disponible",
+    )
+    note = forms.CharField(
+        required=False,
+        label="Note d'affectation",
+        widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Optionnel: consigne pour le technicien."}),
+    )
+
+    def __init__(self, *args, user=None, ticket=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        queryset = User.objects.filter(
+            role=User.ROLE_TECHNICIAN,
+            technician_status="available",
+            is_active=True,
+        )
+        organization = getattr(ticket, "organization", None) or getattr(user, "organization", None)
+        if organization:
+            queryset = queryset.filter(organization=organization)
+        self.fields["technician"].queryset = queryset.order_by("first_name", "last_name", "username")
 
 
 class TicketAttachmentForm(forms.ModelForm):

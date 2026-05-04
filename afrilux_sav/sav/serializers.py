@@ -284,7 +284,7 @@ class UserSerializer(serializers.ModelSerializer):
         email = (attrs.get("email") or getattr(self.instance, "email", "") or "").strip().lower()
         role = attrs.get("role") or getattr(self.instance, "role", User.ROLE_CLIENT)
         if role == User.ROLE_FIELD_TECHNICIAN:
-            role = User.ROLE_CHIEF_TECHNICIAN
+            role = User.ROLE_TECHNICIAN
             attrs["role"] = role
         organization = attrs.get("organization") or getattr(self.instance, "organization", None)
         professional_email = (attrs.get("professional_email") or "").strip().lower()
@@ -1167,7 +1167,7 @@ class TicketSerializer(serializers.ModelSerializer):
             and (not previous_assigned_agent or previous_assigned_agent.id != assigned_agent.id)
         ):
             raise serializers.ValidationError(
-                {"assigned_agent": "Affectation autorisee uniquement aux techniciens disponibles."}
+                {"assigned_agent": "Affectation autorisee uniquement aux responsables d'escalade ou techniciens disponibles."}
             )
         return attrs
 
