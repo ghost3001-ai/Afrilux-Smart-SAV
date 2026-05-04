@@ -89,9 +89,15 @@ class User(AbstractUser):
     ROLE_MANAGER = "manager"
 
     ROLE_CHOICES = (
+        (ROLE_ADMIN, "Administrateur"),
+        (ROLE_HEAD_SAV, "Responsable SAV"),
+        (ROLE_TECHNICIAN, "Technicien"),
+        (ROLE_SUPPORT, "Agent support / Hotliner"),
         (ROLE_CLIENT, "Client"),
-        (ROLE_SUPPORT, "Agent support (Niveau 1 / Hotliner)"),
-        (ROLE_TECHNICIAN, "Agent technique (Niveau 2)"),
+        (ROLE_AUDITOR, "Auditeur / Direction"),
+    )
+
+    LEGACY_ROLE_CHOICES = (
         (ROLE_EXPERT, "Chef technicien / Expert (Niveau 3)"),
         (ROLE_CFAO_MANAGER, "Responsable CFAO / GTC & dessin technique"),
         (ROLE_CFAO_WORKS, "Conducteur de travaux CFAO"),
@@ -102,21 +108,12 @@ class User(AbstractUser):
         (ROLE_DISPATCHER, "Planificateur / Dispatch"),
         (ROLE_VIP_SUPPORT, "Support VIP / Grands comptes"),
         (ROLE_SYSTEM_BOT, "Systeme automatique (IA / Bot)"),
-        (ROLE_HEAD_SAV, "Responsable SAV"),
-        (ROLE_AUDITOR, "Auditeur / Direction"),
-        (ROLE_ADMIN, "Administrateur"),
         (ROLE_AGENT, "Agent support (legacy)"),
         (ROLE_MANAGER, "Responsable SAV (legacy)"),
     )
 
     SUPPORT_ROLE_ALIASES = (
         ROLE_SUPPORT,
-        ROLE_SOFTWARE_OWNER,
-        ROLE_SUPERVISOR,
-        ROLE_DISPATCHER,
-        ROLE_VIP_SUPPORT,
-        ROLE_MANAGER,
-        ROLE_HEAD_SAV,
         ROLE_AGENT,
     )
     STANDARD_SUPPORT_ROLES = (
@@ -126,9 +123,7 @@ class User(AbstractUser):
     SPECIAL_SUPPORT_ROLES = (
         ROLE_VIP_SUPPORT,
     )
-    FRONTLINE_ROLES = (
-        *SUPPORT_ROLE_ALIASES,
-    )
+    FRONTLINE_ROLES = (*SUPPORT_ROLE_ALIASES,)
     TECHNICAL_ROLES = (
         ROLE_TECHNICIAN,
         ROLE_EXPERT,
@@ -140,16 +135,11 @@ class User(AbstractUser):
         ROLE_SOFTWARE_OWNER,
     )
     LEADERSHIP_ROLES = (
-        ROLE_SUPERVISOR,
-        ROLE_DISPATCHER,
         ROLE_HEAD_SAV,
         ROLE_ADMIN,
         ROLE_MANAGER,
     )
-    READ_ONLY_ROLES = (
-        ROLE_AUDITOR,
-        ROLE_QA,
-    )
+    READ_ONLY_ROLES = (ROLE_AUDITOR,)
     BOT_ROLES = (
         ROLE_SYSTEM_BOT,
     )
@@ -161,20 +151,12 @@ class User(AbstractUser):
         *BOT_ROLES,
     )
     MANAGER_ROLES = (
-        ROLE_SOFTWARE_OWNER,
-        ROLE_SUPERVISOR,
         ROLE_HEAD_SAV,
         ROLE_ADMIN,
         ROLE_MANAGER,
     )
-    ASSIGNABLE_ROLES = (
-        *SUPPORT_ROLE_ALIASES,
-        ROLE_TECHNICIAN,
-    )
-    TECHNICIAN_SPACE_ROLES = (
-        ROLE_TECHNICIAN,
-        ROLE_EXPERT,
-    )
+    ASSIGNABLE_ROLES = (ROLE_TECHNICIAN,)
+    TECHNICIAN_SPACE_ROLES = (ROLE_TECHNICIAN,)
     REPORTING_ROLES = (
         *LEADERSHIP_ROLES,
         *READ_ONLY_ROLES,
@@ -261,8 +243,6 @@ class User(AbstractUser):
     def is_ticket_assignment_eligible(self):
         if not self.is_active:
             return False
-        if self.role in set(self.SUPPORT_ROLE_ALIASES):
-            return True
         return self.role == self.ROLE_TECHNICIAN and self.technician_status == "available"
 
     @property
@@ -275,10 +255,6 @@ class User(AbstractUser):
             self.ROLE_HEAD_SAV,
             self.ROLE_MANAGER,
             self.ROLE_ADMIN,
-            self.ROLE_SUPERVISOR,
-            self.ROLE_EXPERT,
-            self.ROLE_CFAO_MANAGER,
-            self.ROLE_CFAO_WORKS,
         }
 
     @property
@@ -547,10 +523,17 @@ class Ticket(TimeStampedModel):
 
     STATUS_CHOICES = (
         (STATUS_NEW, "Nouveau"),
-        (STATUS_QUALIFICATION, "Qualification en cours"),
-        (STATUS_PENDING_CUSTOMER, "En attente client"),
         (STATUS_ASSIGNED, "Assigne"),
         (STATUS_IN_PROGRESS, "En cours"),
+        (STATUS_WAITING, "En attente"),
+        (STATUS_RESOLVED, "Resolue"),
+        (STATUS_CLOSED, "Ferme"),
+        (STATUS_CANCELLED, "Annule"),
+    )
+
+    LEGACY_STATUS_CHOICES = (
+        (STATUS_QUALIFICATION, "Qualification en cours"),
+        (STATUS_PENDING_CUSTOMER, "En attente client"),
         (STATUS_IN_PROGRESS_N1, "En traitement (N1)"),
         (STATUS_IN_PROGRESS_N2, "En traitement (N2)"),
         (STATUS_EXPERTISE, "Expertise en cours"),
@@ -558,11 +541,29 @@ class Ticket(TimeStampedModel):
         (STATUS_INTERVENTION_DONE, "Intervention realisee"),
         (STATUS_QA_CONTROL, "En controle qualite"),
         (STATUS_PENDING_CLIENT_CONFIRMATION, "En attente confirmation client"),
-        (STATUS_WAITING, "En attente"),
-        (STATUS_RESOLVED, "Resolue"),
-        (STATUS_CLOSED, "Ferme"),
-        (STATUS_CANCELLED, "Annule"),
     )
+
+    LEGACY_STATUS_MAP = {
+        STATUS_QUALIFICATION: STATUS_NEW,
+        STATUS_PENDING_CUSTOMER: STATUS_WAITING,
+        STATUS_IN_PROGRESS_N1: STATUS_IN_PROGRESS,
+        STATUS_IN_PROGRESS_N2: STATUS_IN_PROGRESS,
+        STATUS_EXPERTISE: STATUS_IN_PROGRESS,
+        STATUS_INTERVENTION_PLANNED: STATUS_ASSIGNED,
+        STATUS_INTERVENTION_DONE: STATUS_RESOLVED,
+        STATUS_QA_CONTROL: STATUS_RESOLVED,
+        STATUS_PENDING_CLIENT_CONFIRMATION: STATUS_RESOLVED,
+    }
+
+    PROCESS_TRANSITIONS = {
+        STATUS_NEW: {STATUS_NEW, STATUS_ASSIGNED, STATUS_IN_PROGRESS, STATUS_CLOSED, STATUS_CANCELLED},
+        STATUS_ASSIGNED: {STATUS_ASSIGNED, STATUS_IN_PROGRESS, STATUS_WAITING, STATUS_CANCELLED},
+        STATUS_IN_PROGRESS: {STATUS_IN_PROGRESS, STATUS_WAITING, STATUS_RESOLVED, STATUS_ASSIGNED, STATUS_CANCELLED},
+        STATUS_WAITING: {STATUS_WAITING, STATUS_IN_PROGRESS, STATUS_ASSIGNED, STATUS_CANCELLED},
+        STATUS_RESOLVED: {STATUS_RESOLVED, STATUS_CLOSED, STATUS_NEW},
+        STATUS_CLOSED: {STATUS_CLOSED, STATUS_NEW},
+        STATUS_CANCELLED: {STATUS_CANCELLED},
+    }
 
     PRIORITY_LOW = "low"
     PRIORITY_NORMAL = "normal"
@@ -698,6 +699,7 @@ class Ticket(TimeStampedModel):
         return ""
 
     def save(self, *args, **kwargs):
+        self.status = self.normalize_process_status(self.status)
         if self.client_id and self.client.organization_id:
             self.organization = self.client.organization
         elif self.product_id and self.product.organization_id:
@@ -709,8 +711,6 @@ class Ticket(TimeStampedModel):
             self.reference = self.generate_reference()
         if self.assigned_agent_id and self.status in {
             self.STATUS_NEW,
-            self.STATUS_QUALIFICATION,
-            self.STATUS_PENDING_CUSTOMER,
             self.STATUS_WAITING,
         }:
             self.status = self.STATUS_ASSIGNED
@@ -747,6 +747,16 @@ class Ticket(TimeStampedModel):
             except (TypeError, ValueError):
                 next_index = 1
         return f"{prefix}{next_index:05d}"
+
+    @classmethod
+    def normalize_process_status(cls, status):
+        return cls.LEGACY_STATUS_MAP.get(status, status)
+
+    @classmethod
+    def can_transition(cls, current_status, next_status):
+        current_status = cls.normalize_process_status(current_status)
+        next_status = cls.normalize_process_status(next_status)
+        return next_status in cls.PROCESS_TRANSITIONS.get(current_status, {current_status})
 
 
 class TicketAssignment(TimeStampedModel):

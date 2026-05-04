@@ -104,13 +104,13 @@ def _percentage(value, total):
 
 def _ticket_status_from_intervention(intervention):
     if intervention.status == Intervention.STATUS_DONE or intervention.finished_at:
-        return Ticket.STATUS_INTERVENTION_DONE
+        return Ticket.STATUS_RESOLVED
     if intervention.status == Intervention.STATUS_IN_PROGRESS or intervention.started_at:
-        return Ticket.STATUS_IN_PROGRESS_N2
+        return Ticket.STATUS_IN_PROGRESS
     if intervention.status == Intervention.STATUS_CANCELLED:
         return Ticket.STATUS_WAITING
     if intervention.scheduled_for:
-        return Ticket.STATUS_INTERVENTION_PLANNED
+        return Ticket.STATUS_ASSIGNED
     return Ticket.STATUS_ASSIGNED if intervention.ticket.assigned_agent_id else Ticket.STATUS_NEW
 
 
@@ -388,7 +388,14 @@ class AdministrationPageView(LoginRequiredMixin, AdminRequiredMixin, TemplateVie
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         users = scope_user_queryset(User.objects.all(), self.request.user)
-        internal_users = users.filter(role__in=User.INTERNAL_ROLES + User.READ_ONLY_ROLES).order_by("role", "first_name", "last_name", "username")
+        cdc_internal_roles = [
+            User.ROLE_ADMIN,
+            User.ROLE_HEAD_SAV,
+            User.ROLE_TECHNICIAN,
+            User.ROLE_SUPPORT,
+            User.ROLE_AUDITOR,
+        ]
+        internal_users = users.filter(role__in=cdc_internal_roles).order_by("role", "first_name", "last_name", "username")
         clients = users.filter(role=User.ROLE_CLIENT).order_by("company_name", "username")
         organization = getattr(self.request.user, "organization", None)
         context.update(
@@ -412,19 +419,9 @@ class AdministrationPageView(LoginRequiredMixin, AdminRequiredMixin, TemplateVie
                 "users_summary": {
                     "admins": internal_users.filter(role=User.ROLE_ADMIN).count(),
                     "responsables": internal_users.filter(role=User.ROLE_HEAD_SAV).count(),
-                    "superviseurs": internal_users.filter(role=User.ROLE_SUPERVISOR).count(),
-                    "dispatchers": internal_users.filter(role=User.ROLE_DISPATCHER).count(),
-                    "supports": internal_users.filter(role__in=User.STANDARD_SUPPORT_ROLES).count(),
-                    "vip_support": internal_users.filter(role__in=User.SPECIAL_SUPPORT_ROLES).count(),
-                    "techniciens": internal_users.filter(role__in=User.TECHNICAL_ROLES).count(),
-                    "experts": internal_users.filter(role=User.ROLE_EXPERT).count(),
-                    "cfao": internal_users.filter(role=User.ROLE_CFAO_MANAGER).count(),
-                    "cfao_works": internal_users.filter(role=User.ROLE_CFAO_WORKS).count(),
-                    "hvac": internal_users.filter(role=User.ROLE_HVAC_MANAGER).count(),
-                    "software_owner": internal_users.filter(role=User.ROLE_SOFTWARE_OWNER).count(),
-                    "qa": internal_users.filter(role=User.ROLE_QA).count(),
+                    "supports": internal_users.filter(role=User.ROLE_SUPPORT).count(),
+                    "techniciens": internal_users.filter(role=User.ROLE_TECHNICIAN).count(),
                     "auditeurs": internal_users.filter(role=User.ROLE_AUDITOR).count(),
-                    "bots": internal_users.filter(role=User.ROLE_SYSTEM_BOT).count(),
                     "clients": clients.count(),
                 },
             }
@@ -656,8 +653,8 @@ class TicketUpdateView(LoginRequiredMixin, InternalRequiredMixin, UpdateView):
     template_name = "sav/ticket_form.html"
 
     def dispatch(self, request, *args, **kwargs):
-        if not (is_support_user(request.user) or is_admin_user(request.user)):
-            django_messages.error(request, "Seul le support peut modifier directement un ticket.")
+        if not (is_support_user(request.user) or is_manager_user(request.user) or is_admin_user(request.user)):
+            django_messages.error(request, "Seuls le support et le responsable SAV peuvent modifier directement un ticket.")
             return redirect("ticket-detail", pk=kwargs["pk"])
         return super().dispatch(request, *args, **kwargs)
 
@@ -675,8 +672,6 @@ class TicketUpdateView(LoginRequiredMixin, InternalRequiredMixin, UpdateView):
             and form.instance.status
             in {
                 Ticket.STATUS_NEW,
-                Ticket.STATUS_QUALIFICATION,
-                Ticket.STATUS_PENDING_CUSTOMER,
                 Ticket.STATUS_WAITING,
             }
         ):

@@ -154,13 +154,13 @@ from .services import (
 
 def _ticket_status_from_intervention(intervention):
     if intervention.status == Intervention.STATUS_DONE or intervention.finished_at:
-        return Ticket.STATUS_INTERVENTION_DONE
+        return Ticket.STATUS_RESOLVED
     if intervention.status == Intervention.STATUS_IN_PROGRESS or intervention.started_at:
-        return Ticket.STATUS_IN_PROGRESS_N2
+        return Ticket.STATUS_IN_PROGRESS
     if intervention.status == Intervention.STATUS_CANCELLED:
         return Ticket.STATUS_WAITING
     if intervention.scheduled_for:
-        return Ticket.STATUS_INTERVENTION_PLANNED
+        return Ticket.STATUS_ASSIGNED
     return Ticket.STATUS_ASSIGNED if intervention.ticket.assigned_agent_id else Ticket.STATUS_NEW
 
 
@@ -537,8 +537,8 @@ class TicketViewSet(AuditedModelViewSet):
         run_automation_rules_for_ticket(instance, actor=self.request.user, trigger_event=AutomationRule.TRIGGER_TICKET_CREATED)
 
     def perform_update(self, serializer):
-        if not (is_support_user(self.request.user) or is_admin_user(self.request.user)):
-            raise PermissionDenied("Seul le support peut modifier directement un ticket.")
+        if not (is_support_user(self.request.user) or is_manager_user(self.request.user) or is_admin_user(self.request.user)):
+            raise PermissionDenied("Seuls le support et le responsable SAV peuvent modifier directement un ticket.")
         previous_status = serializer.instance.status
         previous_assigned_agent_id = serializer.instance.assigned_agent_id
         client = serializer.validated_data.get("client", serializer.instance.client)
@@ -554,8 +554,6 @@ class TicketViewSet(AuditedModelViewSet):
             serializer.instance.status
             in {
                 Ticket.STATUS_NEW,
-                Ticket.STATUS_QUALIFICATION,
-                Ticket.STATUS_PENDING_CUSTOMER,
                 Ticket.STATUS_WAITING,
             }
             or not previous_assigned_agent_id
@@ -589,8 +587,8 @@ class TicketViewSet(AuditedModelViewSet):
             )
         previous_status = ticket.status
         ticket.assigned_agent = request.user
-        if ticket.status in {Ticket.STATUS_NEW, Ticket.STATUS_WAITING, Ticket.STATUS_PENDING_CUSTOMER, Ticket.STATUS_QUALIFICATION}:
-            ticket.status = Ticket.STATUS_ASSIGNED
+        if ticket.status in {Ticket.STATUS_NEW, Ticket.STATUS_ASSIGNED, Ticket.STATUS_WAITING}:
+            ticket.status = Ticket.STATUS_IN_PROGRESS
         ticket.save(update_fields=["assigned_agent", "status", "updated_at"])
         ensure_assignment_intervention(ticket, actor=request.user, note="Prise en charge manuelle du ticket.")
         self.audit("ticket_taken_ownership", ticket, {"assigned_agent": request.user.id})
@@ -604,16 +602,17 @@ class TicketViewSet(AuditedModelViewSet):
         technician_id = request.data.get("technician") or request.data.get("assigned_agent")
         if not technician_id:
             return Response({"detail": "Le technicien est obligatoire."}, status=status.HTTP_400_BAD_REQUEST)
-        assignment_queryset = User.objects.filter(is_active=True).filter(
-            Q(role__in=User.STANDARD_SUPPORT_ROLES + User.SPECIAL_SUPPORT_ROLES)
-            | Q(role=User.ROLE_TECHNICIAN, technician_status="available")
+        assignment_queryset = User.objects.filter(
+            role=User.ROLE_TECHNICIAN,
+            technician_status="available",
+            is_active=True,
         )
         technician = get_object_or_404(
             scope_user_queryset(assignment_queryset, request.user),
             pk=technician_id,
         )
         ticket.assigned_agent = technician
-        if ticket.status in {Ticket.STATUS_NEW, Ticket.STATUS_WAITING, Ticket.STATUS_PENDING_CUSTOMER, Ticket.STATUS_QUALIFICATION}:
+        if ticket.status in {Ticket.STATUS_NEW, Ticket.STATUS_WAITING}:
             ticket.status = Ticket.STATUS_ASSIGNED
         ticket.save(update_fields=["assigned_agent", "status", "updated_at"])
         ensure_assignment_intervention(ticket, actor=request.user, note="Affectation explicite du responsable SAV.")
@@ -678,6 +677,11 @@ class TicketViewSet(AuditedModelViewSet):
         previous_status = ticket.status
         if ticket.status == Ticket.STATUS_CANCELLED:
             return Response({"detail": "Un ticket annule ne peut pas etre cloture."}, status=status.HTTP_400_BAD_REQUEST)
+        if ticket.status not in {Ticket.STATUS_NEW, Ticket.STATUS_RESOLVED}:
+            return Response(
+                {"detail": "Le cahier des charges autorise la cloture directe uniquement pour un doublon nouveau ou un ticket resolu."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         ticket.status = Ticket.STATUS_CLOSED
         if request.data.get("resolution_summary"):
             ticket.resolution_summary = str(request.data.get("resolution_summary", "")).strip()

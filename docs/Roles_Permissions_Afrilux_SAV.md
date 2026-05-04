@@ -1,170 +1,89 @@
 # Matrice des roles, interfaces et workflow AFRILUX SAV
 
-Ce document decrit le modele de roles applique dans la plateforme, avec le workflow SAV en 9 phases.
+Ce document decrit le modele applique dans la plateforme apres alignement sur le cahier des charges `CDC-ASS-HELPDESK-2026-001`.
 
-## 1) Regles globales appliquees
+## 1) Roles officiels
 
-- Visibilite ticket:
-  - `head_sav`, `admin`, `manager`, `superuser`: vision organisation.
-  - autres profils internes: uniquement tickets crees par eux (`created_by`) ou assignes a eux (`assigned_agent`).
-  - `client`: uniquement ses tickets.
-- Notifications:
-  - chaque utilisateur ne voit que ses notifications (`recipient=user`), sauf `superuser`.
-- Affectation ticket:
-  - autorisee seulement vers:
-    - `support`, `agent`, `vip_support`
-    - `technician` avec statut `available`
-- Escalade:
-  - autorisee vers `supervisor`, `head_sav`, `expert`, `cfao_manager`, `cfao_works`.
-- Role legacy:
-  - `field_technician` est migre automatiquement vers `technician`.
+La plateforme expose uniquement les roles suivants dans les formulaires, l'API et l'administration fonctionnelle:
 
-## 2) Interface par role (workspace)
+- `admin` - Administrateur
+- `head_sav` - Responsable SAV
+- `technician` - Technicien
+- `support` - Agent support / Hotliner
+- `client` - Client
+- `auditor` - Auditeur / Direction
 
-Le login redirige automatiquement vers un espace adapte au role:
+Les anciens roles techniques et specialises sont convertis par migration:
 
-- `client` -> `support-page`
-- `support`, `agent`, `vip_support` -> `ticket-list?assignment=mine`
-- `technician`, `expert` -> `technician-space`
-- `dispatcher` -> `planning-page`
-- `qa`, `auditor` -> `reporting-page`
-- `cfao_manager`, `cfao_works`, `hvac_manager`, `software_owner` -> `ticket-list?assignment=mine`
-- `supervisor`, `head_sav`, `admin`, `manager` -> `dashboard`
+- `agent`, `vip_support`, `system_bot` -> `support`
+- `manager`, `supervisor`, `dispatcher`, `software_owner` -> `head_sav`
+- `field_technician`, `expert`, `cfao_manager`, `cfao_works`, `hvac_manager` -> `technician`
+- `qa` -> `auditor`
 
-## 3) Statuts ticket utilises pour le workflow
+## 2) Regles globales
 
-- `new` (Nouveau)
-- `qualification` (Qualification en cours)
-- `pending_customer` (En attente client)
-- `assigned` (Assigne)
-- `in_progress_n1` (En traitement N1)
-- `in_progress_n2` (En traitement N2)
-- `expertise` (Expertise en cours)
-- `intervention_planned` (Intervention planifiee)
-- `intervention_done` (Intervention realisee)
-- `qa_control` (Controle qualite)
-- `pending_client_confirmation` (En attente confirmation client)
-- `resolved` (Resolue)
-- `closed` (Cloturee)
-- `cancelled` (Annulee)
+- `admin` et `head_sav` ont une vision organisationnelle des tickets, utilisateurs, SLA, rapports et affectations.
+- `support` cree les tickets pour les clients, suit les dossiers et communique avec le client.
+- `technician` voit son espace technicien et les tickets/interventions qui lui sont affectes.
+- `client` cree et suit ses demandes.
+- `auditor` consulte les tableaux de bord et rapports en lecture seule.
+- L'affectation d'un ticket se fait uniquement vers un `technician` actif et disponible.
+- L'escalade fonctionnelle se fait vers le `head_sav`.
 
-## 4) Workflow operationnel par phase
+## 3) Espaces apres connexion
 
-### Phase 1 - Creation du ticket
+- `client` -> portail support client
+- `support` -> liste des tickets
+- `technician` -> espace technicien
+- `head_sav` -> tableau de bord de pilotage
+- `admin` -> tableau de bord et administration
+- `auditor` -> reporting
 
-- Declencheurs:
-  - `ROLE_CLIENT`, `ROLE_VIP_SUPPORT`, `ROLE_SUPPORT`, `ROLE_AGENT`, `ROLE_SYSTEM_BOT`
-- Actions:
-  - saisie incident (formulaire/chat/email)
-  - pieces jointes, categorie, priorite, contact, source
-  - enrichissement automatique possible (bot)
-- Resultat:
-  - statut initial `new`
-  - pour `vip_support`, priorite montee au minimum a `high`
+## 4) Cycle de vie ticket CDC
 
-### Phase 2 - Qualification et dispatch initial
+Le workflow strict utilise les statuts suivants:
 
-- Roles:
-  - `ROLE_DISPATCHER`, `ROLE_SUPERVISOR`, `ROLE_SOFTWARE_OWNER` (regles)
-- Actions:
-  - controle completude
-  - demande d'infos manquantes
-  - routing manuel/automatique
-- Resultat:
-  - `qualification` puis `assigned` selon affectation
+- `new` - Nouveau
+- `assigned` - Assigne
+- `in_progress` - En cours
+- `waiting` - En attente
+- `resolved` - Resolue
+- `closed` - Ferme
+- `cancelled` - Annule
 
-### Phase 3 - Traitement niveau 1
+Transitions autorisees:
 
-- Role principal:
-  - `ROLE_SUPPORT` (incl. `ROLE_AGENT` et `ROLE_VIP_SUPPORT`)
-- Actions:
-  - verification infos client
-  - questions complementaires
-  - scripts N1 / KB / FAQ
-- Resultat:
-  - `in_progress_n1`
-  - si non resolu -> escalade N2
+- `new` -> `assigned`, `in_progress`, `closed` pour doublon, ou `cancelled`
+- `assigned` -> `in_progress`, `waiting`, ou `cancelled`
+- `in_progress` -> `waiting`, `resolved`, `assigned` pour reaffectation, ou `cancelled`
+- `waiting` -> `in_progress`, `assigned`, ou `cancelled`
+- `resolved` -> `closed` ou `new` si reouverture
+- `closed` -> `new` si reouverture
+- `cancelled` reste final
 
-### Phase 4 - Escalade technique niveau 2
+Les anciens statuts etendus sont normalises par migration:
 
-- Role principal:
-  - `ROLE_TECHNICIAN`
-- Actions:
-  - diagnostic avance (logs/tests/terrain)
-  - sollicitation transverse possible:
-    - `ROLE_CFAO_MANAGER` / `ROLE_CFAO_WORKS`
-    - `ROLE_HVAC_MANAGER`
-- Resultat:
-  - `in_progress_n2`
+- `qualification` -> `new`
+- `pending_customer` -> `waiting`
+- `in_progress_n1`, `in_progress_n2`, `expertise` -> `in_progress`
+- `intervention_planned` -> `assigned`
+- `intervention_done`, `qa_control`, `pending_client_confirmation` -> `resolved`
 
-### Phase 5 - Escalade expert niveau 3
+## 5) Processus operationnel
 
-- Role principal:
-  - `ROLE_EXPERT`
-- Actions:
-  - RCA
-  - solution non standard
-  - coordination `ROLE_HEAD_SAV` si impact majeur
-- Resultat:
-  - `expertise`
+1. Client ou agent support cree la demande.
+2. Le responsable SAV valide si necessaire et affecte un technicien.
+3. Le technicien prend en charge le ticket, ce qui le passe en cours.
+4. Si une information ou piece manque, le ticket passe en attente.
+5. Le technicien renseigne le rapport d'intervention et passe le ticket en resolu.
+6. Le client valide la resolution, puis le ticket est ferme.
+7. Le responsable SAV suit les SLA, les rapports et les indicateurs.
 
-### Phase 6 - Intervention terrain (si besoin)
+## 6) SLA
 
-- Roles:
-  - `ROLE_DISPATCHER`, `ROLE_CFAO_WORKS`, `ROLE_HVAC_MANAGER`
-- Actions:
-  - planification
-  - execution
-  - rapport intervention
-- Resultat:
-  - `intervention_planned` puis `intervention_done`
+Les priorites restent celles du cahier des charges:
 
-### Phase 7 - Controle qualite
-
-- Roles:
-  - `ROLE_QA`, `ROLE_SUPERVISOR` (et `ROLE_AUDITOR` en echantillonnage)
-- Actions:
-  - verification resolution
-  - verification preuves
-  - renvoi au bon niveau si non conforme
-- Resultat:
-  - `qa_control`
-
-### Phase 8 - Verification client et cloture
-
-- Roles:
-  - `ROLE_SUPPORT` / `ROLE_AGENT`, puis `ROLE_CLIENT`
-- Actions:
-  - confirmation client
-  - reouverture si refus
-  - cloture finale
-- Resultat:
-  - `pending_client_confirmation` -> `resolved`/`closed`
-
-### Phase 9 - Post-cloture et amelioration continue
-
-- Roles:
-  - `ROLE_HEAD_SAV`, `ROLE_SOFTWARE_OWNER`, `ROLE_QA`, `ROLE_AUDITOR`
-- Actions:
-  - analyse KPI
-  - analyse escalades
-  - mise a jour knowledge base
-  - plans de formation et ameliorations produit/process
-
-## 5) Matrice role -> phases principales
-
-- `ROLE_CLIENT`: 1, 8
-- `ROLE_SUPPORT` / `ROLE_AGENT`: 1, 2, 3, 8
-- `ROLE_VIP_SUPPORT`: 1, 3, 8
-- `ROLE_TECHNICIAN`: 4
-- `ROLE_EXPERT`: 5
-- `ROLE_DISPATCHER`: 2, 6
-- `ROLE_CFAO_MANAGER` / `ROLE_CFAO_WORKS`: 4, 6
-- `ROLE_HVAC_MANAGER`: 4, 6
-- `ROLE_QA`: 7, 9
-- `ROLE_SUPERVISOR`: 2, 3, 4, 7, 9
-- `ROLE_HEAD_SAV`: 5, 8, 9
-- `ROLE_SOFTWARE_OWNER`: 2, 9
-- `ROLE_AUDITOR`: 7, 9
-- `ROLE_SYSTEM_BOT`: 1, 2, 8
-- `ROLE_ADMIN`: gouvernance globale, administration et cloture forcee si necessaire
+- `critical`: prise en charge 30 min, resolution 2 h
+- `high`: prise en charge 1 h, resolution 4 h
+- `normal`: prise en charge 2 h, resolution 8 h
+- `low`: prise en charge 4 h, resolution 24 h

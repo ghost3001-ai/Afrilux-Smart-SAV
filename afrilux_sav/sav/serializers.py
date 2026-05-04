@@ -1146,6 +1146,13 @@ class TicketSerializer(serializers.ModelSerializer):
         product = attrs.get("product") or getattr(self.instance, "product", None)
         assigned_agent = attrs.get("assigned_agent") or getattr(self.instance, "assigned_agent", None)
         organization = attrs.get("organization") or getattr(self.instance, "organization", None)
+        if self.instance is not None and "status" in attrs:
+            next_status = Ticket.normalize_process_status(attrs["status"])
+            if not Ticket.can_transition(self.instance.status, next_status):
+                raise serializers.ValidationError(
+                    {"status": "Transition non autorisee par le cycle de vie du cahier des charges."}
+                )
+            attrs["status"] = next_status
 
         if client and product and product.client_id != client.id:
             raise serializers.ValidationError("Le produit selectionne n'appartient pas a ce client.")
@@ -1160,7 +1167,7 @@ class TicketSerializer(serializers.ModelSerializer):
             and (not previous_assigned_agent or previous_assigned_agent.id != assigned_agent.id)
         ):
             raise serializers.ValidationError(
-                {"assigned_agent": "Affectation autorisee uniquement aux agents et techniciens disponibles."}
+                {"assigned_agent": "Affectation autorisee uniquement aux techniciens disponibles."}
             )
         return attrs
 

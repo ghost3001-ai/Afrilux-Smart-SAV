@@ -8,11 +8,7 @@ from django.utils import timezone
 from .file_validation import MAX_TICKET_ATTACHMENT_BYTES, validate_ticket_attachment_file
 from .models import EquipmentCategory, Intervention, InterventionMedia, Message, Organization, Product, Ticket, TicketAttachment, User
 from .services import (
-    ESCALATION_TARGET_CFAO_MANAGER,
-    ESCALATION_TARGET_CFAO_WORKS,
-    ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV,
     ESCALATION_TARGET_HEAD_SAV,
-    ESCALATION_TARGET_SUPERVISOR,
     compute_ticket_sla_deadline,
     provision_client_account,
 )
@@ -145,9 +141,10 @@ class TicketForm(forms.ModelForm):
         self.fields["product"].required = False
         self.fields["product"].widget = forms.HiddenInput()
         client_queryset = User.objects.filter(role=User.ROLE_CLIENT)
-        agent_queryset = User.objects.filter(is_active=True).filter(
-            Q(role__in=User.SUPPORT_ROLE_ALIASES)
-            | Q(role=User.ROLE_TECHNICIAN, technician_status="available")
+        agent_queryset = User.objects.filter(
+            role=User.ROLE_TECHNICIAN,
+            technician_status="available",
+            is_active=True,
         )
         if user and user.is_authenticated and not user.is_superuser and user.organization_id:
             client_queryset = client_queryset.filter(organization=user.organization)
@@ -156,7 +153,7 @@ class TicketForm(forms.ModelForm):
             agent_queryset = (agent_queryset | User.objects.filter(pk=self.instance.assigned_agent_id)).distinct()
         self.fields["client"].queryset = client_queryset.order_by("company_name", "first_name", "last_name", "username")
         self.fields["assigned_agent"].queryset = agent_queryset.order_by("first_name", "last_name", "username")
-        self.fields["assigned_agent"].help_text = "Affectation autorisee uniquement aux agents et techniciens disponibles."
+        self.fields["assigned_agent"].help_text = "Affectation autorisee uniquement aux techniciens disponibles."
         self.fields["category"].choices = [
             choice
             for choice in self.fields["category"].choices
@@ -195,6 +192,11 @@ class TicketForm(forms.ModelForm):
         product = cleaned_data.get("product")
         assigned_agent = cleaned_data.get("assigned_agent")
         cleaned_data["business_domain"] = cleaned_data.get("business_domain") or Ticket.DOMAIN_OTHER
+        if self.instance.pk and "status" in cleaned_data:
+            next_status = Ticket.normalize_process_status(cleaned_data["status"])
+            if not Ticket.can_transition(self.instance.status, next_status):
+                self.add_error("status", "Transition non autorisee par le cycle de vie du cahier des charges.")
+            cleaned_data["status"] = next_status
         if self.user and self.user.is_authenticated and self.user.role == User.ROLE_CLIENT:
             cleaned_data["client"] = self.user
             cleaned_data["assigned_agent"] = None
@@ -209,7 +211,7 @@ class TicketForm(forms.ModelForm):
             and not assigned_agent.is_ticket_assignment_eligible
             and (not previous_assigned_agent or previous_assigned_agent.id != assigned_agent.id)
         ):
-            self.add_error("assigned_agent", "Affectation autorisee uniquement aux agents et techniciens disponibles.")
+            self.add_error("assigned_agent", "Affectation autorisee uniquement aux techniciens disponibles.")
         return cleaned_data
 
 
@@ -282,7 +284,11 @@ class TicketCreateForm(TicketForm):
         return bool(
             self.user
             and self.user.is_authenticated
-            and (self.user.is_superuser or self.user.role in set(User.SUPPORT_ROLE_ALIASES))
+            and (
+                self.user.is_superuser
+                or self.user.role in set(User.SUPPORT_ROLE_ALIASES)
+                or self.user.role in set(User.MANAGER_ROLES)
+            )
         )
 
     def _inline_client_organization(self):
@@ -483,23 +489,15 @@ class MessageForm(forms.ModelForm):
 
 
 class TicketEscalationForm(forms.Form):
-    TARGET_SUPERVISOR = ESCALATION_TARGET_SUPERVISOR
     TARGET_HEAD_SAV = ESCALATION_TARGET_HEAD_SAV
-    TARGET_EXPERT_THEN_HEAD_SAV = ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV
-    TARGET_CFAO_MANAGER = ESCALATION_TARGET_CFAO_MANAGER
-    TARGET_CFAO_WORKS = ESCALATION_TARGET_CFAO_WORKS
     TARGET_CHOICES = (
-        (TARGET_SUPERVISOR, "1. Vers superviseur"),
-        (TARGET_HEAD_SAV, "2. Vers responsable SAV"),
-        (TARGET_EXPERT_THEN_HEAD_SAV, "3. Expert puis responsable SAV"),
-        (TARGET_CFAO_MANAGER, "4. Vers responsable CFAO"),
-        (TARGET_CFAO_WORKS, "5. Vers conducteur de travaux CFAO"),
+        (TARGET_HEAD_SAV, "Vers responsable SAV"),
     )
 
     target = forms.ChoiceField(
         label="Cible d'escalade",
         choices=TARGET_CHOICES,
-        initial=TARGET_EXPERT_THEN_HEAD_SAV,
+        initial=TARGET_HEAD_SAV,
     )
     note = forms.CharField(
         required=False,

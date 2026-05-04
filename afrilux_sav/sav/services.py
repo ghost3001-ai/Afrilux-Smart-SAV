@@ -51,17 +51,8 @@ LLM_CLIENT = OpenAIResponsesClient()
 
 OPEN_TICKET_STATUSES = [
     Ticket.STATUS_NEW,
-    Ticket.STATUS_QUALIFICATION,
-    Ticket.STATUS_PENDING_CUSTOMER,
     Ticket.STATUS_ASSIGNED,
     Ticket.STATUS_IN_PROGRESS,
-    Ticket.STATUS_IN_PROGRESS_N1,
-    Ticket.STATUS_IN_PROGRESS_N2,
-    Ticket.STATUS_EXPERTISE,
-    Ticket.STATUS_INTERVENTION_PLANNED,
-    Ticket.STATUS_INTERVENTION_DONE,
-    Ticket.STATUS_QA_CONTROL,
-    Ticket.STATUS_PENDING_CLIENT_CONFIRMATION,
     Ticket.STATUS_WAITING,
 ]
 
@@ -72,21 +63,18 @@ ESCALATION_PRIORITY_SEQUENCE = [
     Ticket.PRIORITY_CRITICAL,
 ]
 
-ESCALATION_TARGET_SUPERVISOR = "supervisor"
 ESCALATION_TARGET_HEAD_SAV = "head_sav"
 ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV = "expert_then_head_sav"
-ESCALATION_TARGET_CFAO_MANAGER = "cfao_manager"
-ESCALATION_TARGET_CFAO_WORKS = "cfao_works"
 ESCALATION_ALLOWED_TARGETS = {
-    ESCALATION_TARGET_SUPERVISOR,
     ESCALATION_TARGET_HEAD_SAV,
     ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV,
-    ESCALATION_TARGET_CFAO_MANAGER,
-    ESCALATION_TARGET_CFAO_WORKS,
 }
 
 TICKET_CREATOR_ROLES = {
     User.ROLE_CLIENT,
+    User.ROLE_HEAD_SAV,
+    User.ROLE_ADMIN,
+    User.ROLE_MANAGER,
     *User.SUPPORT_ROLE_ALIASES,
 }
 
@@ -244,15 +232,11 @@ def role_workspace_name(user):
         return "support-page"
     if user.role in set(User.SUPPORT_ROLE_ALIASES):
         return "ticket-list"
-    if user.role in {User.ROLE_TECHNICIAN, User.ROLE_EXPERT}:
+    if user.role == User.ROLE_TECHNICIAN:
         return "technician-space"
-    if user.role == User.ROLE_DISPATCHER:
-        return "planning-page"
-    if user.role in {User.ROLE_QA, User.ROLE_AUDITOR}:
+    if user.role == User.ROLE_AUDITOR:
         return "reporting-page"
-    if user.role in {User.ROLE_CFAO_MANAGER, User.ROLE_CFAO_WORKS, User.ROLE_HVAC_MANAGER, User.ROLE_SOFTWARE_OWNER}:
-        return "ticket-list"
-    if user.role in {User.ROLE_SUPERVISOR, User.ROLE_HEAD_SAV, User.ROLE_ADMIN, User.ROLE_MANAGER}:
+    if user.role in {User.ROLE_HEAD_SAV, User.ROLE_ADMIN, User.ROLE_MANAGER}:
         return "dashboard"
     return "dashboard"
 
@@ -260,15 +244,6 @@ def role_workspace_name(user):
 def role_default_processing_status(user):
     if not user or not user.is_authenticated:
         return Ticket.STATUS_NEW
-    role = getattr(user, "role", "")
-    if role in set(User.SUPPORT_ROLE_ALIASES):
-        return Ticket.STATUS_IN_PROGRESS_N1
-    if role == User.ROLE_TECHNICIAN:
-        return Ticket.STATUS_IN_PROGRESS_N2
-    if role == User.ROLE_EXPERT:
-        return Ticket.STATUS_EXPERTISE
-    if role == User.ROLE_DISPATCHER:
-        return Ticket.STATUS_QUALIFICATION
     return Ticket.STATUS_IN_PROGRESS
 
 
@@ -321,7 +296,7 @@ def scope_ticket_queryset(queryset, user):
                 | Q(client__organization=user.organization)
                 | Q(product__organization=user.organization)
             ).distinct()
-        if is_support_user(user) or is_admin_user(user):
+        if is_support_user(user) or is_manager_user(user) or is_admin_user(user):
             return queryset
         return queryset.filter(Q(created_by=user) | Q(assigned_agent=user) | Q(interventions__agent=user)).distinct()
     return queryset.filter(client=user)
@@ -489,9 +464,10 @@ def manager_queryset_for_organization(organization=None):
 
 
 def assignment_eligible_queryset_for_organization(organization=None):
-    queryset = User.objects.filter(is_active=True).filter(
-        Q(role__in=User.SUPPORT_ROLE_ALIASES)
-        | Q(role=User.ROLE_TECHNICIAN, technician_status="available")
+    queryset = User.objects.filter(
+        role=User.ROLE_TECHNICIAN,
+        technician_status="available",
+        is_active=True,
     )
     if organization is None:
         return queryset
@@ -541,50 +517,12 @@ def select_escalation_agent(ticket, *, target=ESCALATION_TARGET_EXPERT_THEN_HEAD
     exclude_ids = [getattr(current_agent, "id", None)]
     normalized_target = (target or ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV).strip().lower()
 
-    if normalized_target == ESCALATION_TARGET_SUPERVISOR:
-        return _select_least_loaded_agent_for_roles(
-            roles=[User.ROLE_SUPERVISOR],
-            organization=ticket.organization,
-            exclude_user_ids=exclude_ids,
-        )
-
-    if normalized_target == ESCALATION_TARGET_HEAD_SAV:
+    if normalized_target in {ESCALATION_TARGET_HEAD_SAV, ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV, ""}:
         return _select_least_loaded_agent_for_roles(
             roles=[User.ROLE_HEAD_SAV],
             organization=ticket.organization,
             exclude_user_ids=exclude_ids,
         )
-
-    if normalized_target == ESCALATION_TARGET_CFAO_MANAGER:
-        return _select_least_loaded_agent_for_roles(
-            roles=[User.ROLE_CFAO_MANAGER],
-            organization=ticket.organization,
-            exclude_user_ids=exclude_ids,
-        )
-
-    if normalized_target == ESCALATION_TARGET_CFAO_WORKS:
-        return _select_least_loaded_agent_for_roles(
-            roles=[User.ROLE_CFAO_WORKS],
-            organization=ticket.organization,
-            exclude_user_ids=exclude_ids,
-        )
-
-    role_resolution_order = [
-        [User.ROLE_EXPERT],
-        [User.ROLE_HEAD_SAV],
-        [User.ROLE_SUPERVISOR],
-        [User.ROLE_CFAO_MANAGER],
-        [User.ROLE_CFAO_WORKS],
-    ]
-
-    for roles in role_resolution_order:
-        escalation_agent = _select_least_loaded_agent_for_roles(
-            roles=roles,
-            organization=ticket.organization,
-            exclude_user_ids=exclude_ids,
-        )
-        if escalation_agent:
-            return escalation_agent
 
     return None
 
@@ -1364,32 +1302,17 @@ def escalate_ticket(ticket, *, actor=None, note="", target=ESCALATION_TARGET_EXP
     previous_assigned_agent = ticket.assigned_agent
     normalized_target = (target or ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV).strip().lower()
     if normalized_target not in ESCALATION_ALLOWED_TARGETS:
-        raise ValueError("Cible d'escalade invalide. Cibles autorisees: responsable, chef, conducteur CFAO, superviseur.")
+        raise ValueError("Cible d'escalade invalide. Cible autorisee: responsable SAV.")
     escalation_target = select_escalation_agent(ticket, target=normalized_target)
     escalation_note = (note or "Escalade du ticket pour prise en charge de niveau superieur.").strip()[:500]
 
     if escalation_target is None:
-        if normalized_target == ESCALATION_TARGET_SUPERVISOR:
-            raise ValueError("Aucun superviseur disponible pour recevoir cette escalade.")
-        if normalized_target == ESCALATION_TARGET_HEAD_SAV:
-            raise ValueError("Aucun responsable SAV disponible pour recevoir cette escalade.")
-        if normalized_target == ESCALATION_TARGET_CFAO_MANAGER:
-            raise ValueError("Aucun responsable CFAO disponible pour recevoir cette escalade.")
-        if normalized_target == ESCALATION_TARGET_CFAO_WORKS:
-            raise ValueError("Aucun conducteur de travaux CFAO disponible pour recevoir cette escalade.")
-        raise ValueError("Aucun expert ni responsable SAV disponible pour recevoir cette escalade.")
+        raise ValueError("Aucun responsable SAV disponible pour recevoir cette escalade.")
 
     ticket.priority = next_ticket_priority(ticket.priority)
     ticket.assigned_agent = escalation_target
     if previous_assigned_agent is None or previous_assigned_agent.id != escalation_target.id:
-        if escalation_target.role == User.ROLE_EXPERT:
-            ticket.status = Ticket.STATUS_EXPERTISE
-        elif escalation_target.role == User.ROLE_CFAO_WORKS:
-            ticket.status = Ticket.STATUS_INTERVENTION_PLANNED
-        elif escalation_target.role in {User.ROLE_HEAD_SAV, User.ROLE_SUPERVISOR, User.ROLE_CFAO_MANAGER}:
-            ticket.status = Ticket.STATUS_ASSIGNED
-        else:
-            ticket.status = Ticket.STATUS_ASSIGNED
+        ticket.status = Ticket.STATUS_ASSIGNED
     ticket.sla_deadline = compute_ticket_sla_deadline(ticket.priority, organization=ticket.organization)
     ticket.save(update_fields=["priority", "assigned_agent", "status", "sla_deadline", "updated_at"])
 
