@@ -8,7 +8,10 @@ from django.utils import timezone
 from .file_validation import MAX_TICKET_ATTACHMENT_BYTES, validate_ticket_attachment_file
 from .models import EquipmentCategory, Intervention, InterventionMedia, Message, Organization, Product, Ticket, TicketAttachment, User
 from .services import (
-    ESCALATION_TARGET_HEAD_SAV,
+    ESCALATION_TARGET_CFAO_MANAGER,
+    ESCALATION_TARGET_CFAO_WORKS,
+    ESCALATION_TARGET_CHIEF_TECHNICIAN,
+    ESCALATION_TARGET_HVAC_MANAGER,
     compute_ticket_sla_deadline,
     provision_client_account,
 )
@@ -142,7 +145,7 @@ class TicketForm(forms.ModelForm):
         self.fields["product"].widget = forms.HiddenInput()
         client_queryset = User.objects.filter(role=User.ROLE_CLIENT)
         agent_queryset = User.objects.filter(
-            role=User.ROLE_TECHNICIAN,
+            role__in=User.ASSIGNABLE_ROLES,
             technician_status="available",
             is_active=True,
         )
@@ -286,7 +289,6 @@ class TicketCreateForm(TicketForm):
             and self.user.is_authenticated
             and (
                 self.user.is_superuser
-                or self.user.role in set(User.SUPPORT_ROLE_ALIASES)
                 or self.user.role in set(User.MANAGER_ROLES)
             )
         )
@@ -461,16 +463,16 @@ class MessageForm(forms.ModelForm):
         recipient_queryset = User.objects.none()
         if user and user.is_authenticated and ticket:
             participant_ids = {ticket.client_id}
-            if ticket.assigned_agent_id and ticket.assigned_agent.has_support_role:
+            if ticket.assigned_agent_id:
                 participant_ids.add(ticket.assigned_agent_id)
             if user.organization_id:
                 support_queryset = User.objects.filter(
                     organization=user.organization,
-                    role__in=User.SUPPORT_ROLE_ALIASES,
+                    role=User.ROLE_HEAD_SAV,
                     is_active=True,
                 )
             else:
-                support_queryset = User.objects.filter(role__in=User.SUPPORT_ROLE_ALIASES, is_active=True)
+                support_queryset = User.objects.filter(role=User.ROLE_HEAD_SAV, is_active=True)
             participant_ids.update(support_queryset.values_list("id", flat=True))
             recipient_queryset = User.objects.filter(pk__in=participant_ids).exclude(pk=user.pk).order_by(
                 "first_name",
@@ -489,15 +491,21 @@ class MessageForm(forms.ModelForm):
 
 
 class TicketEscalationForm(forms.Form):
-    TARGET_HEAD_SAV = ESCALATION_TARGET_HEAD_SAV
+    TARGET_CFAO_MANAGER = ESCALATION_TARGET_CFAO_MANAGER
+    TARGET_CFAO_WORKS = ESCALATION_TARGET_CFAO_WORKS
+    TARGET_HVAC_MANAGER = ESCALATION_TARGET_HVAC_MANAGER
+    TARGET_CHIEF_TECHNICIAN = ESCALATION_TARGET_CHIEF_TECHNICIAN
     TARGET_CHOICES = (
-        (TARGET_HEAD_SAV, "Vers responsable SAV"),
+        (TARGET_CFAO_MANAGER, "Vers Responsable CFAO / Projet Technique CFAO"),
+        (TARGET_CFAO_WORKS, "Vers Conducteur de travaux CFAO"),
+        (TARGET_HVAC_MANAGER, "Vers Responsable Froid et climatisation"),
+        (TARGET_CHIEF_TECHNICIAN, "Vers Chef Technicien Froid & Climatisation"),
     )
 
     target = forms.ChoiceField(
         label="Cible d'escalade",
         choices=TARGET_CHOICES,
-        initial=TARGET_HEAD_SAV,
+        initial=TARGET_CHIEF_TECHNICIAN,
     )
     note = forms.CharField(
         required=False,
@@ -582,7 +590,7 @@ class InterventionForm(forms.ModelForm):
         if user and user.is_authenticated and not user.is_superuser and user.organization_id:
             agent_queryset = agent_queryset.filter(organization=user.organization)
         self.fields["agent"].queryset = agent_queryset.order_by("first_name", "last_name", "username")
-        if user and user.is_authenticated and user.role == User.ROLE_TECHNICIAN:
+        if user and user.is_authenticated and user.role in User.ASSIGNABLE_ROLES:
             for field_name in list(self.fields):
                 if field_name not in self.TECHNICIAN_ALLOWED_FIELDS:
                     self.fields.pop(field_name)

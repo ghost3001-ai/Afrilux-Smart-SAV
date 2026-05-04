@@ -39,13 +39,11 @@ python3 manage.py runserver
 ## 4. Rôles utilisateurs et usages
 
 - Client : ouvre des tickets, échange sur ses dossiers, ajoute des pièces jointes, valide la résolution, laisse un feedback et consulte ses produits/offres.
-- Agent support / hotliner : traite la relation client, crée des tickets, répond, rattache un client existant ou en crée un nouveau dans le flux ticket.
-- Technicien / expert / technicien terrain : prend en charge, intervient, produit les rapports PDF et pilote les tickets techniques.
-- Superviseur / head SAV / dispatcher : pilotage, affectation, planification, reporting, crédits de compte, escalades et supervision globale.
-- Responsable CFAO : référent plans, maquette numérique, données techniques et documentation as-built.
-- Conducteur de travaux CFAO : prend le relais lorsqu’un ticket devient un projet de remplacement ou chantier lourd.
-- Responsable froid & climatisation : niveau d’escalade spécialisé pour les cas CVC / fluides / compresseurs / contraintes réglementaires.
-- Gestionnaire principal du logiciel : référent fonctionnel des évolutions applicatives et escalades liées au logiciel lui-même.
+- Responsable SAV : remplace l'ancien agent support, crée les tickets pour les clients, qualifie, affecte, escalade, suit les SLA et supervise la relation client.
+- Responsable CFAO / Responsable de Projet Technique CFAO : cible d'escalade pour les projets techniques CFAO, la coordination et le suivi d'avancement.
+- Conducteur de travaux CFAO : cible d'escalade pour la gestion opérationnelle des chantiers et interventions lourdes.
+- Responsable froid & climatisation / responsable technique froid : cible d'escalade pour l'expertise CVC, froid, fluides et conformité technique.
+- Chef Technicien Froid & Climatisation : cible d'escalade terrain pour le diagnostic complexe, l'organisation des interventions et le support aux techniciens.
 - QA / auditeur : consultation, qualité, contrôle et suivi sans capacité d’action métier complète.
 - Administrateur : accès back-office, gestion structurelle et administration Django.
 
@@ -58,14 +56,14 @@ python3 manage.py runserver
 5. À la résolution, confirmer la résolution, rouvrir le dossier si nécessaire ou laisser un feedback.
 6. Consulter aussi les produits associés, la connaissance, les offres recommandées et l’intelligence client si exposées par le rôle.
 
-## 6. Parcours support / manager / technicien
+## 6. Parcours responsable SAV et escalade technique
 
 1. Ouvrir le dashboard pour surveiller les tickets ouverts, critiques, non assignés, les produits, alertes et notifications.
 2. Créer un ticket interne depuis `/tickets/new/` en choisissant soit `Client existant` (recherche par email), soit `Nouveau client` (création inline avec nom/email/mot de passe).
-3. Affecter le ticket à un agent ou prendre soi-même la propriété du ticket.
+3. Garder la visibilité responsable SAV sur tous les tickets de l'organisation et laisser chaque client voir uniquement ses propres tickets.
 4. Répondre par message interne ou public, joindre des fichiers et déclencher la résolution agentique si besoin.
 5. Planifier une intervention, documenter le diagnostic, les actions, les pièces utilisées et générer le PDF d’intervention.
-6. Escalader le ticket selon la cible adaptée : superviseur, responsable SAV, expert puis responsable SAV, responsable CFAO, conducteur de travaux CFAO, responsable froid/climatisation, gestionnaire principal du logiciel.
+6. Escalader le ticket uniquement vers : Responsable CFAO / Responsable de Projet Technique CFAO, Conducteur de travaux CFAO, Responsable froid & climatisation / responsable technique froid, ou Chef Technicien Froid & Climatisation.
 7. Déclencher un crédit de compte client si le workflow le justifie.
 8. Exécuter un workflow d’automatisation ou la maintenance prédictive sur un produit.
 

@@ -71,6 +71,7 @@ class User(AbstractUser):
     ROLE_CLIENT = "client"
     ROLE_SUPPORT = "support"
     ROLE_TECHNICIAN = "technician"
+    ROLE_CHIEF_TECHNICIAN = "chief_technician"
     ROLE_EXPERT = "expert"
     ROLE_CFAO_MANAGER = "cfao_manager"
     ROLE_CFAO_WORKS = "cfao_works"
@@ -91,17 +92,18 @@ class User(AbstractUser):
     ROLE_CHOICES = (
         (ROLE_ADMIN, "Administrateur"),
         (ROLE_HEAD_SAV, "Responsable SAV"),
-        (ROLE_TECHNICIAN, "Technicien"),
-        (ROLE_SUPPORT, "Agent support / Hotliner"),
+        (ROLE_CFAO_MANAGER, "Responsable CFAO / Responsable de Projet Technique CFAO"),
+        (ROLE_CFAO_WORKS, "Conducteur de travaux CFAO"),
+        (ROLE_HVAC_MANAGER, "Responsable Froid et climatisation / Responsable technique froid"),
+        (ROLE_CHIEF_TECHNICIAN, "Chef Technicien Froid & Climatisation"),
         (ROLE_CLIENT, "Client"),
         (ROLE_AUDITOR, "Auditeur / Direction"),
     )
 
     LEGACY_ROLE_CHOICES = (
+        (ROLE_SUPPORT, "Agent support / Hotliner"),
+        (ROLE_TECHNICIAN, "Technicien"),
         (ROLE_EXPERT, "Chef technicien / Expert (Niveau 3)"),
-        (ROLE_CFAO_MANAGER, "Responsable CFAO / GTC & dessin technique"),
-        (ROLE_CFAO_WORKS, "Conducteur de travaux CFAO"),
-        (ROLE_HVAC_MANAGER, "Responsable froid & climatisation"),
         (ROLE_SOFTWARE_OWNER, "Gestionnaire principal du logiciel"),
         (ROLE_SUPERVISOR, "Superviseur / Team Leader"),
         (ROLE_QA, "Qualite / QA SAV"),
@@ -112,27 +114,21 @@ class User(AbstractUser):
         (ROLE_MANAGER, "Responsable SAV (legacy)"),
     )
 
-    SUPPORT_ROLE_ALIASES = (
-        ROLE_SUPPORT,
-        ROLE_AGENT,
-    )
-    STANDARD_SUPPORT_ROLES = (
-        ROLE_SUPPORT,
-        ROLE_AGENT,
-    )
-    SPECIAL_SUPPORT_ROLES = (
-        ROLE_VIP_SUPPORT,
-    )
+    SUPPORT_ROLE_ALIASES = ()
+    STANDARD_SUPPORT_ROLES = ()
+    SPECIAL_SUPPORT_ROLES = ()
     FRONTLINE_ROLES = (*SUPPORT_ROLE_ALIASES,)
     TECHNICAL_ROLES = (
-        ROLE_TECHNICIAN,
-        ROLE_EXPERT,
-    )
-    SPECIALIST_ROLES = (
+        ROLE_CHIEF_TECHNICIAN,
         ROLE_CFAO_MANAGER,
         ROLE_CFAO_WORKS,
         ROLE_HVAC_MANAGER,
-        ROLE_SOFTWARE_OWNER,
+    )
+    SPECIALIST_ROLES = (
+        ROLE_CHIEF_TECHNICIAN,
+        ROLE_CFAO_MANAGER,
+        ROLE_CFAO_WORKS,
+        ROLE_HVAC_MANAGER,
     )
     LEADERSHIP_ROLES = (
         ROLE_HEAD_SAV,
@@ -155,8 +151,13 @@ class User(AbstractUser):
         ROLE_ADMIN,
         ROLE_MANAGER,
     )
-    ASSIGNABLE_ROLES = (ROLE_TECHNICIAN,)
-    TECHNICIAN_SPACE_ROLES = (ROLE_TECHNICIAN,)
+    ASSIGNABLE_ROLES = (
+        ROLE_CFAO_MANAGER,
+        ROLE_CFAO_WORKS,
+        ROLE_HVAC_MANAGER,
+        ROLE_CHIEF_TECHNICIAN,
+    )
+    TECHNICIAN_SPACE_ROLES = ASSIGNABLE_ROLES
     REPORTING_ROLES = (
         *LEADERSHIP_ROLES,
         *READ_ONLY_ROLES,
@@ -227,7 +228,15 @@ class User(AbstractUser):
 
     def save(self, *args, **kwargs):
         if self.role == self.ROLE_FIELD_TECHNICIAN:
-            self.role = self.ROLE_TECHNICIAN
+            self.role = self.ROLE_CHIEF_TECHNICIAN
+        if self.role in {self.ROLE_SUPPORT, self.ROLE_AGENT, self.ROLE_VIP_SUPPORT, self.ROLE_SYSTEM_BOT}:
+            self.role = self.ROLE_HEAD_SAV
+        if self.role == self.ROLE_TECHNICIAN or self.role == self.ROLE_EXPERT:
+            self.role = self.ROLE_CHIEF_TECHNICIAN
+        if self.role in {self.ROLE_SUPERVISOR, self.ROLE_DISPATCHER, self.ROLE_SOFTWARE_OWNER, self.ROLE_MANAGER}:
+            self.role = self.ROLE_HEAD_SAV
+        if self.role == self.ROLE_QA:
+            self.role = self.ROLE_AUDITOR
         if self.role == self.ROLE_ADMIN and not self.is_staff:
             self.is_staff = True
         if (
@@ -243,7 +252,7 @@ class User(AbstractUser):
     def is_ticket_assignment_eligible(self):
         if not self.is_active:
             return False
-        return self.role == self.ROLE_TECHNICIAN and self.technician_status == "available"
+        return self.role in set(self.ASSIGNABLE_ROLES) and self.technician_status == "available"
 
     @property
     def has_support_role(self):
@@ -251,11 +260,7 @@ class User(AbstractUser):
 
     @property
     def is_ticket_escalation_target(self):
-        return self.role in {
-            self.ROLE_HEAD_SAV,
-            self.ROLE_MANAGER,
-            self.ROLE_ADMIN,
-        }
+        return self.role in set(self.ASSIGNABLE_ROLES)
 
     @property
     def account_balance(self):

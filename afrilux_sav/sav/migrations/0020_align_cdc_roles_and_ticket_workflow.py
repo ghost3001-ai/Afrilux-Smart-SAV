@@ -2,19 +2,18 @@ from django.db import migrations, models
 
 
 ROLE_MAP = {
-    "agent": "support",
+    "agent": "head_sav",
+    "support": "head_sav",
     "manager": "head_sav",
-    "field_technician": "technician",
-    "expert": "technician",
-    "cfao_manager": "technician",
-    "cfao_works": "technician",
-    "hvac_manager": "technician",
+    "technician": "chief_technician",
+    "field_technician": "chief_technician",
+    "expert": "chief_technician",
     "software_owner": "head_sav",
     "supervisor": "head_sav",
     "dispatcher": "head_sav",
-    "vip_support": "support",
+    "vip_support": "head_sav",
     "qa": "auditor",
-    "system_bot": "support",
+    "system_bot": "head_sav",
 }
 
 
@@ -55,8 +54,10 @@ class Migration(migrations.Migration):
                 choices=[
                     ("admin", "Administrateur"),
                     ("head_sav", "Responsable SAV"),
-                    ("technician", "Technicien"),
-                    ("support", "Agent support / Hotliner"),
+                    ("cfao_manager", "Responsable CFAO / Responsable de Projet Technique CFAO"),
+                    ("cfao_works", "Conducteur de travaux CFAO"),
+                    ("hvac_manager", "Responsable Froid et climatisation / Responsable technique froid"),
+                    ("chief_technician", "Chef Technicien Froid & Climatisation"),
                     ("client", "Client"),
                     ("auditor", "Auditeur / Direction"),
                 ],

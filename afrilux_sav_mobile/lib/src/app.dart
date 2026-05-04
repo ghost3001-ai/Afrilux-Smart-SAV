@@ -77,20 +77,24 @@ class SavSession {
   final Map<String, dynamic> currentUser;
 
   String get role => (currentUser["role"] ?? "client").toString();
-  bool get isSupportRole => const {"support", "agent"}.contains(role);
+  bool get isEscalationRole => const {
+    "cfao_manager",
+    "cfao_works",
+    "hvac_manager",
+    "chief_technician",
+  }.contains(role);
   bool get isInternal => const {
-    "agent",
-    "manager",
-    "support",
-    "technician",
     "head_sav",
     "admin",
     "auditor",
+    "cfao_manager",
+    "cfao_works",
+    "hvac_manager",
+    "chief_technician",
   }.contains(role);
-  bool get isManager =>
-      role == "head_sav" || role == "manager" || role == "admin";
+  bool get isManager => role == "head_sav";
   bool get isAdmin => role == "admin";
-  bool get canCreateTicket => role == "client" || isSupportRole || isManager;
+  bool get canCreateTicket => role == "client" || role == "head_sav";
   int get userId => (currentUser["id"] ?? 0) as int;
   String get organizationName =>
       (currentUser["organization_name"] ?? "").toString();

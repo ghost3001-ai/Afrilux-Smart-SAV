@@ -63,19 +63,20 @@ ESCALATION_PRIORITY_SEQUENCE = [
     Ticket.PRIORITY_CRITICAL,
 ]
 
-ESCALATION_TARGET_HEAD_SAV = "head_sav"
-ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV = "expert_then_head_sav"
+ESCALATION_TARGET_CFAO_MANAGER = "cfao_manager"
+ESCALATION_TARGET_CFAO_WORKS = "cfao_works"
+ESCALATION_TARGET_HVAC_MANAGER = "hvac_manager"
+ESCALATION_TARGET_CHIEF_TECHNICIAN = "chief_technician"
 ESCALATION_ALLOWED_TARGETS = {
-    ESCALATION_TARGET_HEAD_SAV,
-    ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV,
+    ESCALATION_TARGET_CFAO_MANAGER,
+    ESCALATION_TARGET_CFAO_WORKS,
+    ESCALATION_TARGET_HVAC_MANAGER,
+    ESCALATION_TARGET_CHIEF_TECHNICIAN,
 }
 
 TICKET_CREATOR_ROLES = {
     User.ROLE_CLIENT,
     User.ROLE_HEAD_SAV,
-    User.ROLE_ADMIN,
-    User.ROLE_MANAGER,
-    *User.SUPPORT_ROLE_ALIASES,
 }
 
 NEGATIVE_WORDS = [
@@ -158,11 +159,7 @@ def is_manager_user(user):
 
 
 def is_support_user(user):
-    return bool(
-        user
-        and user.is_authenticated
-        and (user.is_superuser or getattr(user, "role", "") in set(User.SUPPORT_ROLE_ALIASES))
-    )
+    return False
 
 
 def is_admin_user(user):
@@ -173,7 +170,7 @@ def can_create_ticket(user):
     return bool(
         user
         and user.is_authenticated
-        and (user.is_superuser or getattr(user, "role", "") in TICKET_CREATOR_ROLES)
+        and getattr(user, "role", "") in TICKET_CREATOR_ROLES
     )
 
 
@@ -230,9 +227,7 @@ def role_workspace_name(user):
         return "login"
     if user.role == User.ROLE_CLIENT:
         return "support-page"
-    if user.role in set(User.SUPPORT_ROLE_ALIASES):
-        return "ticket-list"
-    if user.role == User.ROLE_TECHNICIAN:
+    if user.role in set(User.TECHNICIAN_SPACE_ROLES):
         return "technician-space"
     if user.role == User.ROLE_AUDITOR:
         return "reporting-page"
@@ -296,8 +291,12 @@ def scope_ticket_queryset(queryset, user):
                 | Q(client__organization=user.organization)
                 | Q(product__organization=user.organization)
             ).distinct()
-        if is_support_user(user) or is_manager_user(user) or is_admin_user(user):
+        if getattr(user, "role", "") == User.ROLE_HEAD_SAV:
             return queryset
+        if getattr(user, "role", "") in set(User.ASSIGNABLE_ROLES):
+            return queryset.filter(Q(assigned_agent=user) | Q(interventions__agent=user)).distinct()
+        if is_admin_user(user):
+            return queryset.none()
         return queryset.filter(Q(created_by=user) | Q(assigned_agent=user) | Q(interventions__agent=user)).distinct()
     return queryset.filter(client=user)
 
@@ -325,7 +324,7 @@ def scope_message_queryset(queryset, user):
     queryset = _scope_ticket_related_queryset(queryset, user, "ticket")
     if not user or not user.is_authenticated:
         return queryset.none()
-    if is_support_user(user) or is_admin_user(user):
+    if getattr(user, "role", "") == User.ROLE_HEAD_SAV:
         return queryset
     queryset = queryset.filter(Q(recipient__isnull=True) | Q(recipient=user) | Q(sender=user))
     if not has_backoffice_access(user) and not getattr(user, "is_superuser", False):
@@ -465,7 +464,7 @@ def manager_queryset_for_organization(organization=None):
 
 def assignment_eligible_queryset_for_organization(organization=None):
     queryset = User.objects.filter(
-        role=User.ROLE_TECHNICIAN,
+        role__in=User.ASSIGNABLE_ROLES,
         technician_status="available",
         is_active=True,
     )
@@ -512,14 +511,20 @@ def next_ticket_priority(priority):
     return ESCALATION_PRIORITY_SEQUENCE[current_index + 1]
 
 
-def select_escalation_agent(ticket, *, target=ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV):
+def select_escalation_agent(ticket, *, target=ESCALATION_TARGET_CHIEF_TECHNICIAN):
     current_agent = getattr(ticket, "assigned_agent", None)
     exclude_ids = [getattr(current_agent, "id", None)]
-    normalized_target = (target or ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV).strip().lower()
-
-    if normalized_target in {ESCALATION_TARGET_HEAD_SAV, ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV, ""}:
+    normalized_target = (target or ESCALATION_TARGET_CHIEF_TECHNICIAN).strip().lower()
+    target_roles = {
+        ESCALATION_TARGET_CFAO_MANAGER: [User.ROLE_CFAO_MANAGER],
+        ESCALATION_TARGET_CFAO_WORKS: [User.ROLE_CFAO_WORKS],
+        ESCALATION_TARGET_HVAC_MANAGER: [User.ROLE_HVAC_MANAGER],
+        ESCALATION_TARGET_CHIEF_TECHNICIAN: [User.ROLE_CHIEF_TECHNICIAN],
+    }
+    roles = target_roles.get(normalized_target)
+    if roles:
         return _select_least_loaded_agent_for_roles(
-            roles=[User.ROLE_HEAD_SAV],
+            roles=roles,
             organization=ticket.organization,
             exclude_user_ids=exclude_ids,
         )
@@ -1293,21 +1298,23 @@ def sync_ticket_assignment(ticket, *, assigned_by=None, note="", release_status=
     return current_assignment, created, released_ids
 
 
-def escalate_ticket(ticket, *, actor=None, note="", target=ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV):
+def escalate_ticket(ticket, *, actor=None, note="", target=ESCALATION_TARGET_CHIEF_TECHNICIAN):
     if ticket.status not in OPEN_TICKET_STATUSES:
         raise ValueError("Seuls les tickets ouverts peuvent etre escalades.")
 
     previous_priority = ticket.priority
     previous_status = ticket.status
     previous_assigned_agent = ticket.assigned_agent
-    normalized_target = (target or ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV).strip().lower()
+    if getattr(actor, "role", "") != User.ROLE_HEAD_SAV:
+        raise ValueError("Seul le Responsable SAV peut escalader un ticket.")
+    normalized_target = (target or ESCALATION_TARGET_CHIEF_TECHNICIAN).strip().lower()
     if normalized_target not in ESCALATION_ALLOWED_TARGETS:
-        raise ValueError("Cible d'escalade invalide. Cible autorisee: responsable SAV.")
+        raise ValueError("Cible d'escalade invalide. Cibles autorisees: CFAO, travaux CFAO, froid/climatisation ou chef technicien.")
     escalation_target = select_escalation_agent(ticket, target=normalized_target)
     escalation_note = (note or "Escalade du ticket pour prise en charge de niveau superieur.").strip()[:500]
 
     if escalation_target is None:
-        raise ValueError("Aucun responsable SAV disponible pour recevoir cette escalade.")
+        raise ValueError("Aucun utilisateur disponible pour recevoir cette escalade.")
 
     ticket.priority = next_ticket_priority(ticket.priority)
     ticket.assigned_agent = escalation_target

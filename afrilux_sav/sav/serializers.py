@@ -284,7 +284,7 @@ class UserSerializer(serializers.ModelSerializer):
         email = (attrs.get("email") or getattr(self.instance, "email", "") or "").strip().lower()
         role = attrs.get("role") or getattr(self.instance, "role", User.ROLE_CLIENT)
         if role == User.ROLE_FIELD_TECHNICIAN:
-            role = User.ROLE_TECHNICIAN
+            role = User.ROLE_CHIEF_TECHNICIAN
             attrs["role"] = role
         organization = attrs.get("organization") or getattr(self.instance, "organization", None)
         professional_email = (attrs.get("professional_email") or "").strip().lower()

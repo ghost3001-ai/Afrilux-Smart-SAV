@@ -537,8 +537,8 @@ class TicketViewSet(AuditedModelViewSet):
         run_automation_rules_for_ticket(instance, actor=self.request.user, trigger_event=AutomationRule.TRIGGER_TICKET_CREATED)
 
     def perform_update(self, serializer):
-        if not (is_support_user(self.request.user) or is_manager_user(self.request.user) or is_admin_user(self.request.user)):
-            raise PermissionDenied("Seuls le support et le responsable SAV peuvent modifier directement un ticket.")
+        if self.request.user.role != User.ROLE_HEAD_SAV:
+            raise PermissionDenied("Seul le responsable SAV peut modifier directement un ticket.")
         previous_status = serializer.instance.status
         previous_assigned_agent_id = serializer.instance.assigned_agent_id
         client = serializer.validated_data.get("client", serializer.instance.client)
@@ -582,7 +582,7 @@ class TicketViewSet(AuditedModelViewSet):
         ticket = self.get_object()
         if not request.user.is_ticket_assignment_eligible:
             return Response(
-                {"detail": "Prise en charge autorisee uniquement pour les agents et techniciens disponibles."},
+                {"detail": "Prise en charge autorisee uniquement pour les roles d'escalade disponibles."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         previous_status = ticket.status
@@ -601,9 +601,11 @@ class TicketViewSet(AuditedModelViewSet):
         previous_status = ticket.status
         technician_id = request.data.get("technician") or request.data.get("assigned_agent")
         if not technician_id:
-            return Response({"detail": "Le technicien est obligatoire."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "La cible d'escalade est obligatoire."}, status=status.HTTP_400_BAD_REQUEST)
+        if request.user.role != User.ROLE_HEAD_SAV:
+            raise PermissionDenied("Seul le responsable SAV peut affecter ou escalader un ticket.")
         assignment_queryset = User.objects.filter(
-            role=User.ROLE_TECHNICIAN,
+            role__in=User.ASSIGNABLE_ROLES,
             technician_status="available",
             is_active=True,
         )
@@ -855,20 +857,22 @@ class MessageViewSet(AuditedModelViewSet):
             return
         if recipient.pk == ticket.client_id:
             return
-        if recipient.role in set(User.SUPPORT_ROLE_ALIASES) and (
+        if recipient.role == User.ROLE_HEAD_SAV and (
             not ticket.organization_id or recipient.organization_id == ticket.organization_id
         ):
             return
-        raise PermissionDenied("Le destinataire doit etre le client ou un membre support autorise sur ce ticket.")
+        if recipient.pk == ticket.assigned_agent_id:
+            return
+        raise PermissionDenied("Le destinataire doit etre le client, le responsable SAV ou la cible d'escalade du ticket.")
 
     def perform_create(self, serializer):
         ticket = serializer.validated_data["ticket"]
         if not (
             self.request.user.role == User.ROLE_CLIENT
-            or is_support_user(self.request.user)
-            or is_admin_user(self.request.user)
+            or self.request.user.role == User.ROLE_HEAD_SAV
+            or self.request.user.pk == ticket.assigned_agent_id
         ):
-            raise PermissionDenied("Seuls le client et le support peuvent participer a la conversation.")
+            raise PermissionDenied("Seuls le client, le responsable SAV et la cible d'escalade peuvent participer a la conversation.")
         if self.request.user.role == User.ROLE_CLIENT and ticket.client_id != self.request.user.id:
             raise PermissionDenied("Vous ne pouvez pas publier un message sur le ticket d'un autre client.")
         if (
@@ -1001,7 +1005,7 @@ class InterventionViewSet(AuditedModelViewSet):
 
     def perform_create(self, serializer):
         ticket = serializer.validated_data["ticket"]
-        if self.request.user.role == User.ROLE_TECHNICIAN and ticket.assigned_agent_id != self.request.user.id:
+        if self.request.user.role in set(User.ASSIGNABLE_ROLES) and ticket.assigned_agent_id != self.request.user.id:
             raise PermissionDenied("Vous ne pouvez intervenir que sur les tickets qui vous sont affectes.")
         if (
             not self.request.user.is_superuser
@@ -1010,7 +1014,7 @@ class InterventionViewSet(AuditedModelViewSet):
         ):
             raise PermissionDenied("Vous ne pouvez pas creer une intervention pour une autre organisation.")
         extra = {"organization": ticket.organization}
-        if self.request.user.role == User.ROLE_TECHNICIAN:
+        if self.request.user.role in set(User.ASSIGNABLE_ROLES):
             extra["agent"] = self.request.user
             extra["intervention_type"] = Intervention.TYPE_ON_SITE
         instance = serializer.save(**extra)

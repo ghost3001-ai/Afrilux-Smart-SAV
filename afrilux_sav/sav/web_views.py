@@ -391,8 +391,10 @@ class AdministrationPageView(LoginRequiredMixin, AdminRequiredMixin, TemplateVie
         cdc_internal_roles = [
             User.ROLE_ADMIN,
             User.ROLE_HEAD_SAV,
-            User.ROLE_TECHNICIAN,
-            User.ROLE_SUPPORT,
+            User.ROLE_CFAO_MANAGER,
+            User.ROLE_CFAO_WORKS,
+            User.ROLE_HVAC_MANAGER,
+            User.ROLE_CHIEF_TECHNICIAN,
             User.ROLE_AUDITOR,
         ]
         internal_users = users.filter(role__in=cdc_internal_roles).order_by("role", "first_name", "last_name", "username")
@@ -419,8 +421,10 @@ class AdministrationPageView(LoginRequiredMixin, AdminRequiredMixin, TemplateVie
                 "users_summary": {
                     "admins": internal_users.filter(role=User.ROLE_ADMIN).count(),
                     "responsables": internal_users.filter(role=User.ROLE_HEAD_SAV).count(),
-                    "supports": internal_users.filter(role=User.ROLE_SUPPORT).count(),
-                    "techniciens": internal_users.filter(role=User.ROLE_TECHNICIAN).count(),
+                    "cfao": internal_users.filter(role=User.ROLE_CFAO_MANAGER).count(),
+                    "travaux_cfao": internal_users.filter(role=User.ROLE_CFAO_WORKS).count(),
+                    "froid_clim": internal_users.filter(role=User.ROLE_HVAC_MANAGER).count(),
+                    "chefs_techniciens": internal_users.filter(role=User.ROLE_CHIEF_TECHNICIAN).count(),
                     "auditeurs": internal_users.filter(role=User.ROLE_AUDITOR).count(),
                     "clients": clients.count(),
                 },
@@ -653,8 +657,8 @@ class TicketUpdateView(LoginRequiredMixin, InternalRequiredMixin, UpdateView):
     template_name = "sav/ticket_form.html"
 
     def dispatch(self, request, *args, **kwargs):
-        if not (is_support_user(request.user) or is_manager_user(request.user) or is_admin_user(request.user)):
-            django_messages.error(request, "Seuls le support et le responsable SAV peuvent modifier directement un ticket.")
+        if request.user.role != User.ROLE_HEAD_SAV:
+            django_messages.error(request, "Seul le responsable SAV peut modifier directement un ticket.")
             return redirect("ticket-detail", pk=kwargs["pk"])
         return super().dispatch(request, *args, **kwargs)
 
@@ -718,11 +722,11 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         context = super().get_context_data(**kwargs)
         ticket = self.object
         user = self.request.user
-        can_support_edit = is_support_user(user) or is_admin_user(user)
-        is_assigned_technician = user.role == User.ROLE_TECHNICIAN and ticket.assigned_agent_id == user.id
+        can_support_edit = user.role == User.ROLE_HEAD_SAV
+        is_assigned_technician = user.role in set(User.ASSIGNABLE_ROLES) and ticket.assigned_agent_id == user.id
         can_participate = (
             not is_read_only_user(user)
-            and (user.role == User.ROLE_CLIENT and ticket.client_id == user.id or can_support_edit)
+            and (user.role == User.ROLE_CLIENT and ticket.client_id == user.id or can_support_edit or is_assigned_technician)
         )
         context["message_form"] = MessageForm(user=user, ticket=ticket)
         context["attachment_form"] = TicketAttachmentForm()
@@ -961,7 +965,7 @@ class TicketAttachmentCreateView(LoginRequiredMixin, View):
 class TicketInterventionCreateView(LoginRequiredMixin, InternalRequiredMixin, View):
     def post(self, request, pk):
         ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
-        if request.user.role == User.ROLE_TECHNICIAN and ticket.assigned_agent_id != request.user.id:
+        if request.user.role in set(User.ASSIGNABLE_ROLES) and ticket.assigned_agent_id != request.user.id:
             django_messages.error(request, "Vous ne pouvez intervenir que sur les tickets qui vous sont affectes.")
             return redirect("ticket-detail", pk=pk)
         form = InterventionForm(request.POST, request.FILES, user=request.user, ticket=ticket)
@@ -972,7 +976,7 @@ class TicketInterventionCreateView(LoginRequiredMixin, InternalRequiredMixin, Vi
         intervention = form.save(commit=False)
         intervention.ticket = ticket
         intervention.organization = ticket.organization
-        if request.user.role == User.ROLE_TECHNICIAN:
+        if request.user.role in set(User.ASSIGNABLE_ROLES):
             intervention.agent = request.user
             intervention.intervention_type = Intervention.TYPE_ON_SITE
         if not intervention.location_snapshot:
