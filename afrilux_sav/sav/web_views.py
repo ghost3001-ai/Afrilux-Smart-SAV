@@ -51,6 +51,7 @@ from .services import (
     apply_agentic_resolution,
     build_customer_insight,
     can_create_ticket,
+    can_record_ticket_intervention,
     calculate_sentiment,
     compute_agent_performance_rows,
     compute_average_first_response_hours,
@@ -744,7 +745,7 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         ticket = self.object
         user = self.request.user
         can_support_edit = user.role == User.ROLE_HEAD_SAV
-        is_assigned_technician = user.role in set(User.ASSIGNABLE_ROLES) and ticket.assigned_agent_id == user.id
+        is_assigned_technician = can_record_ticket_intervention(user, ticket)
         can_participate = (
             not is_read_only_user(user)
             and (user.role == User.ROLE_CLIENT and ticket.client_id == user.id or can_support_edit or is_assigned_technician)
@@ -1014,8 +1015,8 @@ class TicketAttachmentCreateView(LoginRequiredMixin, View):
 class TicketInterventionCreateView(LoginRequiredMixin, InternalRequiredMixin, View):
     def post(self, request, pk):
         ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
-        if request.user.role in set(User.ASSIGNABLE_ROLES) and ticket.assigned_agent_id != request.user.id:
-            django_messages.error(request, "Vous ne pouvez intervenir que sur les tickets qui vous sont affectes.")
+        if not can_record_ticket_intervention(request.user, ticket):
+            django_messages.error(request, "Vous ne pouvez intervenir que sur les tickets qui vous sont affectes ou planifies.")
             return redirect("ticket-detail", pk=pk)
         form = InterventionForm(request.POST, request.FILES, user=request.user, ticket=ticket)
         if not form.is_valid():

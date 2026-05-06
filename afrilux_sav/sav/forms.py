@@ -645,7 +645,10 @@ class InterventionForm(forms.ModelForm):
         "time_spent_minutes",
         "technical_report",
         "client_signed_at",
+        "client_signed_by",
         "client_signature_file",
+        "intervention_media",
+        "location_snapshot",
     }
 
     def __init__(self, *args, user=None, ticket=None, **kwargs):
@@ -658,7 +661,10 @@ class InterventionForm(forms.ModelForm):
             for field_name in list(self.fields):
                 if field_name not in self.TECHNICIAN_ALLOWED_FIELDS:
                     self.fields.pop(field_name)
-            if ticket and ticket.assigned_agent_id == user.id:
+            if ticket and (
+                ticket.assigned_agent_id == user.id
+                or ticket.interventions.filter(agent=user).exists()
+            ):
                 self.initial.setdefault("status", Intervention.STATUS_IN_PROGRESS)
 
     def clean_structured_parts_used(self):

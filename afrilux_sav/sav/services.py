@@ -180,6 +180,19 @@ def can_create_ticket(user):
     )
 
 
+def can_record_ticket_intervention(user, ticket):
+    if not user or not user.is_authenticated or is_read_only_user(user):
+        return False
+    if user.is_superuser or getattr(user, "role", "") == User.ROLE_HEAD_SAV:
+        return True
+    if getattr(user, "role", "") not in set(User.ASSIGNABLE_ROLES):
+        return False
+    return bool(
+        ticket.assigned_agent_id == user.id
+        or ticket.interventions.filter(agent=user).exists()
+    )
+
+
 def is_internal_user(user):
     return bool(
         user

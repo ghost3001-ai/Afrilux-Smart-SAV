@@ -101,6 +101,7 @@ from .services import (
     answer_support_question,
     build_customer_insight,
     can_create_ticket,
+    can_record_ticket_intervention,
     calculate_sentiment,
     compute_agent_performance_rows,
     compute_average_first_response_hours,
@@ -1037,8 +1038,8 @@ class InterventionViewSet(AuditedModelViewSet):
 
     def perform_create(self, serializer):
         ticket = serializer.validated_data["ticket"]
-        if self.request.user.role in set(User.ASSIGNABLE_ROLES) and ticket.assigned_agent_id != self.request.user.id:
-            raise PermissionDenied("Vous ne pouvez intervenir que sur les tickets qui vous sont affectes.")
+        if not can_record_ticket_intervention(self.request.user, ticket):
+            raise PermissionDenied("Vous ne pouvez intervenir que sur les tickets qui vous sont affectes ou planifies.")
         if (
             not self.request.user.is_superuser
             and self.request.user.organization_id
