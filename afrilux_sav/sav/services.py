@@ -22,6 +22,7 @@ from .models import (
     AIActionLog,
     AuditLog,
     AutomationRule,
+    ChecklistTemplate,
     ClientContact,
     EquipmentCategory,
     FinancialTransaction,
@@ -29,6 +30,9 @@ from .models import (
     Intervention,
     InterventionMedia,
     KnowledgeArticle,
+    MaintenanceProgram,
+    MaintenanceReport,
+    MaintenanceTicket,
     Message,
     Notification,
     Organization,
@@ -241,6 +245,18 @@ def has_backoffice_access(user):
     return bool(is_internal_user(user) or is_read_only_user(user))
 
 
+def can_manage_maintenance(user):
+    return bool(
+        user
+        and user.is_authenticated
+        and (
+            user.is_superuser
+            or getattr(user, "role", "") in set(User.MANAGER_ROLES)
+            or getattr(user, "role", "") in set(User.ESCALATION_TARGET_ROLES)
+        )
+    )
+
+
 def role_workspace_name(user):
     if not user or not user.is_authenticated:
         return "login"
@@ -310,12 +326,10 @@ def scope_ticket_queryset(queryset, user):
                 | Q(client__organization=user.organization)
                 | Q(product__organization=user.organization)
             ).distinct()
-        if getattr(user, "role", "") == User.ROLE_HEAD_SAV:
+        if is_admin_user(user) or getattr(user, "role", "") == User.ROLE_HEAD_SAV:
             return queryset
         if getattr(user, "role", "") in set(User.ASSIGNABLE_ROLES):
             return queryset.filter(Q(assigned_agent=user) | Q(interventions__agent=user)).distinct()
-        if is_admin_user(user):
-            return queryset.none()
         return queryset.filter(Q(created_by=user) | Q(assigned_agent=user) | Q(interventions__agent=user)).distinct()
     return queryset.filter(client=user)
 
@@ -438,6 +452,53 @@ def scope_sla_rule_queryset(queryset, user):
 
 def scope_workflow_execution_queryset(queryset, user):
     return scope_by_access(queryset, user, "ticket__client", "organization")
+
+
+def scope_maintenance_program_queryset(queryset, user):
+    if not user or not user.is_authenticated:
+        return queryset.none()
+    if user.is_superuser:
+        return queryset
+    if can_manage_maintenance(user) or is_read_only_user(user):
+        if user.organization_id:
+            return queryset.filter(organization=user.organization)
+        return queryset
+    if getattr(user, "role", "") in set(User.ASSIGNABLE_ROLES):
+        return queryset.filter(tickets__technician=user).distinct()
+    return queryset.none()
+
+
+def scope_maintenance_ticket_queryset(queryset, user):
+    if not user or not user.is_authenticated:
+        return queryset.none()
+    if user.is_superuser:
+        return queryset
+    if can_manage_maintenance(user) or is_read_only_user(user):
+        if user.organization_id:
+            return queryset.filter(
+                Q(organization=user.organization)
+                | Q(client__organization=user.organization)
+                | Q(technician__organization=user.organization)
+            ).distinct()
+        return queryset
+    if getattr(user, "role", "") in set(User.ASSIGNABLE_ROLES):
+        return queryset.filter(technician=user)
+    if getattr(user, "role", "") == User.ROLE_CLIENT:
+        return queryset.filter(client=user)
+    return queryset.none()
+
+
+def scope_maintenance_report_queryset(queryset, user):
+    visible_tickets = scope_maintenance_ticket_queryset(MaintenanceTicket.objects.all(), user)
+    return queryset.filter(maintenance_ticket__in=visible_tickets)
+
+
+def scope_checklist_template_queryset(queryset, user):
+    if not user or not user.is_authenticated:
+        return queryset.none()
+    if user.is_superuser or not user.organization_id:
+        return queryset
+    return queryset.filter(Q(organization=user.organization) | Q(organization__isnull=True))
 
 
 def scope_generated_report_queryset(queryset, user):
@@ -1584,6 +1645,483 @@ def ensure_assignment_intervention(ticket, *, actor=None, note=""):
         "intervention": intervention,
         "emailed": emailed,
         "created_assignment": created_assignment,
+    }
+
+
+def _parse_date_value(value, field_label="date"):
+    if hasattr(value, "date") and callable(value.date):
+        return value.date()
+    if hasattr(value, "isoformat") and not isinstance(value, str):
+        return value
+    normalized = str(value or "").strip()
+    if not normalized:
+        raise ValueError(f"Le champ {field_label} est obligatoire.")
+    try:
+        return datetime.fromisoformat(normalized).date()
+    except ValueError as exc:
+        raise ValueError(f"Le champ {field_label} doit etre une date ISO valide.") from exc
+
+
+def _parse_datetime_value(value, field_label="date_heure"):
+    if hasattr(value, "isoformat") and not isinstance(value, str):
+        parsed = value
+    else:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError(f"Le champ {field_label} est obligatoire.")
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError as exc:
+            raise ValueError(f"Le champ {field_label} doit etre une date/heure ISO valide.") from exc
+    if timezone.is_naive(parsed):
+        return timezone.make_aware(parsed)
+    return parsed
+
+
+def _coerce_json_list(value, field_label):
+    if value in (None, ""):
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return []
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            return [item.strip() for item in stripped.splitlines() if item.strip()]
+        if not isinstance(parsed, list):
+            raise ValueError(f"Le champ {field_label} doit etre une liste.")
+        return parsed
+    raise ValueError(f"Le champ {field_label} doit etre une liste.")
+
+
+def _coerce_id_list(value):
+    if value in (None, ""):
+        return []
+    if isinstance(value, (list, tuple, set)):
+        raw_items = value
+    else:
+        raw_items = str(value).replace(";", ",").split(",")
+    ids = []
+    for item in raw_items:
+        normalized = str(item).strip()
+        if not normalized:
+            continue
+        try:
+            ids.append(int(normalized))
+        except ValueError as exc:
+            raise ValueError("Les identifiants d'equipements doivent etre numeriques.") from exc
+    return ids
+
+
+def _business_domain_for_maintenance_service(service):
+    mapping = {
+        MaintenanceProgram.SERVICE_IT: Ticket.DOMAIN_IT,
+        MaintenanceProgram.SERVICE_CFAO: Ticket.DOMAIN_OTHER,
+        MaintenanceProgram.SERVICE_GENERATOR: Ticket.DOMAIN_GENERATOR,
+        MaintenanceProgram.SERVICE_COOLING: Ticket.DOMAIN_COOLING,
+    }
+    return mapping.get(service, Ticket.DOMAIN_OTHER)
+
+
+def publish_maintenance_program(program, *, actor=None):
+    if program.status == MaintenanceProgram.STATUS_PUBLISHED and program.tickets.exists():
+        return list(program.tickets.select_related("client", "technician").prefetch_related("products"))
+    if program.status == MaintenanceProgram.STATUS_ARCHIVED:
+        raise ValueError("Un programme archive ne peut pas etre publie.")
+    if not isinstance(program.task_lines, list) or not program.task_lines:
+        raise ValueError("Ajoutez au moins une ligne de maintenance avant publication.")
+
+    created_tickets = []
+    with transaction.atomic():
+        for index, line in enumerate(program.task_lines, start=1):
+            if not isinstance(line, dict):
+                raise ValueError(f"Ligne {index}: format invalide.")
+            title = str(line.get("title") or line.get("intitule") or line.get("task") or "").strip()
+            if not title:
+                raise ValueError(f"Ligne {index}: l'intitule de la tache est obligatoire.")
+            technician_id = line.get("technician_id") or line.get("technicien_id") or line.get("technician")
+            client_id = line.get("client_id") or line.get("client")
+            if not technician_id or not client_id:
+                raise ValueError(f"Ligne {index}: technicien et client sont obligatoires.")
+
+            technician = User.objects.filter(pk=technician_id, role__in=User.ASSIGNABLE_ROLES, is_active=True).first()
+            if technician is None:
+                raise ValueError(f"Ligne {index}: technicien introuvable ou non assignable.")
+            client = User.objects.filter(pk=client_id, role=User.ROLE_CLIENT, is_active=True).first()
+            if client is None:
+                raise ValueError(f"Ligne {index}: client introuvable.")
+            if program.organization_id:
+                if technician.organization_id and technician.organization_id != program.organization_id:
+                    raise ValueError(f"Ligne {index}: le technicien appartient a une autre organisation.")
+                if client.organization_id and client.organization_id != program.organization_id:
+                    raise ValueError(f"Ligne {index}: le client appartient a une autre organisation.")
+
+            product_ids = _coerce_id_list(
+                line.get("product_ids")
+                or line.get("products")
+                or line.get("equipment_ids")
+                or line.get("equipement_ids")
+                or line.get("equipements")
+            )
+            products = list(Product.objects.filter(pk__in=product_ids)) if product_ids else []
+            for product in products:
+                if product.client_id != client.id:
+                    raise ValueError(f"Ligne {index}: l'equipement {product.serial_number} n'appartient pas au client.")
+
+            scheduled_date = _parse_date_value(
+                line.get("scheduled_date") or line.get("due_date") or line.get("date_prevue") or line.get("date"),
+                "date_prevue",
+            )
+            ticket = MaintenanceTicket.objects.create(
+                organization=program.organization,
+                program=program,
+                responsible=program.responsible or actor,
+                technician=technician,
+                client=client,
+                title=title[:255],
+                service=str(line.get("service") or program.service or MaintenanceProgram.SERVICE_IT).strip(),
+                periodicity=str(line.get("periodicity") or line.get("periodicite") or MaintenanceTicket.PERIOD_MONTHLY).strip(),
+                scheduled_date=scheduled_date,
+                checklist=_coerce_json_list(line.get("checklist") or line.get("check_list"), "checklist"),
+                instructions=str(line.get("instructions") or line.get("notes") or "").strip(),
+                priority=str(line.get("priority") or line.get("priorite") or Ticket.PRIORITY_NORMAL).strip(),
+                location=str(line.get("location") or line.get("localisation") or client.address or "").strip()[:255],
+                status=MaintenanceTicket.STATUS_PLANNED,
+            )
+            if products:
+                ticket.products.set(products)
+            created_tickets.append(ticket)
+
+        program.status = MaintenanceProgram.STATUS_PUBLISHED
+        program.published_at = timezone.now()
+        program.save(update_fields=["status", "published_at", "updated_at"])
+
+    log_audit_event(
+        actor=actor,
+        action="maintenance_program_published",
+        instance=program,
+        details={"created_ticket_ids": [ticket.id for ticket in created_tickets]},
+    )
+    return created_tickets
+
+
+def start_maintenance_ticket(maintenance_ticket, *, actor=None):
+    if maintenance_ticket.status not in {
+        MaintenanceTicket.STATUS_PLANNED,
+        MaintenanceTicket.STATUS_NOTIFIED,
+        MaintenanceTicket.STATUS_POSTPONED,
+    }:
+        raise ValueError("Cette maintenance ne peut pas etre demarree depuis son statut actuel.")
+    if actor and actor.is_authenticated and not (
+        can_manage_maintenance(actor) or maintenance_ticket.technician_id == actor.id
+    ):
+        raise ValueError("Seul le technicien assigne ou un responsable peut demarrer cette maintenance.")
+    maintenance_ticket.status = MaintenanceTicket.STATUS_IN_PROGRESS
+    maintenance_ticket.started_at = maintenance_ticket.started_at or timezone.now()
+    maintenance_ticket.save(update_fields=["status", "started_at", "updated_at"])
+    log_audit_event(actor, "maintenance_ticket_started", maintenance_ticket)
+    return maintenance_ticket
+
+
+def postpone_maintenance_ticket(maintenance_ticket, *, new_date, justification, actor=None):
+    if not str(justification or "").strip():
+        raise ValueError("La justification du report est obligatoire.")
+    parsed_date = _parse_date_value(new_date, "nouvelle_date")
+    if actor and actor.is_authenticated and not (
+        can_manage_maintenance(actor) or maintenance_ticket.technician_id == actor.id
+    ):
+        raise ValueError("Seul le technicien assigne ou un responsable peut reporter cette maintenance.")
+
+    maintenance_ticket.status = MaintenanceTicket.STATUS_POSTPONED
+    maintenance_ticket.postponed_to = parsed_date
+    maintenance_ticket.scheduled_date = parsed_date
+    maintenance_ticket.postponement_reason = str(justification).strip()
+    maintenance_ticket.save(
+        update_fields=["status", "postponed_to", "scheduled_date", "postponement_reason", "updated_at"]
+    )
+
+    recipients = []
+    if maintenance_ticket.responsible_id:
+        recipients.append(maintenance_ticket.responsible)
+    recipients.extend(manager_queryset_for_organization(maintenance_ticket.organization))
+    for recipient in {item.id: item for item in recipients if getattr(item, "id", None)}.values():
+        create_external_channel_notifications(
+            recipient=recipient,
+            ticket=None,
+            event_type="maintenance_postponed",
+            subject=f"Maintenance reportee - {maintenance_ticket.title}",
+            message=f"La maintenance du {maintenance_ticket.scheduled_date:%d/%m/%Y} a ete reportee: {maintenance_ticket.postponement_reason}",
+        )
+    log_audit_event(actor, "maintenance_ticket_postponed", maintenance_ticket, {"new_date": parsed_date.isoformat()})
+    return maintenance_ticket
+
+
+def _create_incident_from_maintenance(maintenance_ticket, report, *, actor=None):
+    if maintenance_ticket.anomaly_ticket_id:
+        return maintenance_ticket.anomaly_ticket
+
+    product = maintenance_ticket.products.first()
+    description = (
+        "Anomalie detectee lors d'une maintenance planifiee.\n\n"
+        f"Maintenance: {maintenance_ticket.title}\n"
+        f"Client: {maintenance_ticket.client}\n"
+        f"Observations: {report.observations}\n"
+        f"Pieces / consommables: {report.parts_used or '-'}"
+    )
+    assigned_agent = maintenance_ticket.technician if maintenance_ticket.technician.is_ticket_assignment_eligible else None
+    incident = Ticket.objects.create(
+        client=maintenance_ticket.client,
+        created_by=actor if getattr(actor, "is_authenticated", False) else maintenance_ticket.responsible,
+        product=product,
+        product_label=product.name if product else "",
+        assigned_agent=assigned_agent,
+        title=f"Anomalie maintenance - {maintenance_ticket.title}"[:255],
+        description=description,
+        business_domain=_business_domain_for_maintenance_service(maintenance_ticket.service),
+        category=Ticket.CATEGORY_BREAKDOWN,
+        channel=Ticket.CHANNEL_WEB,
+        priority=maintenance_ticket.priority,
+        location=maintenance_ticket.location,
+        sla_deadline=compute_ticket_sla_deadline(maintenance_ticket.priority, organization=maintenance_ticket.organization),
+    )
+    if incident.assigned_agent_id:
+        ensure_assignment_intervention(incident, actor=actor, note="Ticket incident genere depuis une maintenance planifiee.")
+    maintenance_ticket.anomaly_ticket = incident
+    maintenance_ticket.save(update_fields=["anomaly_ticket", "updated_at"])
+    log_audit_event(
+        actor=actor,
+        action="maintenance_anomaly_incident_created",
+        instance=maintenance_ticket,
+        details={"incident_ticket": incident.reference},
+    )
+    return incident
+
+
+def close_maintenance_ticket(
+    maintenance_ticket,
+    *,
+    actor=None,
+    final_status=MaintenanceTicket.STATUS_DONE,
+    actual_started_at=None,
+    actual_finished_at=None,
+    checklist_completed=None,
+    observations="",
+    parts_used="",
+    anomaly_detected=None,
+    photos=None,
+    client_signed_by="",
+    client_signature_file=None,
+    new_date=None,
+    postponement_reason="",
+):
+    if final_status not in {choice[0] for choice in MaintenanceTicket.FINAL_STATUS_CHOICES}:
+        raise ValueError("Statut final de maintenance invalide.")
+    if actor and actor.is_authenticated and not (
+        can_manage_maintenance(actor) or maintenance_ticket.technician_id == actor.id
+    ):
+        raise ValueError("Seul le technicien assigne ou un responsable peut cloturer cette maintenance.")
+    normalized_observations = str(observations or "").strip()
+    if not normalized_observations:
+        raise ValueError("Les observations techniques sont obligatoires.")
+
+    actual_started_at = _parse_datetime_value(actual_started_at or maintenance_ticket.started_at or timezone.now(), "debut_reel")
+    actual_finished_at = _parse_datetime_value(actual_finished_at or timezone.now(), "fin_reelle")
+    checklist_payload = _coerce_json_list(checklist_completed, "checklist_realisee")
+    if not checklist_payload:
+        raise ValueError("La check-list realisee est obligatoire.")
+    anomaly_flag = bool(anomaly_detected) or final_status == MaintenanceTicket.STATUS_ANOMALY
+
+    if final_status == MaintenanceTicket.STATUS_POSTPONED:
+        if not new_date:
+            raise ValueError("La nouvelle date est obligatoire pour un report.")
+        if not str(postponement_reason or "").strip():
+            raise ValueError("La justification du report est obligatoire.")
+
+    report_defaults = {
+        "organization": maintenance_ticket.organization,
+        "technician": maintenance_ticket.technician,
+        "actual_started_at": actual_started_at,
+        "actual_finished_at": actual_finished_at,
+        "checklist_completed": checklist_payload,
+        "observations": normalized_observations,
+        "parts_used": str(parts_used or "").strip(),
+        "anomaly_detected": anomaly_flag,
+        "photos": _coerce_json_list(photos, "photos"),
+        "client_signed_by": str(client_signed_by or "").strip(),
+        "final_status": final_status,
+    }
+    if client_signature_file:
+        report_defaults["client_signature_file"] = client_signature_file
+    report, _created = MaintenanceReport.objects.update_or_create(
+        maintenance_ticket=maintenance_ticket,
+        defaults=report_defaults,
+    )
+
+    maintenance_ticket.status = final_status
+    maintenance_ticket.started_at = maintenance_ticket.started_at or actual_started_at
+    maintenance_ticket.finished_at = actual_finished_at
+    update_fields = ["status", "started_at", "finished_at", "updated_at"]
+    if final_status == MaintenanceTicket.STATUS_POSTPONED:
+        parsed_date = _parse_date_value(new_date, "nouvelle_date")
+        maintenance_ticket.postponed_to = parsed_date
+        maintenance_ticket.scheduled_date = parsed_date
+        maintenance_ticket.postponement_reason = str(postponement_reason).strip()
+        update_fields.extend(["postponed_to", "scheduled_date", "postponement_reason"])
+    maintenance_ticket.save(update_fields=update_fields)
+
+    incident = None
+    if anomaly_flag:
+        maintenance_ticket.status = MaintenanceTicket.STATUS_ANOMALY
+        maintenance_ticket.save(update_fields=["status", "updated_at"])
+        incident = _create_incident_from_maintenance(maintenance_ticket, report, actor=actor)
+
+    recipients = []
+    if maintenance_ticket.responsible_id:
+        recipients.append(maintenance_ticket.responsible)
+    recipients.extend(manager_queryset_for_organization(maintenance_ticket.organization))
+    for recipient in {item.id: item for item in recipients if getattr(item, "id", None)}.values():
+        create_external_channel_notifications(
+            recipient=recipient,
+            ticket=incident,
+            event_type="maintenance_closed",
+            subject=f"Maintenance {maintenance_ticket.get_status_display()} - {maintenance_ticket.title}",
+            message=f"Le technicien {maintenance_ticket.technician} a cloture la maintenance: {normalized_observations[:180]}",
+        )
+
+    log_audit_event(
+        actor,
+        "maintenance_ticket_closed",
+        maintenance_ticket,
+        {"final_status": maintenance_ticket.status, "incident_ticket": incident.reference if incident else ""},
+    )
+    return {"maintenance_ticket": maintenance_ticket, "report": report, "incident_ticket": incident}
+
+
+def dispatch_maintenance_operational_notifications(*, organization=None, now=None):
+    now = timezone.localtime(now or timezone.now())
+    today = now.date()
+    queryset = MaintenanceTicket.objects.select_related("technician", "responsible", "client", "organization").filter(
+        status__in=[
+            MaintenanceTicket.STATUS_PLANNED,
+            MaintenanceTicket.STATUS_NOTIFIED,
+            MaintenanceTicket.STATUS_IN_PROGRESS,
+            MaintenanceTicket.STATUS_POSTPONED,
+        ]
+    )
+    if organization is not None:
+        queryset = queryset.filter(organization=organization)
+
+    sent = {"j_minus_3": 0, "not_realized_j_plus_1": 0}
+    for maintenance_ticket in queryset:
+        if (
+            maintenance_ticket.status == MaintenanceTicket.STATUS_PLANNED
+            and maintenance_ticket.scheduled_date <= today + timedelta(days=3)
+        ):
+            create_external_channel_notifications(
+                recipient=maintenance_ticket.technician,
+                ticket=None,
+                event_type="maintenance_j_minus_3",
+                subject=f"Maintenance a venir - {maintenance_ticket.title}",
+                message=f"La maintenance planifiee chez {maintenance_ticket.client} est prevue le {maintenance_ticket.scheduled_date:%d/%m/%Y}.",
+            )
+            maintenance_ticket.status = MaintenanceTicket.STATUS_NOTIFIED
+            maintenance_ticket.notified_at = now
+            maintenance_ticket.save(update_fields=["status", "notified_at", "updated_at"])
+            sent["j_minus_3"] += 1
+
+        if (
+            maintenance_ticket.status
+            not in {
+                MaintenanceTicket.STATUS_DONE,
+                MaintenanceTicket.STATUS_ANOMALY,
+                MaintenanceTicket.STATUS_CANCELLED,
+            }
+            and maintenance_ticket.scheduled_date <= today - timedelta(days=1)
+            and not maintenance_ticket.overdue_alerted_at
+        ):
+            recipients = []
+            if maintenance_ticket.responsible_id:
+                recipients.append(maintenance_ticket.responsible)
+            recipients.extend(manager_queryset_for_organization(maintenance_ticket.organization))
+            for recipient in {item.id: item for item in recipients if getattr(item, "id", None)}.values():
+                create_external_channel_notifications(
+                    recipient=recipient,
+                    ticket=None,
+                    event_type="maintenance_not_realized_j_plus_1",
+                    subject=f"Maintenance non realisee - {maintenance_ticket.title}",
+                    message=f"La maintenance planifiee le {maintenance_ticket.scheduled_date:%d/%m/%Y} n'est pas cloturee.",
+                )
+                sent["not_realized_j_plus_1"] += 1
+            maintenance_ticket.overdue_alerted_at = now
+            maintenance_ticket.save(update_fields=["overdue_alerted_at", "updated_at"])
+
+    return sent
+
+
+def _maintenance_period_bounds(period, anchor_date=None):
+    anchor_date = anchor_date or timezone.localdate()
+    normalized = str(period or "mensuel").strip().lower()
+    if normalized in {"jour", "daily", "journalier"}:
+        return anchor_date, anchor_date + timedelta(days=1), "Journalier"
+    if normalized in {"semaine", "weekly", "hebdomadaire"}:
+        start = anchor_date - timedelta(days=anchor_date.weekday())
+        return start, start + timedelta(days=7), "Hebdomadaire"
+    if re.fullmatch(r"\d{4}-\d{2}", normalized):
+        year, month = [int(item) for item in normalized.split("-")]
+        start = anchor_date.replace(year=year, month=month, day=1)
+        next_month = start.replace(year=year + 1, month=1, day=1) if month == 12 else start.replace(month=month + 1)
+        return start, next_month, normalized
+    start = anchor_date.replace(day=1)
+    next_month = start.replace(year=start.year + 1, month=1, day=1) if start.month == 12 else start.replace(month=start.month + 1)
+    return start, next_month, "Mensuel"
+
+
+def build_maintenance_period_report(period, user, *, anchor_date=None):
+    start, end, label = _maintenance_period_bounds(period, anchor_date=anchor_date)
+    tickets = scope_maintenance_ticket_queryset(MaintenanceTicket.objects.select_related("client", "technician"), user).filter(
+        scheduled_date__gte=start,
+        scheduled_date__lt=end,
+    )
+    total = tickets.count()
+    done = tickets.filter(status=MaintenanceTicket.STATUS_DONE).count()
+    anomalies = tickets.filter(status=MaintenanceTicket.STATUS_ANOMALY).count()
+    postponed = tickets.filter(status=MaintenanceTicket.STATUS_POSTPONED).count()
+    cancelled = tickets.filter(status=MaintenanceTicket.STATUS_CANCELLED).count()
+    generated_incidents = tickets.filter(anomaly_ticket__isnull=False).count()
+    postponed_delays = []
+    for item in tickets.filter(postponed_to__isnull=False):
+        postponed_delays.append((item.postponed_to - item.scheduled_date).days)
+
+    return {
+        "period": label,
+        "date_from": start.isoformat(),
+        "date_to": end.isoformat(),
+        "total": total,
+        "done": done,
+        "postponed": postponed,
+        "cancelled": cancelled,
+        "anomalies": anomalies,
+        "generated_incidents": generated_incidents,
+        "realization_rate": round((done / total) * 100, 1) if total else 0,
+        "anomaly_rate": round((anomalies / total) * 100, 1) if total else 0,
+        "average_postponement_delay_days": round(sum(postponed_delays) / len(postponed_delays), 1) if postponed_delays else 0,
+        "tickets": [
+            {
+                "id": item.id,
+                "title": item.title,
+                "client": str(item.client),
+                "technician": str(item.technician),
+                "scheduled_date": item.scheduled_date.isoformat(),
+                "status": item.status,
+                "incident_reference": item.anomaly_ticket.reference if item.anomaly_ticket_id else "",
+            }
+            for item in tickets.order_by("scheduled_date", "client__company_name", "title")[:200]
+        ],
     }
 
 

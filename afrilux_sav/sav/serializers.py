@@ -7,6 +7,7 @@ from .models import (
     AIActionLog,
     AuditLog,
     AutomationRule,
+    ChecklistTemplate,
     ClientContact,
     DeviceRegistration,
     EquipmentCategory,
@@ -15,6 +16,9 @@ from .models import (
     Intervention,
     InterventionMedia,
     KnowledgeArticle,
+    MaintenanceProgram,
+    MaintenanceReport,
+    MaintenanceTicket,
     Message,
     Notification,
     Organization,
@@ -436,6 +440,206 @@ class ProductSerializer(serializers.ModelSerializer):
         if equipment_category and organization and equipment_category.organization_id and equipment_category.organization_id != organization.id:
             raise serializers.ValidationError("La categorie d'equipement selectionnee appartient a une autre organisation.")
         return attrs
+
+
+class ChecklistTemplateSerializer(serializers.ModelSerializer):
+    organization_name = serializers.CharField(source="organization.display_name", read_only=True)
+    equipment_category_name = serializers.CharField(source="equipment_category.name", read_only=True)
+
+    class Meta:
+        model = ChecklistTemplate
+        fields = [
+            "id",
+            "organization",
+            "organization_name",
+            "service",
+            "equipment_category",
+            "equipment_category_name",
+            "name",
+            "checklist",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class MaintenanceReportSerializer(serializers.ModelSerializer):
+    technician_name = serializers.SerializerMethodField()
+    ticket_title = serializers.CharField(source="maintenance_ticket.title", read_only=True)
+    organization_name = serializers.CharField(source="organization.display_name", read_only=True)
+
+    class Meta:
+        model = MaintenanceReport
+        fields = [
+            "id",
+            "organization",
+            "organization_name",
+            "maintenance_ticket",
+            "ticket_title",
+            "technician",
+            "technician_name",
+            "actual_started_at",
+            "actual_finished_at",
+            "checklist_completed",
+            "observations",
+            "parts_used",
+            "anomaly_detected",
+            "photos",
+            "client_signed_by",
+            "client_signature_file",
+            "final_status",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["organization", "organization_name", "technician_name", "ticket_title", "created_at", "updated_at"]
+
+    def get_technician_name(self, obj):
+        return str(obj.technician)
+
+
+class MaintenanceTicketSerializer(serializers.ModelSerializer):
+    organization_name = serializers.CharField(source="organization.display_name", read_only=True)
+    program_title = serializers.CharField(source="program.title", read_only=True)
+    responsible_name = serializers.SerializerMethodField()
+    technician_name = serializers.SerializerMethodField()
+    client_name = serializers.SerializerMethodField()
+    products = serializers.PrimaryKeyRelatedField(many=True, required=False, queryset=Product.objects.all())
+    product_names = serializers.SerializerMethodField()
+    report = MaintenanceReportSerializer(read_only=True)
+    anomaly_ticket_reference = serializers.CharField(source="anomaly_ticket.reference", read_only=True)
+    type_label = serializers.CharField(read_only=True)
+    is_late = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = MaintenanceTicket
+        fields = [
+            "id",
+            "organization",
+            "organization_name",
+            "program",
+            "program_title",
+            "responsible",
+            "responsible_name",
+            "technician",
+            "technician_name",
+            "client",
+            "client_name",
+            "products",
+            "product_names",
+            "title",
+            "type_label",
+            "service",
+            "periodicity",
+            "scheduled_date",
+            "status",
+            "checklist",
+            "instructions",
+            "priority",
+            "location",
+            "started_at",
+            "finished_at",
+            "postponed_to",
+            "postponement_reason",
+            "notified_at",
+            "overdue_alerted_at",
+            "anomaly_ticket",
+            "anomaly_ticket_reference",
+            "is_late",
+            "report",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "organization",
+            "organization_name",
+            "program_title",
+            "responsible_name",
+            "technician_name",
+            "client_name",
+            "product_names",
+            "type_label",
+            "started_at",
+            "finished_at",
+            "notified_at",
+            "overdue_alerted_at",
+            "anomaly_ticket",
+            "anomaly_ticket_reference",
+            "is_late",
+            "report",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_responsible_name(self, obj):
+        return str(obj.responsible) if obj.responsible else None
+
+    def get_technician_name(self, obj):
+        return str(obj.technician)
+
+    def get_client_name(self, obj):
+        return str(obj.client)
+
+    def get_product_names(self, obj):
+        return [str(product) for product in obj.products.all()]
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        program = attrs.get("program") or getattr(self.instance, "program", None)
+        technician = attrs.get("technician") or getattr(self.instance, "technician", None)
+        client = attrs.get("client") or getattr(self.instance, "client", None)
+        products = attrs.get("products")
+        organization = attrs.get("organization") or getattr(self.instance, "organization", None) or getattr(program, "organization", None)
+        if technician and organization and technician.organization_id and technician.organization_id != organization.id:
+            raise serializers.ValidationError({"technician": "Le technicien appartient a une autre organisation."})
+        if client and organization and client.organization_id and client.organization_id != organization.id:
+            raise serializers.ValidationError({"client": "Le client appartient a une autre organisation."})
+        if products and client:
+            for product in products:
+                if product.client_id != client.id:
+                    raise serializers.ValidationError({"products": "Tous les equipements doivent appartenir au client selectionne."})
+        return attrs
+
+
+class MaintenanceProgramSerializer(serializers.ModelSerializer):
+    organization_name = serializers.CharField(source="organization.display_name", read_only=True)
+    responsible_name = serializers.SerializerMethodField()
+    tickets_count = serializers.SerializerMethodField()
+    tickets_done = serializers.SerializerMethodField()
+    period_label = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = MaintenanceProgram
+        fields = [
+            "id",
+            "organization",
+            "organization_name",
+            "responsible",
+            "responsible_name",
+            "title",
+            "service",
+            "period_type",
+            "period_label",
+            "month",
+            "quarter",
+            "year",
+            "task_lines",
+            "status",
+            "published_at",
+            "tickets_count",
+            "tickets_done",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["organization_name", "responsible_name", "period_label", "published_at", "tickets_count", "tickets_done"]
+
+    def get_responsible_name(self, obj):
+        return str(obj.responsible) if obj.responsible else None
+
+    def get_tickets_count(self, obj):
+        return obj.tickets.count()
+
+    def get_tickets_done(self, obj):
+        return obj.tickets.filter(status=MaintenanceTicket.STATUS_DONE).count()
 
 
 class MessageInlineSerializer(serializers.ModelSerializer):

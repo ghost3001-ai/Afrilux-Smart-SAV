@@ -86,9 +86,17 @@
                                         <p>{{ item.ticket.client }}</p>
                                         <small>{{ item.scheduled_for|date:"H:i" }} · {{ item.action_taken }}</small>
                                     </div>
-                                {% empty %}
-                                    <small class="muted">Aucune intervention planifiee.</small>
                                 {% endfor %}
+                                {% for item in row.maintenance_items %}
+                                    <div class="planning-day__item">
+                                        <strong>MAINT-{{ item.id }} - {{ item.title }}</strong>
+                                        <p>{{ item.client }}</p>
+                                        <small>Maintenance - {{ item.get_status_display }}</small>
+                                    </div>
+                                {% endfor %}
+                                {% if not row.items and not row.maintenance_items %}
+                                    <small class="muted">Aucune intervention planifiee.</small>
+                                {% endif %}
                             </div>
                         </div>
                     {% endfor %}

@@ -1,3 +1,5 @@
+import json
+
 from django import forms
 from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.password_validation import validate_password
@@ -6,7 +8,19 @@ from django.db.models import Q
 from django.utils import timezone
 
 from .file_validation import MAX_TICKET_ATTACHMENT_BYTES, validate_ticket_attachment_file
-from .models import EquipmentCategory, Intervention, InterventionMedia, Message, Organization, Product, Ticket, TicketAttachment, User
+from .models import (
+    EquipmentCategory,
+    Intervention,
+    InterventionMedia,
+    MaintenanceProgram,
+    MaintenanceTicket,
+    Message,
+    Organization,
+    Product,
+    Ticket,
+    TicketAttachment,
+    User,
+)
 from .services import (
     ESCALATION_TARGET_CFAO_MANAGER,
     ESCALATION_TARGET_CFAO_WORKS,
@@ -742,6 +756,125 @@ class CreditAccountForm(forms.Form):
     reason = forms.CharField(label="Motif", max_length=255)
     note = forms.CharField(label="Note", required=False, widget=forms.Textarea(attrs={"rows": 3}))
     external_reference = forms.CharField(label="Reference externe", required=False, max_length=120)
+
+
+class MaintenanceProgramForm(forms.ModelForm):
+    class Meta:
+        model = MaintenanceProgram
+        fields = ["title", "service", "period_type", "month", "quarter", "year", "task_lines"]
+        widgets = {
+            "task_lines": forms.Textarea(attrs={"rows": 12}),
+        }
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.user = user
+        self.fields["title"].required = False
+        self.fields["month"].required = False
+        self.fields["quarter"].required = False
+        self.fields["task_lines"].help_text = (
+            "Liste JSON des maintenances a publier. Champs: title, technician_id, client_id, "
+            "product_ids, scheduled_date, periodicity, checklist, instructions."
+        )
+        if not self.initial.get("task_lines") and not self.instance.pk:
+            self.initial["task_lines"] = json.dumps(
+                [
+                    {
+                        "title": "Entretien preventif equipement client",
+                        "technician_id": "",
+                        "client_id": "",
+                        "product_ids": [],
+                        "scheduled_date": timezone.localdate().isoformat(),
+                        "periodicity": MaintenanceTicket.PERIOD_MONTHLY,
+                        "checklist": ["Controle visuel", "Nettoyage", "Test fonctionnement"],
+                        "instructions": "Verifier les points critiques et signaler toute anomalie.",
+                        "priority": Ticket.PRIORITY_NORMAL,
+                    }
+                ],
+                indent=2,
+            )
+
+    def clean_month(self):
+        value = self.cleaned_data.get("month")
+        if value is not None and (value < 1 or value > 12):
+            raise ValidationError("Le mois doit etre compris entre 1 et 12.")
+        return value
+
+    def clean_quarter(self):
+        value = self.cleaned_data.get("quarter")
+        if value is not None and (value < 1 or value > 4):
+            raise ValidationError("Le trimestre doit etre compris entre 1 et 4.")
+        return value
+
+    def clean_task_lines(self):
+        value = self.cleaned_data.get("task_lines")
+        if isinstance(value, list):
+            task_lines = value
+        else:
+            try:
+                task_lines = json.loads(value or "[]")
+            except json.JSONDecodeError as exc:
+                raise ValidationError("Les lignes de maintenance doivent etre un JSON valide.") from exc
+        if not isinstance(task_lines, list) or not task_lines:
+            raise ValidationError("Ajoutez au moins une ligne de maintenance.")
+        return task_lines
+
+
+class MaintenanceClosureForm(forms.Form):
+    final_status = forms.ChoiceField(label="Nouveau statut", choices=MaintenanceTicket.FINAL_STATUS_CHOICES)
+    actual_started_at = forms.DateTimeField(
+        label="Debut reel",
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
+    )
+    actual_finished_at = forms.DateTimeField(
+        label="Fin reelle",
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
+    )
+    checklist_completed = forms.CharField(
+        label="Check-list realisee",
+        widget=forms.Textarea(attrs={"rows": 5}),
+        help_text="JSON ou une operation par ligne.",
+    )
+    observations = forms.CharField(label="Observations techniques", widget=forms.Textarea(attrs={"rows": 4}))
+    parts_used = forms.CharField(label="Pieces / consommables utilises", required=False, widget=forms.Textarea(attrs={"rows": 2}))
+    anomaly_detected = forms.BooleanField(label="Anomalie detectee ?", required=False)
+    new_date = forms.DateField(label="Nouvelle date si report", required=False, widget=forms.DateInput(attrs={"type": "date"}))
+    postponement_reason = forms.CharField(
+        label="Justification du report",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 2}),
+    )
+
+    def __init__(self, *args, maintenance_ticket=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.maintenance_ticket = maintenance_ticket
+        now = timezone.localtime()
+        self.initial.setdefault("actual_started_at", maintenance_ticket.started_at if maintenance_ticket else now)
+        self.initial.setdefault("actual_finished_at", now)
+        if maintenance_ticket and not self.initial.get("checklist_completed"):
+            self.initial["checklist_completed"] = json.dumps(maintenance_ticket.checklist or [], indent=2)
+
+    def clean_checklist_completed(self):
+        value = (self.cleaned_data.get("checklist_completed") or "").strip()
+        if not value:
+            raise ValidationError("La check-list realisee est obligatoire.")
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            parsed = [line.strip() for line in value.splitlines() if line.strip()]
+        if not isinstance(parsed, list) or not parsed:
+            raise ValidationError("La check-list realisee doit contenir au moins une operation.")
+        return parsed
+
+    def clean(self):
+        cleaned_data = super().clean()
+        final_status = cleaned_data.get("final_status")
+        if final_status == MaintenanceTicket.STATUS_POSTPONED:
+            if not cleaned_data.get("new_date"):
+                self.add_error("new_date", "La nouvelle date est obligatoire pour un report.")
+            if not (cleaned_data.get("postponement_reason") or "").strip():
+                self.add_error("postponement_reason", "La justification est obligatoire pour un report.")
+        return cleaned_data
 
 
 class ProductForm(forms.ModelForm):

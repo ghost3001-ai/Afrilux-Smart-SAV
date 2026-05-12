@@ -1,0 +1,127 @@
+{% extends "sav/base.html" %}
+{% load sav_extras %}
+
+{% block title %}Programme de maintenance | Afrilux SAV{% endblock %}
+
+{% block content %}
+<section class="section-head section-head--page">
+    <div>
+        <p class="eyebrow">Maintenance planifiee</p>
+        <h1>Programme de maintenance</h1>
+    </div>
+    <div class="hero__actions">
+        <a class="button button--ghost" href="{% url 'planning-page' %}">Planning</a>
+        <a class="button button--primary" href="{% url 'maintenance-program-create' %}">Nouveau programme</a>
+    </div>
+</section>
+
+<section class="stats-grid">
+    <article class="stat-card">
+        <span>Programmes</span>
+        <strong>{{ stats.programs }}</strong>
+        <small>en portefeuille</small>
+    </article>
+    <article class="stat-card">
+        <span>A realiser</span>
+        <strong>{{ stats.planned }}</strong>
+        <small>tickets actifs</small>
+    </article>
+    <article class="stat-card">
+        <span>Terminees</span>
+        <strong>{{ stats.done }}</strong>
+        <small>cycle prevenif</small>
+    </article>
+    <article class="stat-card">
+        <span>Anomalies</span>
+        <strong>{{ stats.anomalies }}</strong>
+        <small>tickets incidents generes</small>
+    </article>
+</section>
+
+<section class="two-col">
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Responsable</p>
+            <h2>Programmes</h2>
+        </div>
+        {% for program in programs %}
+            <div class="mini-card">
+                <div class="section-head">
+                    <div>
+                        <strong>{{ program.title }}</strong>
+                        <p>{{ program.get_service_display }} · {{ program.period_label }} · {{ program.responsible|default:"Responsable non defini" }}</p>
+                    </div>
+                    <span class="badge badge--{{ program.status|badge_tone }}">{{ program.get_status_display }}</span>
+                </div>
+                <div class="chip-row">
+                    <span class="badge badge--neutral">{{ program.tickets.count }} ticket(s)</span>
+                    {% if program.status == "draft" %}
+                        <form method="post" action="{% url 'maintenance-program-publish' program.pk %}">
+                            {% csrf_token %}
+                            <button class="button button--primary" type="submit">Publier le programme</button>
+                        </form>
+                    {% endif %}
+                </div>
+            </div>
+        {% empty %}
+            <p class="muted">Aucun programme de maintenance enregistre.</p>
+        {% endfor %}
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Pipeline</p>
+            <h2>Tickets planifies</h2>
+        </div>
+        {% for item in planned_tickets %}
+            <div class="list-row">
+                <div>
+                    <strong>{{ item.title }}</strong>
+                    <p>{{ item.client }} · {{ item.technician }} · {{ item.scheduled_date|date:"d/m/Y" }}</p>
+                </div>
+                <div class="list-row__stats">
+                    <span class="badge badge--accent">Maintenance</span>
+                    <span class="badge badge--{{ item.status|badge_tone }}">{{ item.get_status_display }}</span>
+                </div>
+            </div>
+        {% empty %}
+            <p class="muted">Aucune maintenance active.</p>
+        {% endfor %}
+    </article>
+</section>
+
+<section class="card">
+    <div class="section-head">
+        <p class="eyebrow">Bilan rapide</p>
+        <h2>Maintenances cloturees</h2>
+    </div>
+    <div class="table-wrap">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Tache</th>
+                    <th>Client</th>
+                    <th>Technicien</th>
+                    <th>Statut</th>
+                    <th>Incident</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in recent_done %}
+                    <tr>
+                        <td>{{ item.title }}</td>
+                        <td>{{ item.client }}</td>
+                        <td>{{ item.technician }}</td>
+                        <td><span class="badge badge--{{ item.status|badge_tone }}">{{ item.get_status_display }}</span></td>
+                        <td>{% if item.anomaly_ticket %}<a href="{% url 'ticket-detail' item.anomaly_ticket.pk %}">{{ item.anomaly_ticket.reference }}</a>{% else %}-{% endif %}</td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="5">Aucune maintenance cloturee recemment.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

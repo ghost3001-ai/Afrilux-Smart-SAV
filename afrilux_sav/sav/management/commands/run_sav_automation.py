@@ -4,7 +4,12 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from sav.models import Organization
-from sav.services import auto_close_resolved_tickets, dispatch_due_reports, dispatch_sla_operational_notifications
+from sav.services import (
+    auto_close_resolved_tickets,
+    dispatch_due_reports,
+    dispatch_maintenance_operational_notifications,
+    dispatch_sla_operational_notifications,
+)
 
 
 class Command(BaseCommand):
@@ -36,6 +41,12 @@ class Command(BaseCommand):
             if not options["dry_run"]:
                 closed = auto_close_resolved_tickets(organization=organization, now=now)
             self.stdout.write(f"{organization.display_name}: auto-clotures 72h -> {len(closed)}")
+
+            maintenance_results = dispatch_maintenance_operational_notifications(organization=organization, now=now)
+            self.stdout.write(
+                f"{organization.display_name}: maintenances J-3/J+1 -> "
+                f"{maintenance_results['j_minus_3']}/{maintenance_results['not_realized_j_plus_1']}"
+            )
 
             if options["skip_reports"]:
                 continue

@@ -1,0 +1,70 @@
+{% extends "sav/base.html" %}
+{% load sav_extras %}
+
+{% block title %}Cloture maintenance | Afrilux SAV{% endblock %}
+
+{% block content %}
+<section class="section-head section-head--page">
+    <div>
+        <p class="eyebrow">Maintenance planifiee</p>
+        <h1>{{ maintenance_ticket.title }}</h1>
+        <div class="chip-row">
+            <span class="badge badge--accent">Maintenance</span>
+            <span class="badge badge--{{ maintenance_ticket.status|badge_tone }}">{{ maintenance_ticket.get_status_display }}</span>
+            <span class="badge badge--neutral">{{ maintenance_ticket.scheduled_date|date:"d/m/Y" }}</span>
+        </div>
+    </div>
+</section>
+
+<section class="two-col">
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Contexte</p>
+            <h2>Intervention preventive</h2>
+        </div>
+        <dl class="detail-grid">
+            <div><dt>Client</dt><dd>{{ maintenance_ticket.client }}</dd></div>
+            <div><dt>Technicien</dt><dd>{{ maintenance_ticket.technician }}</dd></div>
+            <div><dt>Service</dt><dd>{{ maintenance_ticket.get_service_display }}</dd></div>
+            <div><dt>Periodicite</dt><dd>{{ maintenance_ticket.get_periodicity_display }}</dd></div>
+            <div class="detail-grid__full"><dt>Localisation</dt><dd>{{ maintenance_ticket.location|default:"Non renseignee" }}</dd></div>
+            <div class="detail-grid__full"><dt>Instructions</dt><dd>{{ maintenance_ticket.instructions|default:"-" }}</dd></div>
+        </dl>
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Check-list</p>
+            <h2>Operations attendues</h2>
+        </div>
+        {% for item in maintenance_ticket.checklist %}
+            <div class="list-row">
+                <strong>{{ item }}</strong>
+            </div>
+        {% empty %}
+            <p class="muted">Aucune check-list predefinie.</p>
+        {% endfor %}
+    </article>
+</section>
+
+<section class="card form-card">
+    <form method="post" class="form-grid form-grid--two">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+            <div class="form-errors form-errors--full">{{ form.non_field_errors }}</div>
+        {% endif %}
+        {% for field in form %}
+            <label class="field {% if field.name == 'checklist_completed' or field.name == 'observations' or field.name == 'parts_used' or field.name == 'postponement_reason' %}field--full{% endif %}">
+                <span>{{ field.label }}{% if field.field.required %} <strong>*</strong>{% endif %}</span>
+                {{ field }}
+                {% if field.help_text %}<small class="field__help">{{ field.help_text }}</small>{% endif %}
+                {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
+            </label>
+        {% endfor %}
+        <div class="form-actions field--full">
+            <button class="button button--primary" type="submit">Valider la maintenance</button>
+            <a class="button button--ghost" href="{% url 'technician-space' %}">Annuler</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

@@ -6,6 +6,7 @@ from .views import (
     AnalyticsAskView,
     AuditLogViewSet,
     AutomationRuleViewSet,
+    ChecklistTemplateViewSet,
     ClientViewSet,
     ClientContactViewSet,
     DailyReportView,
@@ -20,6 +21,10 @@ from .views import (
     InterventionViewSet,
     InterventionMediaViewSet,
     KnowledgeArticleViewSet,
+    MaintenancePeriodReportView,
+    MaintenanceProgramViewSet,
+    MaintenanceReportViewSet,
+    MaintenanceTicketViewSet,
     MessageViewSet,
     MonthlyReportView,
     NotificationViewSet,
@@ -51,6 +56,10 @@ router.register("client-contacts", ClientContactViewSet, basename="client-contac
 router.register("equipment-categories", EquipmentCategoryViewSet, basename="equipment-category")
 router.register("products", ProductViewSet, basename="product")
 router.register("equipements", EquipmentViewSet, basename="equipment")
+router.register("maintenance/programmes", MaintenanceProgramViewSet, basename="maintenance-program")
+router.register("maintenance/tickets", MaintenanceTicketViewSet, basename="maintenance-ticket")
+router.register("maintenance/rapports", MaintenanceReportViewSet, basename="maintenance-report")
+router.register("maintenance/modeles-checklist", ChecklistTemplateViewSet, basename="maintenance-checklist-template")
 router.register("tickets", TicketViewSet, basename="ticket")
 router.register("ticket-assignments", TicketAssignmentViewSet, basename="ticket-assignment")
 router.register("financial-transactions", FinancialTransactionViewSet, basename="financial-transaction")
@@ -84,6 +93,7 @@ urlpatterns = [
     path("rapports/hebdomadaire/", WeeklyReportView.as_view(), name="report-weekly"),
     path("rapports/mensuel/", MonthlyReportView.as_view(), name="report-monthly"),
     path("rapports/export/<str:report_type>/", ReportExportView.as_view(), name="report-export"),
+    path("maintenance/rapports/<str:periode>/", MaintenancePeriodReportView.as_view(), name="maintenance-period-report"),
     path("analytics/ask/", AnalyticsAskView.as_view(), name="analytics-ask"),
     path("techniciens/<int:pk>/planning/", TechnicianPlanningView.as_view(), name="technician-planning"),
     path("support/assistant/", SupportAssistantView.as_view(), name="support-assistant"),

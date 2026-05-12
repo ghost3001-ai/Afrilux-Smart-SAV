@@ -24,6 +24,9 @@ from .models import (
     FinancialTransaction,
     KnowledgeArticle,
     Intervention,
+    MaintenanceProgram,
+    MaintenanceReport,
+    MaintenanceTicket,
     Message,
     Notification,
     Organization,
@@ -2319,6 +2322,92 @@ class SavPlatformTests(TestCase):
         self.assertTrue(TicketAssignment.objects.filter(ticket=ticket, technician=self.agent).exists())
         intervention = ticket.interventions.get(agent=self.agent)
         self.assertTrue(bool(intervention.report_pdf))
+
+    def test_ticket_reference_uses_cdc_format(self):
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            title="Reference CDC",
+            description="Le numero doit suivre le format officiel.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+
+        self.assertRegex(ticket.reference, r"^ASS-SAV-\d{2}-\d{4}-\d{5}$")
+
+    def test_maintenance_program_publish_creates_planned_tickets(self):
+        program = MaintenanceProgram.objects.create(
+            organization=self.organization,
+            responsible=self.manager,
+            service=MaintenanceProgram.SERVICE_IT,
+            period_type=MaintenanceProgram.PERIOD_MONTHLY,
+            month=timezone.localdate().month,
+            year=timezone.localdate().year,
+            task_lines=[
+                {
+                    "title": "Entretien onduleur client",
+                    "technician_id": self.technician.pk,
+                    "client_id": self.client_user.pk,
+                    "product_ids": [self.product.pk],
+                    "scheduled_date": (timezone.localdate() + timedelta(days=2)).isoformat(),
+                    "periodicity": MaintenanceTicket.PERIOD_MONTHLY,
+                    "checklist": ["Controle visuel", "Test batterie"],
+                    "instructions": "Verifier la charge et nettoyer les grilles.",
+                    "priority": Ticket.PRIORITY_NORMAL,
+                }
+            ],
+        )
+
+        response = self.api.post(reverse("sav_api:maintenance-program-publier", args=[program.pk]), {}, format="json")
+
+        self.assertEqual(response.status_code, 201)
+        program.refresh_from_db()
+        self.assertEqual(program.status, MaintenanceProgram.STATUS_PUBLISHED)
+        maintenance_ticket = MaintenanceTicket.objects.get(program=program)
+        self.assertEqual(maintenance_ticket.status, MaintenanceTicket.STATUS_PLANNED)
+        self.assertEqual(maintenance_ticket.technician, self.technician)
+        self.assertEqual(list(maintenance_ticket.products.all()), [self.product])
+
+    def test_maintenance_closure_with_anomaly_generates_incident_ticket(self):
+        maintenance_ticket = MaintenanceTicket.objects.create(
+            organization=self.organization,
+            responsible=self.manager,
+            technician=self.technician,
+            client=self.client_user,
+            title="Entretien chambre froide",
+            service=MaintenanceProgram.SERVICE_COOLING,
+            periodicity=MaintenanceTicket.PERIOD_MONTHLY,
+            scheduled_date=timezone.localdate(),
+            status=MaintenanceTicket.STATUS_IN_PROGRESS,
+            checklist=["Controle temperature", "Nettoyage filtre"],
+            priority=Ticket.PRIORITY_HIGH,
+            location="Salle serveurs",
+            started_at=timezone.now() - timedelta(minutes=45),
+        )
+        maintenance_ticket.products.add(self.product)
+        self.api.force_authenticate(user=self.technician)
+
+        response = self.api.post(
+            reverse("sav_api:maintenance-ticket-cloturer", args=[maintenance_ticket.pk]),
+            {
+                "final_status": MaintenanceTicket.STATUS_ANOMALY,
+                "actual_started_at": (timezone.now() - timedelta(minutes=45)).isoformat(),
+                "actual_finished_at": timezone.now().isoformat(),
+                "checklist_completed": ["Controle temperature", "Nettoyage filtre"],
+                "observations": "Temperature instable detectee pendant l'entretien.",
+                "parts_used": "Filtre remplace",
+                "anomaly_detected": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        maintenance_ticket.refresh_from_db()
+        self.assertEqual(maintenance_ticket.status, MaintenanceTicket.STATUS_ANOMALY)
+        self.assertTrue(MaintenanceReport.objects.filter(maintenance_ticket=maintenance_ticket).exists())
+        self.assertIsNotNone(maintenance_ticket.anomaly_ticket)
+        self.assertEqual(maintenance_ticket.anomaly_ticket.category, Ticket.CATEGORY_BREAKDOWN)
+        self.assertTrue(maintenance_ticket.anomaly_ticket.reference.startswith("ASS-SAV-"))
 
     def test_report_export_archives_generated_report(self):
         response = self.api.get(reverse("sav_api:report-export", args=["journalier"]) + "?format=pdf")

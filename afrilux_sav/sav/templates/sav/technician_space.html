@@ -40,6 +40,11 @@
         <small>planning terrain</small>
     </article>
     <article class="stat-card">
+        <span>Maintenances</span>
+        <strong>{{ maintenance_tickets|length }}</strong>
+        <small>preventif actif</small>
+    </article>
+    <article class="stat-card">
         <span>Historique 30 jours</span>
         <strong>{{ history_30_days|length }}</strong>
         <small>interventions recentes</small>
@@ -97,7 +102,7 @@
                     <strong>Etape {{ stop.order }} · {{ stop.reference }}</strong>
                     <p>{{ stop.location|default:"Localisation non renseignee" }}</p>
                 </div>
-                <span>{{ stop.scheduled_for|date:"H:i"|default:"-" }}</span>
+                <span>{% if stop.kind == "maintenance" %}Maintenance{% else %}{{ stop.scheduled_for|date:"H:i"|default:"-" }}{% endif %}</span>
             </div>
         {% empty %}
             <p class="muted">Aucune intervention planifiee aujourd'hui.</p>
@@ -123,6 +128,37 @@
             </div>
         {% empty %}
             <p class="muted">Aucune intervention a saisir aujourd'hui.</p>
+        {% endfor %}
+    </article>
+
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Maintenance</p>
+            <h2>Planifiees J-3</h2>
+        </div>
+        {% for item in maintenance_tickets %}
+            <div class="mini-card">
+                <div class="section-head">
+                    <div>
+                        <strong>{{ item.title }}</strong>
+                        <p>{{ item.client }} Â· {{ item.scheduled_date|date:"d/m/Y" }}</p>
+                    </div>
+                    <span class="badge badge--accent">Maintenance</span>
+                </div>
+                <p>{{ item.instructions|default:"Aucune instruction particuliere."|truncatechars:140 }}</p>
+                <div class="chip-row">
+                    <span class="badge badge--{{ item.status|badge_tone }}">{{ item.get_status_display }}</span>
+                    {% if item.status != "in_progress" %}
+                        <form method="post" action="{% url 'maintenance-ticket-start' item.pk %}">
+                            {% csrf_token %}
+                            <button class="button button--ghost" type="submit">Demarrer</button>
+                        </form>
+                    {% endif %}
+                    <a class="button button--primary" href="{% url 'maintenance-ticket-close' item.pk %}">Cloturer</a>
+                </div>
+            </div>
+        {% empty %}
+            <p class="muted">Aucune maintenance planifiee dans votre pipeline.</p>
         {% endfor %}
     </article>
 

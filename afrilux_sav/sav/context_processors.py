@@ -3,6 +3,7 @@ from django.urls import reverse
 from .models import Notification, Ticket
 from .services import (
     OPEN_TICKET_STATUSES,
+    can_manage_maintenance,
     has_backoffice_access,
     has_reporting_access,
     has_technician_space_access,
@@ -44,6 +45,7 @@ def sav_shell(request):
                 "has_backoffice_access": False,
                 "has_reporting_access": False,
                 "has_management_access": False,
+                "can_manage_maintenance": False,
                 "has_technician_space_access": False,
                 "unread_notifications": 0,
                 "open_tickets": 0,
@@ -68,6 +70,7 @@ def sav_shell(request):
             "has_backoffice_access": has_backoffice_access(user) or getattr(user, "is_superuser", False),
             "has_reporting_access": has_reporting_access(user),
             "has_management_access": is_manager_user(user),
+            "can_manage_maintenance": can_manage_maintenance(user),
             "has_technician_space_access": has_technician_space_access(user),
             "unread_notifications": notifications.exclude(status=Notification.STATUS_READ).count(),
             "open_tickets": tickets.filter(status__in=OPEN_TICKET_STATUSES).count(),

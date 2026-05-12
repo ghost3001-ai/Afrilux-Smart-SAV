@@ -6,6 +6,7 @@ from .models import (
     AIActionLog,
     AuditLog,
     AutomationRule,
+    ChecklistTemplate,
     ClientContact,
     DeviceRegistration,
     EquipmentCategory,
@@ -14,6 +15,9 @@ from .models import (
     Intervention,
     InterventionMedia,
     KnowledgeArticle,
+    MaintenanceProgram,
+    MaintenanceReport,
+    MaintenanceTicket,
     Message,
     Notification,
     Organization,
@@ -90,6 +94,11 @@ class InterventionMediaInline(admin.TabularInline):
 
 class TicketAssignmentInline(admin.TabularInline):
     model = TicketAssignment
+    extra = 0
+
+
+class MaintenanceTicketInline(admin.TabularInline):
+    model = MaintenanceTicket
     extra = 0
 
 
@@ -270,6 +279,36 @@ class InterventionMediaAdmin(admin.ModelAdmin):
     list_display = ("intervention", "kind", "uploaded_by", "created_at")
     list_filter = ("organization", "kind")
     search_fields = ("intervention__ticket__reference", "uploaded_by__username", "note")
+
+
+@admin.register(MaintenanceProgram)
+class MaintenanceProgramAdmin(admin.ModelAdmin):
+    list_display = ("title", "organization", "service", "period_type", "year", "month", "quarter", "status", "responsible")
+    list_filter = ("organization", "service", "period_type", "status", "year")
+    search_fields = ("title", "responsible__username", "organization__name")
+    inlines = [MaintenanceTicketInline]
+
+
+@admin.register(MaintenanceTicket)
+class MaintenanceTicketAdmin(admin.ModelAdmin):
+    list_display = ("title", "organization", "client", "technician", "service", "scheduled_date", "status", "priority")
+    list_filter = ("organization", "service", "status", "priority", "scheduled_date")
+    search_fields = ("title", "client__username", "client__company_name", "technician__username", "location")
+    filter_horizontal = ("products",)
+
+
+@admin.register(MaintenanceReport)
+class MaintenanceReportAdmin(admin.ModelAdmin):
+    list_display = ("maintenance_ticket", "technician", "final_status", "anomaly_detected", "actual_finished_at")
+    list_filter = ("organization", "final_status", "anomaly_detected")
+    search_fields = ("maintenance_ticket__title", "technician__username", "observations", "parts_used")
+
+
+@admin.register(ChecklistTemplate)
+class ChecklistTemplateAdmin(admin.ModelAdmin):
+    list_display = ("name", "organization", "service", "equipment_category", "is_active")
+    list_filter = ("organization", "service", "is_active")
+    search_fields = ("name", "equipment_category__name")
 
 
 @admin.register(PredictiveAlert)

@@ -1,4 +1,5 @@
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth.models import AbstractUser
@@ -27,6 +28,10 @@ def _generate_unique_slug(model_cls, value, instance_pk=None, field_name="slug")
         slug = f"{base_slug}-{suffix}"
         suffix += 1
     return slug
+
+
+def _current_year():
+    return timezone.localdate().year
 
 
 class Organization(TimeStampedModel):
@@ -745,7 +750,8 @@ class Ticket(TimeStampedModel):
     @staticmethod
     def generate_reference():
         year = timezone.localdate().year
-        prefix = f"SAV-{year}-"
+        month = timezone.localdate().month
+        prefix = f"ASS-SAV-{month:02d}-{year}-"
         last_ticket = Ticket.objects.filter(reference__startswith=prefix).order_by("-reference").first()
         next_index = 1
         if last_ticket and last_ticket.reference:
@@ -1052,6 +1058,298 @@ class InterventionMedia(TimeStampedModel):
             self.organization = self.intervention.organization
         elif self.uploaded_by_id and self.uploaded_by.organization_id:
             self.organization = self.uploaded_by.organization
+        super().save(*args, **kwargs)
+
+
+class MaintenanceProgram(TimeStampedModel):
+    SERVICE_IT = "it"
+    SERVICE_CFAO = "cfao"
+    SERVICE_GENERATOR = "generator"
+    SERVICE_COOLING = "cooling"
+    SERVICE_OTHER = "other"
+
+    SERVICE_CHOICES = (
+        (SERVICE_IT, "SAV Informatique"),
+        (SERVICE_CFAO, "SAV CFAO"),
+        (SERVICE_GENERATOR, "SAV Groupe electrogene"),
+        (SERVICE_COOLING, "SAV Froid & Climatisation"),
+        (SERVICE_OTHER, "Autre service"),
+    )
+
+    PERIOD_MONTHLY = "monthly"
+    PERIOD_QUARTERLY = "quarterly"
+
+    PERIOD_CHOICES = (
+        (PERIOD_MONTHLY, "Mensuelle"),
+        (PERIOD_QUARTERLY, "Trimestrielle"),
+    )
+
+    STATUS_DRAFT = "draft"
+    STATUS_PUBLISHED = "published"
+    STATUS_ARCHIVED = "archived"
+
+    STATUS_CHOICES = (
+        (STATUS_DRAFT, "Brouillon"),
+        (STATUS_PUBLISHED, "Publie"),
+        (STATUS_ARCHIVED, "Archive"),
+    )
+
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.SET_NULL,
+        related_name="maintenance_programs",
+        null=True,
+        blank=True,
+    )
+    responsible = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="maintenance_programs",
+        limit_choices_to={"role__in": User.MANAGER_ROLES + User.ESCALATION_TARGET_ROLES},
+        null=True,
+        blank=True,
+    )
+    title = models.CharField(max_length=255, blank=True)
+    service = models.CharField(max_length=20, choices=SERVICE_CHOICES, default=SERVICE_IT)
+    period_type = models.CharField(max_length=20, choices=PERIOD_CHOICES, default=PERIOD_MONTHLY)
+    month = models.PositiveSmallIntegerField(null=True, blank=True)
+    quarter = models.PositiveSmallIntegerField(null=True, blank=True)
+    year = models.PositiveSmallIntegerField(default=_current_year)
+    task_lines = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT)
+    published_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-year", "-month", "-quarter", "-created_at"]
+
+    def __str__(self):
+        return self.title or f"{self.get_service_display()} {self.period_label}"
+
+    @property
+    def period_label(self):
+        if self.period_type == self.PERIOD_QUARTERLY:
+            return f"T{self.quarter or '-'} {self.year}"
+        return f"{self.month or '-':>02} {self.year}" if self.month else f"{self.year}"
+
+    def save(self, *args, **kwargs):
+        if self.responsible_id and self.responsible.organization_id:
+            self.organization = self.responsible.organization
+        if not self.title:
+            self.title = f"Programme {self.get_service_display()} - {self.period_label}"
+        super().save(*args, **kwargs)
+
+
+class MaintenanceTicket(TimeStampedModel):
+    PERIOD_MONTHLY = "monthly"
+    PERIOD_QUARTERLY = "quarterly"
+    PERIOD_SEMIANNUAL = "semiannual"
+    PERIOD_ANNUAL = "annual"
+
+    PERIODICITY_CHOICES = (
+        (PERIOD_MONTHLY, "Mensuelle"),
+        (PERIOD_QUARTERLY, "Trimestrielle"),
+        (PERIOD_SEMIANNUAL, "Semestrielle"),
+        (PERIOD_ANNUAL, "Annuelle"),
+    )
+
+    STATUS_PLANNED = "planned"
+    STATUS_NOTIFIED = "notified"
+    STATUS_IN_PROGRESS = "in_progress"
+    STATUS_DONE = "done"
+    STATUS_POSTPONED = "postponed"
+    STATUS_ANOMALY = "anomaly_detected"
+    STATUS_CANCELLED = "cancelled"
+
+    STATUS_CHOICES = (
+        (STATUS_PLANNED, "Planifie"),
+        (STATUS_NOTIFIED, "Notifie"),
+        (STATUS_IN_PROGRESS, "En cours"),
+        (STATUS_DONE, "Termine"),
+        (STATUS_POSTPONED, "Reporte"),
+        (STATUS_ANOMALY, "Anomalie detectee"),
+        (STATUS_CANCELLED, "Annule"),
+    )
+
+    FINAL_STATUS_CHOICES = (
+        (STATUS_DONE, "Termine"),
+        (STATUS_POSTPONED, "Reporte"),
+        (STATUS_ANOMALY, "Anomalie detectee"),
+    )
+
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.SET_NULL,
+        related_name="maintenance_tickets",
+        null=True,
+        blank=True,
+    )
+    program = models.ForeignKey(
+        MaintenanceProgram,
+        on_delete=models.SET_NULL,
+        related_name="tickets",
+        null=True,
+        blank=True,
+    )
+    responsible = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="managed_maintenance_tickets",
+        limit_choices_to={"role__in": User.MANAGER_ROLES + User.ESCALATION_TARGET_ROLES},
+        null=True,
+        blank=True,
+    )
+    technician = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="maintenance_tickets",
+        limit_choices_to={"role__in": User.ASSIGNABLE_ROLES},
+    )
+    client = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="client_maintenance_tickets",
+        limit_choices_to={"role": User.ROLE_CLIENT},
+    )
+    products = models.ManyToManyField(Product, related_name="maintenance_tickets", blank=True)
+    title = models.CharField(max_length=255)
+    service = models.CharField(max_length=20, choices=MaintenanceProgram.SERVICE_CHOICES, default=MaintenanceProgram.SERVICE_IT)
+    periodicity = models.CharField(max_length=20, choices=PERIODICITY_CHOICES, default=PERIOD_MONTHLY)
+    scheduled_date = models.DateField()
+    status = models.CharField(max_length=24, choices=STATUS_CHOICES, default=STATUS_PLANNED)
+    checklist = models.JSONField(default=list, blank=True)
+    instructions = models.TextField(blank=True)
+    priority = models.CharField(max_length=20, choices=Ticket.PRIORITY_CHOICES, default=Ticket.PRIORITY_NORMAL)
+    location = models.CharField(max_length=255, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    postponed_to = models.DateField(null=True, blank=True)
+    postponement_reason = models.TextField(blank=True)
+    notified_at = models.DateTimeField(null=True, blank=True)
+    overdue_alerted_at = models.DateTimeField(null=True, blank=True)
+    anomaly_ticket = models.ForeignKey(
+        Ticket,
+        on_delete=models.SET_NULL,
+        related_name="source_maintenance_tickets",
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        ordering = ["scheduled_date", "priority", "id"]
+
+    def __str__(self):
+        return f"{self.title} - {self.client}"
+
+    @property
+    def type_label(self):
+        return "Maintenance planifiee"
+
+    @property
+    def appears_in_technician_pipeline(self):
+        if self.status in {self.STATUS_NOTIFIED, self.STATUS_IN_PROGRESS, self.STATUS_POSTPONED}:
+            return True
+        return self.scheduled_date <= timezone.localdate() + timedelta(days=3)
+
+    @property
+    def is_late(self):
+        return self.status not in {
+            self.STATUS_DONE,
+            self.STATUS_ANOMALY,
+            self.STATUS_CANCELLED,
+        } and self.scheduled_date < timezone.localdate()
+
+    def save(self, *args, **kwargs):
+        if self.program_id and self.program.organization_id:
+            self.organization = self.program.organization
+        elif self.client_id and self.client.organization_id:
+            self.organization = self.client.organization
+        elif self.technician_id and self.technician.organization_id:
+            self.organization = self.technician.organization
+        if self.program_id and not self.responsible_id:
+            self.responsible = self.program.responsible
+        if self.program_id and not self.service:
+            self.service = self.program.service
+        super().save(*args, **kwargs)
+
+
+class MaintenanceReport(TimeStampedModel):
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.SET_NULL,
+        related_name="maintenance_reports",
+        null=True,
+        blank=True,
+    )
+    maintenance_ticket = models.OneToOneField(
+        MaintenanceTicket,
+        on_delete=models.CASCADE,
+        related_name="report",
+    )
+    technician = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="maintenance_reports",
+        limit_choices_to={"role__in": User.ASSIGNABLE_ROLES},
+    )
+    actual_started_at = models.DateTimeField()
+    actual_finished_at = models.DateTimeField()
+    checklist_completed = models.JSONField(default=list, blank=True)
+    observations = models.TextField()
+    parts_used = models.TextField(blank=True)
+    anomaly_detected = models.BooleanField(default=False)
+    photos = models.JSONField(default=list, blank=True)
+    client_signed_by = models.CharField(max_length=255, blank=True)
+    client_signature_file = models.FileField(upload_to="maintenance/signatures/%Y/%m/%d/", blank=True)
+    final_status = models.CharField(
+        max_length=24,
+        choices=MaintenanceTicket.FINAL_STATUS_CHOICES,
+        default=MaintenanceTicket.STATUS_DONE,
+    )
+
+    class Meta:
+        ordering = ["-actual_finished_at", "-created_at"]
+
+    def __str__(self):
+        return f"{self.maintenance_ticket} - {self.technician}"
+
+    def save(self, *args, **kwargs):
+        if self.maintenance_ticket_id and self.maintenance_ticket.organization_id:
+            self.organization = self.maintenance_ticket.organization
+        elif self.technician_id and self.technician.organization_id:
+            self.organization = self.technician.organization
+        super().save(*args, **kwargs)
+
+
+class ChecklistTemplate(TimeStampedModel):
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.SET_NULL,
+        related_name="checklist_templates",
+        null=True,
+        blank=True,
+    )
+    service = models.CharField(max_length=20, choices=MaintenanceProgram.SERVICE_CHOICES, default=MaintenanceProgram.SERVICE_IT)
+    equipment_category = models.ForeignKey(
+        EquipmentCategory,
+        on_delete=models.SET_NULL,
+        related_name="checklist_templates",
+        null=True,
+        blank=True,
+    )
+    name = models.CharField(max_length=255)
+    checklist = models.JSONField(default=list, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["service", "name"]
+        unique_together = [("organization", "service", "equipment_category", "name")]
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        if self.equipment_category_id and self.equipment_category.organization_id and not self.organization_id:
+            self.organization = self.equipment_category.organization
         super().save(*args, **kwargs)
 
 

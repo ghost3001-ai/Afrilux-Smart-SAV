@@ -48,6 +48,9 @@
                     {% if sav_shell.has_management_access %}
                         <a href="{% url 'planning-page' %}">Planning</a>
                     {% endif %}
+                    {% if sav_shell.can_manage_maintenance %}
+                        <a href="{% url 'maintenance-program' %}">Maintenance</a>
+                    {% endif %}
                     <a href="{% url 'product-list' %}">Produits</a>
                     {% if sav_shell.has_backoffice_access %}
                         <a href="{% url 'alert-list' %}">Alertes</a>

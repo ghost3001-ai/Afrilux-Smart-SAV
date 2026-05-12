@@ -34,7 +34,7 @@ Le projet est maintenant aligne sur les points centraux du cahier des charges AF
 
 - roles AFRILUX: Administrateur, Responsable SAV, Technicien, Agent support / Hotliner, Client, Auditeur / Direction
 - cycle ticket CDC: `new` -> `assigned` -> `in_progress` -> `waiting` -> `resolved` -> `closed` / `cancelled`
-- numerotation ticket `SAV-YYYY-NNNNN`
+- numerotation ticket `ASS-SAV-MM-YYYY-NNNNN`
 - priorites et SLA CDC: 30 min / 2 h, 1 h / 4 h, 2 h / 8 h, 4 h / 24 h
 - rapports journaliers, hebdomadaires et mensuels exportables
 - planning technicien web + API, validation client, auto-cloture 72 h et webhook email entrant
@@ -384,6 +384,16 @@ Planning technicien:
 
 - `GET /api/techniciens/<id>/planning/?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
 
+Maintenance planifiee:
+
+- `GET/POST /api/maintenance/programmes/`
+- `POST /api/maintenance/programmes/<id>/publier/`
+- `GET /api/maintenance/tickets/?technicien=<id>&status=planned`
+- `POST /api/maintenance/tickets/<id>/demarrer/`
+- `POST /api/maintenance/tickets/<id>/cloturer/`
+- `POST /api/maintenance/tickets/<id>/reporter/`
+- `GET /api/maintenance/rapports/<jour|hebdomadaire|mensuel|YYYY-MM>/`
+
 Envoi planifie des rapports:
 
 - `python3 manage.py send_scheduled_reports`
@@ -394,7 +404,7 @@ Scheduler local AFRILUX:
 
 - `python3 manage.py run_platform_scheduler --once`
 - `python3 manage.py run_platform_scheduler`
-- le scheduler local enchaine alertes SLA, auto-cloture 72h, rapports planifies et sauvegarde quotidienne
+- le scheduler local enchaine alertes SLA, alertes maintenance J-3/J+1, auto-cloture 72h, rapports planifies et sauvegarde quotidienne
 - il ne depend d'aucun cloud proprietaire obligatoire et reste compatible avec une installation locale
 
 ### 4. Utiliser le portail web

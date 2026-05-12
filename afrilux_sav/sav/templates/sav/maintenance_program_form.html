@@ -1,0 +1,33 @@
+{% extends "sav/base.html" %}
+
+{% block title %}Nouveau programme maintenance | Afrilux SAV{% endblock %}
+
+{% block content %}
+<section class="section-head section-head--page">
+    <div>
+        <p class="eyebrow">Programme de maintenance</p>
+        <h1>Creation du programme</h1>
+    </div>
+</section>
+
+<section class="card form-card">
+    <form method="post" class="form-grid form-grid--two">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+            <div class="form-errors form-errors--full">{{ form.non_field_errors }}</div>
+        {% endif %}
+        {% for field in form %}
+            <label class="field {% if field.name == 'task_lines' or field.name == 'title' %}field--full{% endif %}">
+                <span>{{ field.label }}{% if field.field.required %} <strong>*</strong>{% endif %}</span>
+                {{ field }}
+                {% if field.help_text %}<small class="field__help">{{ field.help_text }}</small>{% endif %}
+                {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
+            </label>
+        {% endfor %}
+        <div class="form-actions field--full">
+            <button class="button button--primary" type="submit">Enregistrer</button>
+            <a class="button button--ghost" href="{% url 'maintenance-program' %}">Annuler</a>
+        </div>
+    </form>
+</section>
+{% endblock %}
