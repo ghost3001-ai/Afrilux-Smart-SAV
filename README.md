@@ -420,6 +420,7 @@ Manager:
 Administrateur:
 
 - acceder a la page `Administration` pour suivre les utilisateurs, les regles SLA, les categories et les journaux d'audit
+- creer un ticket SAV depuis le portail web ou l'API pour le compte d'un client existant
 - creer et mettre a jour les comptes via `/admin/` ou l'API `/api/users/` et `/api/clients/`
 - superviser les exports et les rapports archives
 

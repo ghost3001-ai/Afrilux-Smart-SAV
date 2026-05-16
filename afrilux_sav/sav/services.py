@@ -85,6 +85,7 @@ ESCALATION_TARGET_ROLE_MAP = {
 }
 
 TICKET_CREATOR_ROLES = {
+    User.ROLE_ADMIN,
     User.ROLE_CLIENT,
     User.ROLE_HEAD_SAV,
 }
@@ -180,7 +181,7 @@ def can_create_ticket(user):
     return bool(
         user
         and user.is_authenticated
-        and getattr(user, "role", "") in TICKET_CREATOR_ROLES
+        and (user.is_superuser or getattr(user, "role", "") in TICKET_CREATOR_ROLES)
     )
 
 

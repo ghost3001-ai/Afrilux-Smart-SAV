@@ -1823,6 +1823,69 @@ class SavPlatformTests(TestCase):
         self.assertEqual(created_ticket.assigned_agent, self.agent)
         self.assertEqual(created_ticket.status, Ticket.STATUS_ASSIGNED)
 
+    def test_admin_can_create_ticket_via_web_portal(self):
+        admin_user = User.objects.create_user(
+            username="admin_ticket_create",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_ADMIN,
+            is_staff=True,
+        )
+        self.client.force_login(admin_user)
+
+        response = self.client.post(
+            reverse("ticket-create"),
+            {
+                "client_mode": TicketCreateForm.CLIENT_MODE_EXISTING,
+                "existing_client_email": self.client_user.email,
+                "product_label": "Copieur accueil",
+                "title": "Ticket cree par administrateur",
+                "description": "Creation de ticket depuis le centre administrateur.",
+                "category": Ticket.CATEGORY_BREAKDOWN,
+                "channel": Ticket.CHANNEL_PHONE,
+                "status": Ticket.STATUS_NEW,
+                "priority": Ticket.PRIORITY_HIGH,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        created_ticket = Ticket.objects.get(title="Ticket cree par administrateur")
+        self.assertEqual(created_ticket.client, self.client_user)
+        self.assertEqual(created_ticket.created_by, admin_user)
+        self.assertEqual(created_ticket.organization, self.organization)
+        self.assertTrue(created_ticket.sla_deadline)
+
+    def test_admin_can_create_ticket_via_api(self):
+        admin_user = User.objects.create_user(
+            username="admin_ticket_api",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_ADMIN,
+            is_staff=True,
+        )
+        self.api.force_authenticate(user=admin_user)
+
+        response = self.api.post(
+            reverse("sav_api:ticket-list"),
+            {
+                "client": self.client_user.pk,
+                "product_label": "Groupe electrogene 20kVA",
+                "title": "Ticket API administrateur",
+                "description": "Creation de ticket administrateur via API REST.",
+                "category": Ticket.CATEGORY_BREAKDOWN,
+                "channel": Ticket.CHANNEL_PHONE,
+                "status": Ticket.STATUS_NEW,
+                "priority": Ticket.PRIORITY_NORMAL,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        created_ticket = Ticket.objects.get(title="Ticket API administrateur")
+        self.assertEqual(created_ticket.client, self.client_user)
+        self.assertEqual(created_ticket.created_by, admin_user)
+        self.assertTrue(created_ticket.reference.startswith("ASS-SAV-"))
+
     def test_internal_user_gets_error_when_existing_client_email_is_unknown(self):
         self.client.force_login(self.manager)
 
