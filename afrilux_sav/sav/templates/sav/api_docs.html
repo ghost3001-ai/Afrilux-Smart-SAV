@@ -59,6 +59,15 @@
                         <tr><td><code>/api/techniciens/&lt;id&gt;/planning/</code></td><td>GET</td><td>Planning technicien</td></tr>
                         <tr><td><code>/api/rapports/journalier/</code></td><td>GET</td><td>Rapport journalier JSON</td></tr>
                         <tr><td><code>/api/rapports/export/&lt;type&gt;/</code></td><td>GET</td><td>Export PDF / XLSX / CSV</td></tr>
+                        <tr><td><code>/api/maintenance/programmes/</code></td><td>GET, POST</td><td>Programmes de maintenance planifiee</td></tr>
+                        <tr><td><code>/api/maintenance/programmes/&lt;id&gt;/publier/</code></td><td>POST</td><td>Publication et generation des tickets planifies</td></tr>
+                        <tr><td><code>/api/maintenance/tickets/&lt;id&gt;/accuser-reception/</code></td><td>POST</td><td>Accuse reception technicien</td></tr>
+                        <tr><td><code>/api/maintenance/tickets/&lt;id&gt;/demarrer/</code></td><td>POST</td><td>Demarrage technicien</td></tr>
+                        <tr><td><code>/api/maintenance/tickets/&lt;id&gt;/cloturer/</code></td><td>POST</td><td>Cloture avec rapport, photos et anomalie eventuelle</td></tr>
+                        <tr><td><code>/api/maintenance/tickets/&lt;id&gt;/valider/</code></td><td>POST</td><td>Validation responsable du rapport</td></tr>
+                        <tr><td><code>/api/maintenance/tickets/&lt;id&gt;/reporter/</code></td><td>POST</td><td>Report avec justification obligatoire</td></tr>
+                        <tr><td><code>/api/maintenance/tickets/&lt;id&gt;/annuler/</code></td><td>POST</td><td>Annulation avec motif obligatoire</td></tr>
+                        <tr><td><code>/api/maintenance/rapports/&lt;periode&gt;/?format=pdf|xlsx|csv</code></td><td>GET</td><td>Bilan maintenance et export</td></tr>
                     </tbody>
                 </table>
             </div>

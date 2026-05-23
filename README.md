@@ -46,7 +46,7 @@ Le projet est maintenant aligne sur les points centraux du cahier des charges AF
 
 Le backend est prepare pour **PostgreSQL** en priorite. SQLite reste un mode de secours local si aucune variable `DJANGO_DB_*` n'est definie.
 
-Demarrage:
+Demarrage Linux/macOS ou shell Render:
 
 ```bash
 cd afrilux_sav
@@ -60,9 +60,27 @@ python3 manage.py bootstrap_platform \
   --city=Douala \
   --country=Cameroun \
   --admin-username=aziz \
-  --admin-email=johnarthurclinton@gmail.com \
-  --admin-password='Charlotte2.0'
+  --admin-email=admin@afrilux.local \
+  --admin-password='ChangeMe123!'
 python3 manage.py runserver
+```
+
+Demarrage Windows PowerShell depuis la racine du depot:
+
+```powershell
+python afrilux_sav\manage.py migrate
+python afrilux_sav\manage.py purge_demo_data --execute
+python afrilux_sav\manage.py bootstrap_platform `
+  --organization-name "AFRILUX SMART SOLUTIONS" `
+  --organization-slug afrilux-smart `
+  --support-email siege@afriluxsa.local `
+  --support-phone +237691674993 `
+  --city Douala `
+  --country Cameroun `
+  --admin-username aziz `
+  --admin-email admin@afrilux.local `
+  --admin-password "ChangeMe123!"
+python afrilux_sav\manage.py runserver
 ```
 
 Acces utiles:
@@ -297,8 +315,8 @@ python3 manage.py bootstrap_platform \
   --city=Douala \
   --country=Cameroun \
   --admin-username=aziz \
-  --admin-email=johnarthurclinton@gmail.com \
-  --admin-password='Charlotte2.0'
+  --admin-email=admin@afrilux.local \
+  --admin-password='ChangeMe123!'
 python3 manage.py runserver
 ```
 
@@ -390,9 +408,12 @@ Maintenance planifiee:
 - `POST /api/maintenance/programmes/<id>/publier/`
 - `GET /api/maintenance/tickets/?technicien=<id>&status=planned`
 - `POST /api/maintenance/tickets/<id>/demarrer/`
+- `POST /api/maintenance/tickets/<id>/accuser-reception/`
 - `POST /api/maintenance/tickets/<id>/cloturer/`
+- `POST /api/maintenance/tickets/<id>/valider/`
 - `POST /api/maintenance/tickets/<id>/reporter/`
-- `GET /api/maintenance/rapports/<jour|hebdomadaire|mensuel|YYYY-MM>/`
+- `POST /api/maintenance/tickets/<id>/annuler/`
+- `GET /api/maintenance/rapports/<jour|hebdomadaire|mensuel|YYYY-MM>/?format=pdf|xlsx|csv`
 
 Envoi planifie des rapports:
 

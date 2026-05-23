@@ -53,7 +53,59 @@ Ce choix est intentionnel sur Render:
 
 Si vous restez sur l'URL `onrender.com`, l'application sait aussi utiliser les variables Render injectees automatiquement pour l'URL publique et l'host.
 
-## Bootstrap initial
+## Correction rapide: DJANGO_SECRET_KEY
+
+Si Render affiche:
+
+```text
+django.core.exceptions.ImproperlyConfigured: DJANGO_SECRET_KEY doit etre defini...
+```
+
+le service lance Django avec `DJANGO_DEBUG=false`, mais la variable `DJANGO_SECRET_KEY` n'est pas presente dans l'environnement effectif du service.
+
+Avec la blueprint, `render.yaml` declare deja:
+
+```yaml
+- key: DJANGO_SECRET_KEY
+  generateValue: true
+```
+
+Si l'erreur persiste, corrigez le service actif dans Render:
+
+1. Ouvrir le service `afrilux-sav-web`.
+2. Aller dans `Environment`.
+3. Ajouter `DJANGO_SECRET_KEY` avec une valeur secrete longue et aleatoire, ou utiliser la generation de secret Render si disponible.
+4. Verifier que `DJANGO_DEBUG=false`.
+5. Sauvegarder puis relancer un deploy.
+
+Cette variable ne doit pas etre commitee dans le depot. En local, elle peut rester dans `afrilux_sav/.env`.
+
+## Bootstrap initial sans Shell
+
+Vous pouvez creer ou mettre a jour le compte admin uniquement avec les variables d'environnement Render.
+
+Le fichier `render.yaml` declare deja les variables de bootstrap non sensibles. Il declare aussi `BOOTSTRAP_ADMIN_PASSWORD` avec `sync: false` pour ne pas committer le mot de passe admin.
+
+Si vous creez la blueprint pour la premiere fois, Render vous demandera la valeur de `BOOTSTRAP_ADMIN_PASSWORD`.
+
+Si le service Render existe deja, ajoutez ou mettez a jour manuellement dans Render > `afrilux-sav-web` > `Environment`:
+
+```text
+BOOTSTRAP_ADMIN_PASSWORD=Charlotte2.0
+```
+
+Puis lancez un redeploy. Au demarrage, le conteneur execute automatiquement:
+
+1. `migrate`
+2. `bootstrap_platform`
+3. `collectstatic`
+4. le serveur web
+
+La commande `bootstrap_platform` est idempotente: si le compte `aziz` existe deja, il est mis a jour et son mot de passe est remplace par `BOOTSTRAP_ADMIN_PASSWORD`.
+
+Apres un deploy reussi, il est recommande de passer `DJANGO_BOOTSTRAP_ON_STARTUP=false` ou de supprimer `BOOTSTRAP_ADMIN_PASSWORD`, puis de redeployer. Cela evite de remettre le meme mot de passe a chaque redemarrage.
+
+## Bootstrap initial avec Shell
 
 Apres le premier deploiement, lancer une seule fois dans le shell Render:
 
@@ -69,6 +121,44 @@ python manage.py bootstrap_platform \
   --admin-username=aziz \
   --admin-email=admin@afrilux.local \
   --admin-password='ChangeMe123!'
+```
+
+Le shell Render est un shell Linux: `python` est disponible et le caractere `\` continue une commande sur plusieurs lignes.
+
+## Commandes locales Windows PowerShell
+
+Sur Windows, utilisez `python` au lieu de `python3`. PowerShell n'utilise pas `\` comme continuation de ligne; utilisez un backtick `` ` `` ou gardez la commande sur une seule ligne.
+
+Depuis la racine du depot:
+
+```powershell
+python afrilux_sav\manage.py migrate
+python afrilux_sav\manage.py purge_demo_data --execute
+python afrilux_sav\manage.py bootstrap_platform `
+  --organization-name "AFRILUX SMART SOLUTIONS" `
+  --organization-slug afrilux-smart `
+  --support-email siege@afriluxsa.local `
+  --support-phone +237698762455 `
+  --city Douala `
+  --country Cameroun `
+  --admin-username aziz `
+  --admin-email johnarthurclinton@afrilux.local `
+  --admin-password "Charlotte2.0"
+python afrilux_sav\manage.py runserver
+```
+
+Si vous voulez utiliser la venv sans activer les scripts PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r afrilux_sav\requirements.txt
+.\.venv\Scripts\python.exe afrilux_sav\manage.py migrate
+```
+
+Si vous preferez activer la venv dans la session courante:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
 ```
 
 ## Notes d'exploitation

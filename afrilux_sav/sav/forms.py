@@ -25,8 +25,10 @@ from .services import (
     ESCALATION_TARGET_CFAO_MANAGER,
     ESCALATION_TARGET_CFAO_WORKS,
     ESCALATION_TARGET_CHIEF_TECHNICIAN,
-    ESCALATION_TARGET_HVAC_MANAGER,
+    ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV,
+    ESCALATION_TARGET_HEAD_SAV,
     ESCALATION_TARGET_ROLE_MAP,
+    ESCALATION_TARGET_SUPERVISOR,
     compute_ticket_sla_deadline,
     provision_client_account,
 )
@@ -284,10 +286,11 @@ class TicketCreateForm(TicketForm):
         label="Escalade initiale si technicien inconnu",
         choices=(
             ("", "Ne pas escalader maintenant"),
-            (ESCALATION_TARGET_CFAO_MANAGER, "Responsable CFAO / Projet Technique CFAO"),
-            (ESCALATION_TARGET_CFAO_WORKS, "Conducteur de travaux CFAO"),
-            (ESCALATION_TARGET_HVAC_MANAGER, "Responsable Froid et climatisation"),
-            (ESCALATION_TARGET_CHIEF_TECHNICIAN, "Chef Technicien Froid & Climatisation"),
+            (ESCALATION_TARGET_CFAO_MANAGER, "responsable CFAO"),
+            (ESCALATION_TARGET_CFAO_WORKS, "conducteur de travaux CFAO"),
+            (ESCALATION_TARGET_CHIEF_TECHNICIAN, "chef technicien froid & climatisation"),
+            (ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV, "expert puis Responsable SAV"),
+            (ESCALATION_TARGET_HEAD_SAV, "Responsable SAV"),
         ),
         help_text="A utiliser quand le Responsable SAV ne sait pas encore quel technicien affecter.",
     )
@@ -546,13 +549,17 @@ class MessageForm(forms.ModelForm):
 class TicketEscalationForm(forms.Form):
     TARGET_CFAO_MANAGER = ESCALATION_TARGET_CFAO_MANAGER
     TARGET_CFAO_WORKS = ESCALATION_TARGET_CFAO_WORKS
-    TARGET_HVAC_MANAGER = ESCALATION_TARGET_HVAC_MANAGER
     TARGET_CHIEF_TECHNICIAN = ESCALATION_TARGET_CHIEF_TECHNICIAN
+    TARGET_SUPERVISOR = ESCALATION_TARGET_SUPERVISOR
+    TARGET_HEAD_SAV = ESCALATION_TARGET_HEAD_SAV
+    TARGET_EXPERT_THEN_HEAD_SAV = ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV
     TARGET_CHOICES = (
-        (TARGET_CFAO_MANAGER, "Vers Responsable CFAO / Projet Technique CFAO"),
-        (TARGET_CFAO_WORKS, "Vers Conducteur de travaux CFAO"),
-        (TARGET_HVAC_MANAGER, "Vers Responsable Froid et climatisation"),
-        (TARGET_CHIEF_TECHNICIAN, "Vers Chef Technicien Froid & Climatisation"),
+        (TARGET_CFAO_MANAGER, "Vers responsable CFAO"),
+        (TARGET_CFAO_WORKS, "Vers conducteur de travaux CFAO"),
+        (TARGET_CHIEF_TECHNICIAN, "Vers chef technicien froid & climatisation"),
+        (TARGET_SUPERVISOR, "Vers superviseur"),
+        (TARGET_EXPERT_THEN_HEAD_SAV, "Vers expert puis Responsable SAV"),
+        (TARGET_HEAD_SAV, "Vers Responsable SAV"),
     )
 
     target = forms.ChoiceField(
@@ -819,6 +826,15 @@ class MaintenanceProgramForm(forms.ModelForm):
             raise ValidationError("Ajoutez au moins une ligne de maintenance.")
         return task_lines
 
+    def clean(self):
+        cleaned_data = super().clean()
+        period_type = cleaned_data.get("period_type")
+        if period_type == MaintenanceProgram.PERIOD_MONTHLY and not cleaned_data.get("month"):
+            self.add_error("month", "Le mois est obligatoire pour un programme mensuel.")
+        if period_type == MaintenanceProgram.PERIOD_QUARTERLY and not cleaned_data.get("quarter"):
+            self.add_error("quarter", "Le trimestre est obligatoire pour un programme trimestriel.")
+        return cleaned_data
+
 
 class MaintenanceClosureForm(forms.Form):
     final_status = forms.ChoiceField(label="Nouveau statut", choices=MaintenanceTicket.FINAL_STATUS_CHOICES)
@@ -837,7 +853,21 @@ class MaintenanceClosureForm(forms.Form):
     )
     observations = forms.CharField(label="Observations techniques", widget=forms.Textarea(attrs={"rows": 4}))
     parts_used = forms.CharField(label="Pieces / consommables utilises", required=False, widget=forms.Textarea(attrs={"rows": 2}))
-    anomaly_detected = forms.BooleanField(label="Anomalie detectee ?", required=False)
+    anomaly_detected = forms.TypedChoiceField(
+        label="Anomalie detectee ?",
+        choices=((False, "Non"), (True, "Oui")),
+        coerce=lambda value: str(value).lower() in {"true", "1", "oui", "yes"},
+        widget=forms.RadioSelect,
+        initial=False,
+    )
+    maintenance_photos = MultipleFileField(
+        required=False,
+        label="Photos jointes",
+        help_text="Photos de l'equipement avant/apres ou de l'anomalie constatee.",
+        widget=MultipleFileInput(attrs={"accept": "image/*"}),
+    )
+    client_signed_by = forms.CharField(label="Signature client par", required=False, max_length=255)
+    client_signature_file = forms.FileField(label="Signature client scannee", required=False)
     new_date = forms.DateField(label="Nouvelle date si report", required=False, widget=forms.DateInput(attrs={"type": "date"}))
     postponement_reason = forms.CharField(
         label="Justification du report",
@@ -875,6 +905,27 @@ class MaintenanceClosureForm(forms.Form):
             if not (cleaned_data.get("postponement_reason") or "").strip():
                 self.add_error("postponement_reason", "La justification est obligatoire pour un report.")
         return cleaned_data
+
+    def clean_maintenance_photos(self):
+        files = self.cleaned_data.get("maintenance_photos", [])
+        if len(files) > 5:
+            raise ValidationError("Vous pouvez joindre au maximum 5 photos par rapport de maintenance.")
+        for uploaded in files:
+            validate_ticket_attachment_file(uploaded)
+        return files
+
+    def clean_client_signature_file(self):
+        uploaded = self.cleaned_data.get("client_signature_file")
+        if uploaded:
+            return validate_ticket_attachment_file(uploaded)
+        return uploaded
+
+
+class MaintenanceCancelForm(forms.Form):
+    reason = forms.CharField(
+        label="Motif d'annulation",
+        widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Client inaccessible, contrat suspendu, intervention annulee..."}),
+    )
 
 
 class ProductForm(forms.ModelForm):

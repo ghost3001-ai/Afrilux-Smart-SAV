@@ -10,6 +10,124 @@
     </div>
 </section>
 
+<section class="card" data-maintenance-builder>
+    <div class="section-head">
+        <div>
+            <p class="eyebrow">Lignes du programme</p>
+            <h2>Ajout rapide</h2>
+        </div>
+    </div>
+    <div class="form-grid form-grid--two">
+        <label class="field field--full">
+            <span>Intitule de la tache</span>
+            <input type="text" data-maintenance-field="title" placeholder="Entretien climatiseur salle serveurs">
+        </label>
+        <label class="field">
+            <span>Technicien assigne</span>
+            <select data-maintenance-field="technician_id">
+                <option value="">Choisir un technicien</option>
+                {% for technician in maintenance_technicians %}
+                    <option value="{{ technician.id }}">#{{ technician.id }} - {{ technician }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Client / site concerne</span>
+            <select data-maintenance-field="client_id">
+                <option value="">Choisir un client</option>
+                {% for client in maintenance_clients %}
+                    <option value="{{ client.id }}">#{{ client.id }} - {{ client.company_name|default:client }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Date d'echeance prevue</span>
+            <input type="date" data-maintenance-field="scheduled_date">
+        </label>
+        <label class="field">
+            <span>Periodicite</span>
+            <select data-maintenance-field="periodicity">
+                {% for value, label in periodicity_choices %}
+                    <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Priorite</span>
+            <select data-maintenance-field="priority">
+                <option value="normal">Normale</option>
+                <option value="low">Basse</option>
+                <option value="high">Haute</option>
+                <option value="critical">Critique</option>
+            </select>
+        </label>
+        <label class="field">
+            <span>Equipement(s)</span>
+            <select data-maintenance-field="product_ids" multiple size="5">
+                {% for product in maintenance_products %}
+                    <option value="{{ product.id }}">#{{ product.id }} - {{ product.name }} / {{ product.serial_number }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field field--full">
+            <span>Instructions / check-list</span>
+            <textarea data-maintenance-field="checklist" rows="4" placeholder="Controle visuel&#10;Nettoyage&#10;Test fonctionnement"></textarea>
+        </label>
+        <label class="field field--full">
+            <span>Instructions complementaires</span>
+            <textarea data-maintenance-field="instructions" rows="2"></textarea>
+        </label>
+        <div class="form-actions field--full">
+            <button class="button button--ghost" type="button" data-maintenance-add-line>Ajouter la ligne</button>
+        </div>
+    </div>
+</section>
+
+<section class="three-col">
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Techniciens</p>
+            <h2>IDs assignables</h2>
+        </div>
+        {% for technician in maintenance_technicians %}
+            <div class="list-row">
+                <strong>#{{ technician.id }} - {{ technician }}</strong>
+                <span>{{ technician.get_role_display }}</span>
+            </div>
+        {% empty %}
+            <p class="muted">Aucun technicien disponible.</p>
+        {% endfor %}
+    </article>
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Clients</p>
+            <h2>IDs clients</h2>
+        </div>
+        {% for client in maintenance_clients %}
+            <div class="list-row">
+                <strong>#{{ client.id }} - {{ client.company_name|default:client }}</strong>
+                <span>{{ client.email|default:client.username }}</span>
+            </div>
+        {% empty %}
+            <p class="muted">Aucun client actif.</p>
+        {% endfor %}
+    </article>
+    <article class="card">
+        <div class="section-head">
+            <p class="eyebrow">Equipements</p>
+            <h2>IDs produits</h2>
+        </div>
+        {% for product in maintenance_products %}
+            <div class="list-row">
+                <strong>#{{ product.id }} - {{ product.name }}</strong>
+                <span>{{ product.serial_number }} / {{ product.client }}</span>
+            </div>
+        {% empty %}
+            <p class="muted">Aucun equipement actif.</p>
+        {% endfor %}
+    </article>
+</section>
+
 <section class="card form-card">
     <form method="post" class="form-grid form-grid--two">
         {% csrf_token %}

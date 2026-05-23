@@ -246,6 +246,90 @@ function initializePlanningBoard() {
   });
 }
 
+function initializeMaintenanceProgramBuilder() {
+  const builder = document.querySelector("[data-maintenance-builder]");
+  const target = document.querySelector("textarea[name='task_lines']");
+  if (!builder || !target) {
+    return;
+  }
+
+  const field = (name) => builder.querySelector(`[data-maintenance-field='${name}']`);
+  const scheduledDate = field("scheduled_date");
+  if (scheduledDate && !scheduledDate.value) {
+    scheduledDate.value = new Date().toISOString().slice(0, 10);
+  }
+
+  const readLines = () => {
+    try {
+      const parsed = JSON.parse(target.value || "[]");
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_error) {
+      return [];
+    }
+  };
+
+  const readChecklist = () => {
+    const value = field("checklist")?.value || "";
+    return value
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  };
+
+  const readSelectedProducts = () => {
+    const productField = field("product_ids");
+    if (!productField) {
+      return [];
+    }
+    return Array.from(productField.selectedOptions)
+      .map((option) => Number(option.value))
+      .filter(Boolean);
+  };
+
+  const clearBuilder = () => {
+    ["title", "instructions", "checklist"].forEach((name) => {
+      const input = field(name);
+      if (input) {
+        input.value = "";
+      }
+    });
+    const products = field("product_ids");
+    if (products) {
+      Array.from(products.options).forEach((option) => {
+        option.selected = false;
+      });
+    }
+  };
+
+  const addButton = builder.querySelector("[data-maintenance-add-line]");
+  addButton?.addEventListener("click", () => {
+    const title = (field("title")?.value || "").trim();
+    const technicianId = Number(field("technician_id")?.value || 0);
+    const clientId = Number(field("client_id")?.value || 0);
+    const dateValue = (field("scheduled_date")?.value || "").trim();
+    if (!title || !technicianId || !clientId || !dateValue) {
+      alert("Renseignez l'intitule, le technicien, le client et la date prevue.");
+      return;
+    }
+
+    const lines = readLines();
+    lines.push({
+      title,
+      technician_id: technicianId,
+      client_id: clientId,
+      product_ids: readSelectedProducts(),
+      scheduled_date: dateValue,
+      periodicity: field("periodicity")?.value || "monthly",
+      checklist: readChecklist(),
+      instructions: (field("instructions")?.value || "").trim(),
+      priority: field("priority")?.value || "normal",
+    });
+    target.value = JSON.stringify(lines, null, 2);
+    clearBuilder();
+    target.focus();
+  });
+}
+
 function initializeSupportChat() {
   const root = document.querySelector("[data-support-chat]");
   if (!root) {
@@ -391,5 +475,6 @@ document.addEventListener("DOMContentLoaded", () => {
   initializeTicketClientMode();
   initializeDashboardCharts();
   initializePlanningBoard();
+  initializeMaintenanceProgramBuilder();
   initializeSupportChat();
 });

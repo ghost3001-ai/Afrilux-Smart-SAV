@@ -26,6 +26,7 @@ from .models import (
     Intervention,
     MaintenanceProgram,
     MaintenanceReport,
+    MaintenanceReportPhoto,
     MaintenanceTicket,
     Message,
     Notification,
@@ -41,6 +42,7 @@ from .models import (
     User,
     WorkflowExecution,
 )
+from .services import dispatch_maintenance_operational_notifications
 
 
 class SavPlatformTests(TestCase):
@@ -2471,6 +2473,153 @@ class SavPlatformTests(TestCase):
         self.assertIsNotNone(maintenance_ticket.anomaly_ticket)
         self.assertEqual(maintenance_ticket.anomaly_ticket.category, Ticket.CATEGORY_BREAKDOWN)
         self.assertTrue(maintenance_ticket.anomaly_ticket.reference.startswith("ASS-SAV-"))
+
+    def test_maintenance_ticket_acknowledge_and_cancel_actions(self):
+        maintenance_ticket = MaintenanceTicket.objects.create(
+            organization=self.organization,
+            responsible=self.manager,
+            technician=self.technician,
+            client=self.client_user,
+            title="Controle trimestriel groupe",
+            service=MaintenanceProgram.SERVICE_GENERATOR,
+            periodicity=MaintenanceTicket.PERIOD_QUARTERLY,
+            scheduled_date=timezone.localdate() + timedelta(days=3),
+            checklist=["Controle huile"],
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+
+        self.api.force_authenticate(user=self.technician)
+        ack_response = self.api.post(reverse("sav_api:maintenance-ticket-accuser-reception", args=[maintenance_ticket.pk]), {})
+
+        self.assertEqual(ack_response.status_code, 200)
+        maintenance_ticket.refresh_from_db()
+        self.assertEqual(maintenance_ticket.status, MaintenanceTicket.STATUS_NOTIFIED)
+        self.assertIsNotNone(maintenance_ticket.acknowledged_at)
+
+        self.api.force_authenticate(user=self.manager)
+        cancel_response = self.api.post(
+            reverse("sav_api:maintenance-ticket-annuler", args=[maintenance_ticket.pk]),
+            {"reason": "Client inaccessible et intervention reportee hors periode."},
+            format="json",
+        )
+
+        self.assertEqual(cancel_response.status_code, 200)
+        maintenance_ticket.refresh_from_db()
+        self.assertEqual(maintenance_ticket.status, MaintenanceTicket.STATUS_CANCELLED)
+        self.assertIn("Client inaccessible", maintenance_ticket.cancellation_reason)
+        self.assertIsNotNone(maintenance_ticket.cancelled_at)
+
+    def test_maintenance_operational_notifications_cover_j_minus_3_and_j_plus_1(self):
+        upcoming = MaintenanceTicket.objects.create(
+            organization=self.organization,
+            responsible=self.manager,
+            technician=self.technician,
+            client=self.client_user,
+            title="Maintenance J-3",
+            service=MaintenanceProgram.SERVICE_IT,
+            periodicity=MaintenanceTicket.PERIOD_MONTHLY,
+            scheduled_date=timezone.localdate() + timedelta(days=3),
+            checklist=["Controle"],
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+        overdue = MaintenanceTicket.objects.create(
+            organization=self.organization,
+            responsible=self.manager,
+            technician=self.technician,
+            client=self.client_user,
+            title="Maintenance non realisee",
+            service=MaintenanceProgram.SERVICE_IT,
+            periodicity=MaintenanceTicket.PERIOD_MONTHLY,
+            scheduled_date=timezone.localdate() - timedelta(days=1),
+            checklist=["Controle"],
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+
+        results = dispatch_maintenance_operational_notifications(
+            organization=self.organization,
+            now=timezone.now(),
+        )
+        upcoming.refresh_from_db()
+        overdue.refresh_from_db()
+
+        self.assertEqual(results["j_minus_3"], 1)
+        self.assertEqual(results["not_realized_j_plus_1"], 1)
+        self.assertEqual(upcoming.status, MaintenanceTicket.STATUS_NOTIFIED)
+        self.assertIsNotNone(upcoming.notified_at)
+        self.assertIsNotNone(overdue.overdue_alerted_at)
+        self.assertTrue(
+            Notification.objects.filter(recipient=self.technician, event_type="maintenance_j_minus_3").exists()
+        )
+        self.assertTrue(
+            Notification.objects.filter(recipient=self.manager, event_type="maintenance_not_realized_j_plus_1").exists()
+        )
+
+    def test_maintenance_closure_stores_photos_and_generates_pdf(self):
+        maintenance_ticket = MaintenanceTicket.objects.create(
+            organization=self.organization,
+            responsible=self.manager,
+            technician=self.technician,
+            client=self.client_user,
+            title="Entretien preventif copieur",
+            service=MaintenanceProgram.SERVICE_IT,
+            periodicity=MaintenanceTicket.PERIOD_MONTHLY,
+            scheduled_date=timezone.localdate(),
+            status=MaintenanceTicket.STATUS_IN_PROGRESS,
+            checklist=["Nettoyage", "Test impression"],
+            priority=Ticket.PRIORITY_NORMAL,
+            started_at=timezone.now() - timedelta(minutes=30),
+        )
+        self.api.force_authenticate(user=self.technician)
+        photo = SimpleUploadedFile("maintenance-photo.png", b"fake image content", content_type="image/png")
+
+        response = self.api.post(
+            reverse("sav_api:maintenance-ticket-cloturer", args=[maintenance_ticket.pk]),
+            {
+                "final_status": MaintenanceTicket.STATUS_DONE,
+                "actual_started_at": (timezone.now() - timedelta(minutes=30)).isoformat(),
+                "actual_finished_at": timezone.now().isoformat(),
+                "checklist_completed": json.dumps(["Nettoyage", "Test impression"]),
+                "observations": "Maintenance realisee sans anomalie.",
+                "anomaly_detected": "false",
+                "photos": photo,
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        maintenance_ticket.refresh_from_db()
+        report = maintenance_ticket.report
+        self.assertEqual(maintenance_ticket.status, MaintenanceTicket.STATUS_DONE)
+        self.assertTrue(bool(report.report_pdf))
+        self.assertEqual(MaintenanceReportPhoto.objects.filter(report=report).count(), 1)
+        self.assertFalse(Ticket.objects.filter(title__icontains="Anomalie maintenance").exists())
+
+        self.api.force_authenticate(user=self.manager)
+        validate_response = self.api.post(reverse("sav_api:maintenance-ticket-valider", args=[maintenance_ticket.pk]), {})
+        self.assertEqual(validate_response.status_code, 200)
+        report.refresh_from_db()
+        self.assertEqual(report.validated_by, self.manager)
+        self.assertIsNotNone(report.validated_at)
+
+    def test_maintenance_period_report_exports_pdf(self):
+        MaintenanceTicket.objects.create(
+            organization=self.organization,
+            responsible=self.manager,
+            technician=self.technician,
+            client=self.client_user,
+            title="Entretien export PDF",
+            service=MaintenanceProgram.SERVICE_IT,
+            periodicity=MaintenanceTicket.PERIOD_MONTHLY,
+            scheduled_date=timezone.localdate(),
+            status=MaintenanceTicket.STATUS_DONE,
+            checklist=["Controle"],
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+
+        response = self.api.get(reverse("sav_api:maintenance-period-report", args=["mensuel"]) + "?format=pdf")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
 
     def test_report_export_archives_generated_report(self):
         response = self.api.get(reverse("sav_api:report-export", args=["journalier"]) + "?format=pdf")

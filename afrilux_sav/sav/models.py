@@ -97,6 +97,7 @@ class User(AbstractUser):
     ROLE_CHOICES = (
         (ROLE_ADMIN, "Administrateur"),
         (ROLE_HEAD_SAV, "Responsable SAV"),
+        (ROLE_SUPPORT, "Agent support / Hotliner"),
         (ROLE_CFAO_MANAGER, "Responsable CFAO / Responsable de Projet Technique CFAO"),
         (ROLE_CFAO_WORKS, "Conducteur de travaux CFAO"),
         (ROLE_HVAC_MANAGER, "Responsable Froid et climatisation / Responsable technique froid"),
@@ -107,7 +108,6 @@ class User(AbstractUser):
     )
 
     LEGACY_ROLE_CHOICES = (
-        (ROLE_SUPPORT, "Agent support / Hotliner"),
         (ROLE_EXPERT, "Chef technicien / Expert (Niveau 3)"),
         (ROLE_SOFTWARE_OWNER, "Gestionnaire principal du logiciel"),
         (ROLE_SUPERVISOR, "Superviseur / Team Leader"),
@@ -119,10 +119,24 @@ class User(AbstractUser):
         (ROLE_MANAGER, "Responsable SAV (legacy)"),
     )
 
-    SUPPORT_ROLE_ALIASES = ()
-    STANDARD_SUPPORT_ROLES = ()
-    SPECIAL_SUPPORT_ROLES = ()
+    SUPPORT_ROLE_ALIASES = (
+        ROLE_SUPPORT,
+        ROLE_AGENT,
+        ROLE_DISPATCHER,
+        ROLE_VIP_SUPPORT,
+    )
+    STANDARD_SUPPORT_ROLES = (
+        ROLE_SUPPORT,
+        ROLE_AGENT,
+        ROLE_DISPATCHER,
+    )
+    SPECIAL_SUPPORT_ROLES = (
+        ROLE_VIP_SUPPORT,
+    )
     FRONTLINE_ROLES = (*SUPPORT_ROLE_ALIASES,)
+    SUPERVISOR_ROLES = (
+        ROLE_SUPERVISOR,
+    )
     ESCALATION_TARGET_ROLES = (
         ROLE_CFAO_MANAGER,
         ROLE_CFAO_WORKS,
@@ -133,6 +147,7 @@ class User(AbstractUser):
         ROLE_TECHNICIAN,
     )
     TECHNICAL_ROLES = (
+        *SUPERVISOR_ROLES,
         *ESCALATION_TARGET_ROLES,
         *FIELD_TECHNICIAN_ROLES,
     )
@@ -161,10 +176,15 @@ class User(AbstractUser):
         ROLE_MANAGER,
     )
     ASSIGNABLE_ROLES = (
+        *FRONTLINE_ROLES,
+        *SUPERVISOR_ROLES,
         *ESCALATION_TARGET_ROLES,
         *FIELD_TECHNICIAN_ROLES,
     )
-    TECHNICIAN_SPACE_ROLES = ASSIGNABLE_ROLES
+    TECHNICIAN_SPACE_ROLES = (
+        *ESCALATION_TARGET_ROLES,
+        *FIELD_TECHNICIAN_ROLES,
+    )
     REPORTING_ROLES = (
         *LEADERSHIP_ROLES,
         *READ_ONLY_ROLES,
@@ -236,12 +256,8 @@ class User(AbstractUser):
     def save(self, *args, **kwargs):
         if self.role == self.ROLE_FIELD_TECHNICIAN:
             self.role = self.ROLE_TECHNICIAN
-        if self.role in {self.ROLE_SUPPORT, self.ROLE_AGENT, self.ROLE_VIP_SUPPORT, self.ROLE_SYSTEM_BOT}:
-            self.role = self.ROLE_HEAD_SAV
         if self.role == self.ROLE_EXPERT:
             self.role = self.ROLE_CHIEF_TECHNICIAN
-        if self.role in {self.ROLE_SUPERVISOR, self.ROLE_DISPATCHER, self.ROLE_SOFTWARE_OWNER, self.ROLE_MANAGER}:
-            self.role = self.ROLE_HEAD_SAV
         if self.role == self.ROLE_QA:
             self.role = self.ROLE_AUDITOR
         if self.role == self.ROLE_ADMIN and not self.is_staff:
@@ -1202,7 +1218,7 @@ class MaintenanceTicket(TimeStampedModel):
         User,
         on_delete=models.CASCADE,
         related_name="maintenance_tickets",
-        limit_choices_to={"role__in": User.ASSIGNABLE_ROLES},
+        limit_choices_to={"role__in": User.TECHNICIAN_SPACE_ROLES},
     )
     client = models.ForeignKey(
         User,
@@ -1220,12 +1236,16 @@ class MaintenanceTicket(TimeStampedModel):
     instructions = models.TextField(blank=True)
     priority = models.CharField(max_length=20, choices=Ticket.PRIORITY_CHOICES, default=Ticket.PRIORITY_NORMAL)
     location = models.CharField(max_length=255, blank=True)
+    initial_scheduled_date = models.DateField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     postponed_to = models.DateField(null=True, blank=True)
     postponement_reason = models.TextField(blank=True)
     notified_at = models.DateTimeField(null=True, blank=True)
+    acknowledged_at = models.DateTimeField(null=True, blank=True)
     overdue_alerted_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancellation_reason = models.TextField(blank=True)
     anomaly_ticket = models.ForeignKey(
         Ticket,
         on_delete=models.SET_NULL,
@@ -1269,6 +1289,8 @@ class MaintenanceTicket(TimeStampedModel):
             self.responsible = self.program.responsible
         if self.program_id and not self.service:
             self.service = self.program.service
+        if self.scheduled_date and not self.initial_scheduled_date:
+            self.initial_scheduled_date = self.scheduled_date
         super().save(*args, **kwargs)
 
 
@@ -1289,8 +1311,16 @@ class MaintenanceReport(TimeStampedModel):
         User,
         on_delete=models.CASCADE,
         related_name="maintenance_reports",
-        limit_choices_to={"role__in": User.ASSIGNABLE_ROLES},
+        limit_choices_to={"role__in": User.TECHNICIAN_SPACE_ROLES},
     )
+    validated_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="validated_maintenance_reports",
+        null=True,
+        blank=True,
+    )
+    validated_at = models.DateTimeField(null=True, blank=True)
     actual_started_at = models.DateTimeField()
     actual_finished_at = models.DateTimeField()
     checklist_completed = models.JSONField(default=list, blank=True)
@@ -1300,6 +1330,8 @@ class MaintenanceReport(TimeStampedModel):
     photos = models.JSONField(default=list, blank=True)
     client_signed_by = models.CharField(max_length=255, blank=True)
     client_signature_file = models.FileField(upload_to="maintenance/signatures/%Y/%m/%d/", blank=True)
+    report_pdf = models.FileField(upload_to="maintenance/reports/%Y/%m/%d/", blank=True)
+    report_generated_at = models.DateTimeField(null=True, blank=True)
     final_status = models.CharField(
         max_length=24,
         choices=MaintenanceTicket.FINAL_STATUS_CHOICES,
@@ -1317,6 +1349,39 @@ class MaintenanceReport(TimeStampedModel):
             self.organization = self.maintenance_ticket.organization
         elif self.technician_id and self.technician.organization_id:
             self.organization = self.technician.organization
+        super().save(*args, **kwargs)
+
+
+class MaintenanceReportPhoto(TimeStampedModel):
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.SET_NULL,
+        related_name="maintenance_report_photos",
+        null=True,
+        blank=True,
+    )
+    report = models.ForeignKey(MaintenanceReport, on_delete=models.CASCADE, related_name="photo_files")
+    uploaded_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="maintenance_report_photos",
+        null=True,
+        blank=True,
+    )
+    file = models.FileField(upload_to="maintenance/photos/%Y/%m/%d/")
+    note = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+    def __str__(self):
+        return f"{self.report.maintenance_ticket.title} - photo {self.pk or 'N/A'}"
+
+    def save(self, *args, **kwargs):
+        if self.report_id and self.report.organization_id:
+            self.organization = self.report.organization
+        elif self.uploaded_by_id and self.uploaded_by.organization_id:
+            self.organization = self.uploaded_by.organization
         super().save(*args, **kwargs)
 
 

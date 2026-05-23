@@ -12,6 +12,13 @@ is_true() {
   esac
 }
 
+require_env() {
+  if [ -z "$(eval "printf '%s' \"\${$1:-}\"")" ]; then
+    echo "Variable d'environnement obligatoire manquante: $1"
+    exit 1
+  fi
+}
+
 DB_ENGINE="${DJANGO_DB_ENGINE:-}"
 if [ -z "$DB_ENGINE" ] && [ -n "${DJANGO_DB_HOST:-}" ]; then
   DB_ENGINE="django.db.backends.postgresql"
@@ -30,6 +37,41 @@ fi
 
 if is_true "${DJANGO_RUN_MIGRATIONS_ON_STARTUP:-true}"; then
   python manage.py migrate --noinput
+fi
+
+if is_true "${DJANGO_BOOTSTRAP_ON_STARTUP:-false}"; then
+  BOOTSTRAP_ORGANIZATION_NAME_VALUE="${BOOTSTRAP_ORGANIZATION_NAME:-AFRILUX SMART SOLUTIONS}"
+  BOOTSTRAP_ADMIN_USERNAME_VALUE="${BOOTSTRAP_ADMIN_USERNAME:-${SUPERUSER_NAME:-}}"
+  BOOTSTRAP_ADMIN_EMAIL_VALUE="${BOOTSTRAP_ADMIN_EMAIL:-${SUPERUSER_EMAIL:-}}"
+  BOOTSTRAP_ADMIN_PASSWORD_VALUE="${BOOTSTRAP_ADMIN_PASSWORD:-${SUPERUSER_PASSWORD:-}}"
+
+  if [ -z "$BOOTSTRAP_ADMIN_USERNAME_VALUE" ] && [ -n "$BOOTSTRAP_ADMIN_EMAIL_VALUE" ]; then
+    BOOTSTRAP_ADMIN_USERNAME_VALUE="$(printf '%s' "$BOOTSTRAP_ADMIN_EMAIL_VALUE" | cut -d '@' -f 1)"
+  fi
+
+  if [ -z "$BOOTSTRAP_ADMIN_USERNAME_VALUE" ]; then
+    BOOTSTRAP_ADMIN_USERNAME_VALUE="aziz"
+  fi
+
+  require_env BOOTSTRAP_ADMIN_EMAIL_VALUE
+  require_env BOOTSTRAP_ADMIN_PASSWORD_VALUE
+
+  python manage.py bootstrap_platform \
+    --organization-name "${BOOTSTRAP_ORGANIZATION_NAME_VALUE}" \
+    --organization-slug "${BOOTSTRAP_ORGANIZATION_SLUG:-}" \
+    --brand-name "${BOOTSTRAP_BRAND_NAME:-}" \
+    --portal-tagline "${BOOTSTRAP_PORTAL_TAGLINE:-}" \
+    --support-email "${BOOTSTRAP_SUPPORT_EMAIL:-}" \
+    --support-phone "${BOOTSTRAP_SUPPORT_PHONE:-}" \
+    --headquarters-address "${BOOTSTRAP_HEADQUARTERS_ADDRESS:-}" \
+    --city "${BOOTSTRAP_CITY:-}" \
+    --country "${BOOTSTRAP_COUNTRY:-Cameroun}" \
+    --reporting-emails "${BOOTSTRAP_REPORTING_EMAILS:-}" \
+    --admin-username "${BOOTSTRAP_ADMIN_USERNAME_VALUE}" \
+    --admin-email "${BOOTSTRAP_ADMIN_EMAIL_VALUE}" \
+    --admin-password "${BOOTSTRAP_ADMIN_PASSWORD_VALUE}" \
+    --admin-first-name "${BOOTSTRAP_ADMIN_FIRST_NAME:-Admin}" \
+    --admin-last-name "${BOOTSTRAP_ADMIN_LAST_NAME:-AFRILUX}"
 fi
 
 COLLECTSTATIC_ON_STARTUP="${DJANGO_COLLECTSTATIC_ON_STARTUP:-}"

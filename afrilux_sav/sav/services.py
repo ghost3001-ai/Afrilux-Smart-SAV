@@ -32,6 +32,7 @@ from .models import (
     KnowledgeArticle,
     MaintenanceProgram,
     MaintenanceReport,
+    MaintenanceReportPhoto,
     MaintenanceTicket,
     Message,
     Notification,
@@ -71,23 +72,32 @@ ESCALATION_TARGET_CFAO_MANAGER = "cfao_manager"
 ESCALATION_TARGET_CFAO_WORKS = "cfao_works"
 ESCALATION_TARGET_HVAC_MANAGER = "hvac_manager"
 ESCALATION_TARGET_CHIEF_TECHNICIAN = "chief_technician"
+ESCALATION_TARGET_SUPERVISOR = "supervisor"
+ESCALATION_TARGET_HEAD_SAV = "head_sav"
+ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV = "expert_then_head_sav"
 ESCALATION_ALLOWED_TARGETS = {
     ESCALATION_TARGET_CFAO_MANAGER,
     ESCALATION_TARGET_CFAO_WORKS,
-    ESCALATION_TARGET_HVAC_MANAGER,
     ESCALATION_TARGET_CHIEF_TECHNICIAN,
+    ESCALATION_TARGET_SUPERVISOR,
+    ESCALATION_TARGET_HEAD_SAV,
+    ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV,
 }
 ESCALATION_TARGET_ROLE_MAP = {
     ESCALATION_TARGET_CFAO_MANAGER: [User.ROLE_CFAO_MANAGER],
     ESCALATION_TARGET_CFAO_WORKS: [User.ROLE_CFAO_WORKS],
     ESCALATION_TARGET_HVAC_MANAGER: [User.ROLE_HVAC_MANAGER],
     ESCALATION_TARGET_CHIEF_TECHNICIAN: [User.ROLE_CHIEF_TECHNICIAN],
+    ESCALATION_TARGET_SUPERVISOR: [User.ROLE_SUPERVISOR],
+    ESCALATION_TARGET_HEAD_SAV: [User.ROLE_HEAD_SAV, User.ROLE_MANAGER],
+    ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV: [User.ROLE_CHIEF_TECHNICIAN, User.ROLE_EXPERT],
 }
 
 TICKET_CREATOR_ROLES = {
     User.ROLE_ADMIN,
     User.ROLE_CLIENT,
     User.ROLE_HEAD_SAV,
+    *User.FRONTLINE_ROLES,
 }
 
 NEGATIVE_WORDS = [
@@ -170,7 +180,11 @@ def is_manager_user(user):
 
 
 def is_support_user(user):
-    return False
+    return bool(
+        user
+        and user.is_authenticated
+        and getattr(user, "role", "") in set(User.FRONTLINE_ROLES)
+    )
 
 
 def is_admin_user(user):
@@ -263,6 +277,8 @@ def role_workspace_name(user):
         return "login"
     if user.role == User.ROLE_CLIENT:
         return "support-page"
+    if is_support_user(user):
+        return "ticket-list"
     if user.role in set(User.TECHNICIAN_SPACE_ROLES):
         return "technician-space"
     if user.role == User.ROLE_AUDITOR:
@@ -329,6 +345,13 @@ def scope_ticket_queryset(queryset, user):
             ).distinct()
         if is_admin_user(user) or getattr(user, "role", "") == User.ROLE_HEAD_SAV:
             return queryset
+        if is_support_user(user):
+            return queryset.filter(
+                Q(created_by=user)
+                | Q(assigned_agent=user)
+                | Q(assigned_agent__isnull=True)
+                | Q(interventions__agent=user)
+            ).distinct()
         if getattr(user, "role", "") in set(User.ASSIGNABLE_ROLES):
             return queryset.filter(Q(assigned_agent=user) | Q(interventions__agent=user)).distinct()
         return queryset.filter(Q(created_by=user) | Q(assigned_agent=user) | Q(interventions__agent=user)).distinct()
@@ -610,6 +633,19 @@ def select_escalation_agent(ticket, *, target=ESCALATION_TARGET_CHIEF_TECHNICIAN
     current_agent = getattr(ticket, "assigned_agent", None)
     exclude_ids = [getattr(current_agent, "id", None)]
     normalized_target = (target or ESCALATION_TARGET_CHIEF_TECHNICIAN).strip().lower()
+    if normalized_target == ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV:
+        expert = _select_least_loaded_agent_for_roles(
+            roles=ESCALATION_TARGET_ROLE_MAP[ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV],
+            organization=ticket.organization,
+            exclude_user_ids=exclude_ids,
+        )
+        if expert:
+            return expert
+        return _select_least_loaded_agent_for_roles(
+            roles=ESCALATION_TARGET_ROLE_MAP[ESCALATION_TARGET_HEAD_SAV],
+            organization=ticket.organization,
+            exclude_user_ids=exclude_ids,
+        )
     roles = ESCALATION_TARGET_ROLE_MAP.get(normalized_target)
     if roles:
         return _select_least_loaded_agent_for_roles(
@@ -1286,6 +1322,93 @@ def generate_intervention_pdf(intervention, persist=True, force=False):
     return content
 
 
+def generate_maintenance_report_pdf(report, persist=True, force=False):
+    if persist and not force and getattr(report, "report_pdf", None):
+        try:
+            with report.report_pdf.open("rb") as existing_report:
+                return existing_report.read()
+        except OSError:
+            pass
+
+    maintenance_ticket = report.maintenance_ticket
+    products = list(maintenance_ticket.products.all())
+    product_label = ", ".join(product.serial_number for product in products) if products else "-"
+    checklist_rows = [["Operation realisee"]]
+    checklist_rows.extend([[str(item)] for item in report.checklist_completed or ["-"]])
+    data = [
+        ["Reference maintenance", f"MAINT-{maintenance_ticket.id}"],
+        ["Client", str(maintenance_ticket.client)],
+        ["Technicien", str(report.technician)],
+        ["Service", maintenance_ticket.get_service_display()],
+        ["Periodicite", maintenance_ticket.get_periodicity_display()],
+        ["Date prevue", (maintenance_ticket.initial_scheduled_date or maintenance_ticket.scheduled_date).strftime("%d/%m/%Y")],
+        ["Execution reelle", f"{report.actual_started_at:%d/%m/%Y %H:%M} - {report.actual_finished_at:%d/%m/%Y %H:%M}"],
+        ["Equipement(s)", product_label],
+        ["Lieu", maintenance_ticket.location or maintenance_ticket.client.address or "-"],
+        ["Statut final", report.get_final_status_display()],
+        ["Anomalie detectee", "Oui" if report.anomaly_detected else "Non"],
+        ["Signature client", report.client_signed_by or "-"],
+    ]
+
+    buffer = BytesIO()
+    document = SimpleDocTemplate(buffer, pagesize=A4)
+    styles = getSampleStyleSheet()
+    story = [
+        Paragraph("Bon de maintenance planifiee AFRILUX SMART SOLUTIONS", styles["Title"]),
+        Spacer(1, 12),
+        Table(data, colWidths=[150, 340]),
+        Spacer(1, 12),
+        Paragraph("Check-list realisee", styles["Heading2"]),
+    ]
+    checklist_table = Table(checklist_rows, colWidths=[490])
+    checklist_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8D5BF")),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ]
+        )
+    )
+    story.extend(
+        [
+            checklist_table,
+            Spacer(1, 12),
+            Paragraph("Observations techniques", styles["Heading2"]),
+            Paragraph(report.observations or "-", styles["BodyText"]),
+            Spacer(1, 12),
+            Paragraph("Pieces / consommables", styles["Heading2"]),
+            Paragraph(report.parts_used or "-", styles["BodyText"]),
+        ]
+    )
+    photo_items = list(report.photo_files.all()[:5])
+    if photo_items:
+        story.extend([Spacer(1, 12), Paragraph("Photos jointes", styles["Heading3"])])
+        photo_rows = [["Note", "Fichier"]]
+        for photo in photo_items:
+            photo_rows.append([photo.note or "-", photo.file.name.split("/")[-1]])
+        photo_table = Table(photo_rows, colWidths=[240, 250])
+        photo_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8D5BF")),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ]
+            )
+        )
+        story.append(photo_table)
+
+    document.build(story)
+    content = buffer.getvalue()
+    if persist:
+        filename = f"maintenance-{maintenance_ticket.id}-{timezone.localdate():%Y%m%d}.pdf"
+        report.report_pdf.save(filename, ContentFile(content), save=False)
+        report.report_generated_at = timezone.now()
+        report.save(update_fields=["report_pdf", "report_generated_at", "updated_at"])
+    return content
+
+
 def send_intervention_assignment_email(intervention, pdf_content=None):
     technician = intervention.agent
     recipient = (technician.professional_email or technician.email or "").strip()
@@ -1402,11 +1525,11 @@ def escalate_ticket(
     previous_priority = ticket.priority
     previous_status = ticket.status
     previous_assigned_agent = ticket.assigned_agent
-    if getattr(actor, "role", "") != User.ROLE_HEAD_SAV:
+    if not is_manager_user(actor):
         raise ValueError("Seul le Responsable SAV peut escalader un ticket.")
     normalized_target = (target or ESCALATION_TARGET_CHIEF_TECHNICIAN).strip().lower()
     if normalized_target not in ESCALATION_ALLOWED_TARGETS:
-        raise ValueError("Cible d'escalade invalide. Cibles autorisees: CFAO, travaux CFAO, froid/climatisation ou chef technicien.")
+        raise ValueError("Cible d'escalade invalide. Cibles autorisees: CFAO, travaux CFAO, superviseur, expert ou Responsable SAV.")
     escalation_target = select_escalation_agent(ticket, target=normalized_target)
     escalation_note = (note or "Escalade du ticket pour prise en charge de niveau superieur.").strip()[:500]
 
@@ -1506,7 +1629,7 @@ def escalate_ticket(
 def can_assign_ticket_technician(user, ticket):
     if not user or not user.is_authenticated or is_read_only_user(user):
         return False
-    if user.role == User.ROLE_HEAD_SAV:
+    if is_manager_user(user):
         return True
     return bool(user.role in set(User.ESCALATION_TARGET_ROLES) and ticket.assigned_agent_id == user.id)
 
@@ -1516,16 +1639,16 @@ def assign_ticket_to_technician(ticket, technician, *, actor=None, note=""):
         raise ValueError("Seuls les tickets ouverts peuvent etre affectes.")
     if not can_assign_ticket_technician(actor, ticket):
         raise ValueError("Seul le Responsable SAV ou le responsable escalade sur ce ticket peut affecter un technicien.")
-    if not technician or technician.role != User.ROLE_TECHNICIAN:
-        raise ValueError("La cible doit etre un technicien de maintenance.")
+    if not technician or technician.role not in set(User.ASSIGNABLE_ROLES):
+        raise ValueError("La cible doit etre un technicien ou agent SAV habilite.")
     if not technician.is_ticket_assignment_eligible:
-        raise ValueError("Le technicien doit etre actif et disponible.")
+        raise ValueError("La cible doit etre active et disponible.")
     if ticket.organization_id and technician.organization_id and ticket.organization_id != technician.organization_id:
         raise ValueError("Le technicien doit appartenir a la meme organisation que le ticket.")
 
     previous_status = ticket.status
     previous_assigned_agent = ticket.assigned_agent
-    assignment_note = (note or "Affectation du ticket a un technicien de maintenance.").strip()[:500]
+    assignment_note = (note or "Affectation du ticket a un technicien ou agent SAV.").strip()[:500]
 
     ticket.assigned_agent = technician
     if ticket.status in {Ticket.STATUS_NEW, Ticket.STATUS_WAITING, Ticket.STATUS_ASSIGNED}:
@@ -1539,8 +1662,8 @@ def assign_ticket_to_technician(ticket, technician, *, actor=None, note=""):
         message_type=Message.TYPE_INTERNAL,
         channel=Message.CHANNEL_PORTAL,
         direction=Message.DIRECTION_INTERNAL,
-        content=f"Le ticket a ete affecte au technicien {technician}.",
-        sentiment_score=calculate_sentiment("Le ticket a ete affecte a un technicien."),
+        content=f"Le ticket a ete affecte a {technician}.",
+        sentiment_score=calculate_sentiment("Le ticket a ete affecte a un agent SAV."),
     )
 
     recipients = [technician]
@@ -1555,7 +1678,7 @@ def assign_ticket_to_technician(ticket, technician, *, actor=None, note=""):
             ticket=ticket,
             event_type="ticket_technician_assigned",
             subject=f"Technicien affecte {ticket.reference}",
-            message=f"Le ticket '{ticket.title}' est maintenant affecte au technicien {technician}.",
+            message=f"Le ticket '{ticket.title}' est maintenant affecte a {technician}.",
         )
 
     log_audit_event(
@@ -1700,6 +1823,16 @@ def _coerce_json_list(value, field_label):
     raise ValueError(f"Le champ {field_label} doit etre une liste.")
 
 
+def _coerce_bool(value):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in {"1", "true", "yes", "oui", "on"}
+
+
 def _coerce_id_list(value):
     if value in (None, ""):
         return []
@@ -1750,9 +1883,9 @@ def publish_maintenance_program(program, *, actor=None):
             if not technician_id or not client_id:
                 raise ValueError(f"Ligne {index}: technicien et client sont obligatoires.")
 
-            technician = User.objects.filter(pk=technician_id, role__in=User.ASSIGNABLE_ROLES, is_active=True).first()
+            technician = User.objects.filter(pk=technician_id, role__in=User.TECHNICIAN_SPACE_ROLES, is_active=True).first()
             if technician is None:
-                raise ValueError(f"Ligne {index}: technicien introuvable ou non assignable.")
+                raise ValueError(f"Ligne {index}: technicien introuvable ou non habilite pour la maintenance terrain.")
             client = User.objects.filter(pk=client_id, role=User.ROLE_CLIENT, is_active=True).first()
             if client is None:
                 raise ValueError(f"Ligne {index}: client introuvable.")
@@ -1788,6 +1921,7 @@ def publish_maintenance_program(program, *, actor=None):
                 service=str(line.get("service") or program.service or MaintenanceProgram.SERVICE_IT).strip(),
                 periodicity=str(line.get("periodicity") or line.get("periodicite") or MaintenanceTicket.PERIOD_MONTHLY).strip(),
                 scheduled_date=scheduled_date,
+                initial_scheduled_date=scheduled_date,
                 checklist=_coerce_json_list(line.get("checklist") or line.get("check_list"), "checklist"),
                 instructions=str(line.get("instructions") or line.get("notes") or "").strip(),
                 priority=str(line.get("priority") or line.get("priorite") or Ticket.PRIORITY_NORMAL).strip(),
@@ -1829,6 +1963,35 @@ def start_maintenance_ticket(maintenance_ticket, *, actor=None):
     return maintenance_ticket
 
 
+def acknowledge_maintenance_ticket(maintenance_ticket, *, actor=None):
+    if actor and actor.is_authenticated and not (
+        can_manage_maintenance(actor) or maintenance_ticket.technician_id == actor.id
+    ):
+        raise ValueError("Seul le technicien assigne ou un responsable peut accuser reception de cette maintenance.")
+    if maintenance_ticket.status not in {MaintenanceTicket.STATUS_PLANNED, MaintenanceTicket.STATUS_NOTIFIED}:
+        raise ValueError("Seules les maintenances planifiees ou notifiees peuvent etre accusees reception.")
+
+    now = timezone.now()
+    maintenance_ticket.status = MaintenanceTicket.STATUS_NOTIFIED
+    maintenance_ticket.notified_at = maintenance_ticket.notified_at or now
+    maintenance_ticket.acknowledged_at = now
+    maintenance_ticket.save(update_fields=["status", "notified_at", "acknowledged_at", "updated_at"])
+
+    recipients = []
+    if maintenance_ticket.responsible_id:
+        recipients.append(maintenance_ticket.responsible)
+    for recipient in {item.id: item for item in recipients if getattr(item, "id", None)}.values():
+        create_external_channel_notifications(
+            recipient=recipient,
+            ticket=None,
+            event_type="maintenance_acknowledged",
+            subject=f"Maintenance accusee - {maintenance_ticket.title}",
+            message=f"{maintenance_ticket.technician} a accuse reception de la maintenance du {maintenance_ticket.scheduled_date:%d/%m/%Y}.",
+        )
+    log_audit_event(actor, "maintenance_ticket_acknowledged", maintenance_ticket)
+    return maintenance_ticket
+
+
 def postpone_maintenance_ticket(maintenance_ticket, *, new_date, justification, actor=None):
     if not str(justification or "").strip():
         raise ValueError("La justification du report est obligatoire.")
@@ -1839,11 +2002,12 @@ def postpone_maintenance_ticket(maintenance_ticket, *, new_date, justification, 
         raise ValueError("Seul le technicien assigne ou un responsable peut reporter cette maintenance.")
 
     maintenance_ticket.status = MaintenanceTicket.STATUS_POSTPONED
+    maintenance_ticket.initial_scheduled_date = maintenance_ticket.initial_scheduled_date or maintenance_ticket.scheduled_date
     maintenance_ticket.postponed_to = parsed_date
     maintenance_ticket.scheduled_date = parsed_date
     maintenance_ticket.postponement_reason = str(justification).strip()
     maintenance_ticket.save(
-        update_fields=["status", "postponed_to", "scheduled_date", "postponement_reason", "updated_at"]
+        update_fields=["status", "initial_scheduled_date", "postponed_to", "scheduled_date", "postponement_reason", "updated_at"]
     )
 
     recipients = []
@@ -1860,6 +2024,55 @@ def postpone_maintenance_ticket(maintenance_ticket, *, new_date, justification, 
         )
     log_audit_event(actor, "maintenance_ticket_postponed", maintenance_ticket, {"new_date": parsed_date.isoformat()})
     return maintenance_ticket
+
+
+def cancel_maintenance_ticket(maintenance_ticket, *, reason, actor=None):
+    normalized_reason = str(reason or "").strip()
+    if not normalized_reason:
+        raise ValueError("Le motif d'annulation est obligatoire.")
+    if actor and actor.is_authenticated and not can_manage_maintenance(actor):
+        raise ValueError("L'annulation d'une maintenance est reservee au responsable de service.")
+    if maintenance_ticket.status in {
+        MaintenanceTicket.STATUS_DONE,
+        MaintenanceTicket.STATUS_ANOMALY,
+        MaintenanceTicket.STATUS_CANCELLED,
+    }:
+        raise ValueError("Cette maintenance ne peut plus etre annulee depuis son statut actuel.")
+
+    maintenance_ticket.status = MaintenanceTicket.STATUS_CANCELLED
+    maintenance_ticket.cancellation_reason = normalized_reason
+    maintenance_ticket.cancelled_at = timezone.now()
+    maintenance_ticket.save(update_fields=["status", "cancellation_reason", "cancelled_at", "updated_at"])
+
+    recipients = [maintenance_ticket.technician]
+    if maintenance_ticket.responsible_id:
+        recipients.append(maintenance_ticket.responsible)
+    for recipient in {item.id: item for item in recipients if getattr(item, "id", None)}.values():
+        create_external_channel_notifications(
+            recipient=recipient,
+            ticket=None,
+            event_type="maintenance_cancelled",
+            subject=f"Maintenance annulee - {maintenance_ticket.title}",
+            message=f"La maintenance planifiee le {maintenance_ticket.scheduled_date:%d/%m/%Y} est annulee. Motif: {normalized_reason}",
+        )
+    log_audit_event(actor, "maintenance_ticket_cancelled", maintenance_ticket, {"reason": normalized_reason})
+    return maintenance_ticket
+
+
+def validate_maintenance_report(maintenance_ticket, *, actor=None):
+    if actor and actor.is_authenticated and not can_manage_maintenance(actor):
+        raise ValueError("La validation du rapport est reservee au responsable de service.")
+    if maintenance_ticket.status not in {MaintenanceTicket.STATUS_DONE, MaintenanceTicket.STATUS_ANOMALY}:
+        raise ValueError("Seules les maintenances terminees ou avec anomalie peuvent etre validees.")
+    try:
+        report = maintenance_ticket.report
+    except MaintenanceReport.DoesNotExist as exc:
+        raise ValueError("Aucun rapport de maintenance n'est disponible pour validation.") from exc
+    report.validated_by = actor if getattr(actor, "is_authenticated", False) else None
+    report.validated_at = timezone.now()
+    report.save(update_fields=["validated_by", "validated_at", "updated_at"])
+    log_audit_event(actor, "maintenance_report_validated", maintenance_ticket, {"report_id": report.id})
+    return report
 
 
 def _create_incident_from_maintenance(maintenance_ticket, report, *, actor=None):
@@ -1917,6 +2130,7 @@ def close_maintenance_ticket(
     photos=None,
     client_signed_by="",
     client_signature_file=None,
+    photo_files=None,
     new_date=None,
     postponement_reason="",
 ):
@@ -1935,7 +2149,7 @@ def close_maintenance_ticket(
     checklist_payload = _coerce_json_list(checklist_completed, "checklist_realisee")
     if not checklist_payload:
         raise ValueError("La check-list realisee est obligatoire.")
-    anomaly_flag = bool(anomaly_detected) or final_status == MaintenanceTicket.STATUS_ANOMALY
+    anomaly_flag = _coerce_bool(anomaly_detected) or final_status == MaintenanceTicket.STATUS_ANOMALY
 
     if final_status == MaintenanceTicket.STATUS_POSTPONED:
         if not new_date:
@@ -1962,6 +2176,18 @@ def close_maintenance_ticket(
         maintenance_ticket=maintenance_ticket,
         defaults=report_defaults,
     )
+    photo_records = []
+    for uploaded_file in photo_files or []:
+        photo = MaintenanceReportPhoto.objects.create(
+            report=report,
+            uploaded_by=actor if getattr(actor, "is_authenticated", False) else None,
+            file=uploaded_file,
+            note="Photo jointe a la cloture de maintenance.",
+        )
+        photo_records.append(photo)
+    if photo_records:
+        report.photos = [photo.file.name for photo in report.photo_files.all()]
+        report.save(update_fields=["photos", "updated_at"])
 
     maintenance_ticket.status = final_status
     maintenance_ticket.started_at = maintenance_ticket.started_at or actual_started_at
@@ -1994,6 +2220,7 @@ def close_maintenance_ticket(
             message=f"Le technicien {maintenance_ticket.technician} a cloture la maintenance: {normalized_observations[:180]}",
         )
 
+    generate_maintenance_report_pdf(report)
     log_audit_event(
         actor,
         "maintenance_ticket_closed",
@@ -2021,6 +2248,7 @@ def dispatch_maintenance_operational_notifications(*, organization=None, now=Non
     for maintenance_ticket in queryset:
         if (
             maintenance_ticket.status == MaintenanceTicket.STATUS_PLANNED
+            and maintenance_ticket.scheduled_date >= today
             and maintenance_ticket.scheduled_date <= today + timedelta(days=3)
         ):
             create_external_channel_notifications(
@@ -2096,9 +2324,13 @@ def build_maintenance_period_report(period, user, *, anchor_date=None):
     generated_incidents = tickets.filter(anomaly_ticket__isnull=False).count()
     postponed_delays = []
     for item in tickets.filter(postponed_to__isnull=False):
-        postponed_delays.append((item.postponed_to - item.scheduled_date).days)
+        original_date = item.initial_scheduled_date or item.created_at.date()
+        postponed_delays.append((item.postponed_to - original_date).days)
 
     return {
+        "title": "Bilan de maintenance planifiee",
+        "report_type": "maintenance",
+        "period_label": label,
         "period": label,
         "date_from": start.isoformat(),
         "date_to": end.isoformat(),

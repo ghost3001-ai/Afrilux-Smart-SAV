@@ -17,6 +17,7 @@ from .forms import (
     ClientRegistrationForm,
     CreditAccountForm,
     InterventionForm,
+    MaintenanceCancelForm,
     MaintenanceClosureForm,
     MaintenanceProgramForm,
     MessageForm,
@@ -65,9 +66,11 @@ from .services import (
     compute_ticket_monthly_series,
     compute_ticket_sla_deadline,
     compute_ticket_volume_series,
+    acknowledge_maintenance_ticket,
     assign_ticket_to_technician,
     can_assign_ticket_technician,
     can_manage_maintenance,
+    cancel_maintenance_ticket,
     close_maintenance_ticket,
     credit_account_for_ticket,
     create_notification,
@@ -101,6 +104,7 @@ from .services import (
     scope_ticket_queryset,
     scope_user_queryset,
     start_maintenance_ticket,
+    validate_maintenance_report,
     role_workspace_name,
     notify_ticket_status_change,
 )
@@ -351,7 +355,7 @@ class TechnicianPlanningPageView(LoginRequiredMixin, ManagerRequiredMixin, Templ
         week_start = selected_date - timedelta(days=selected_date.weekday())
         week_end = week_start + timedelta(days=7)
         technicians = scope_user_queryset(
-            User.objects.filter(role__in=User.ASSIGNABLE_ROLES, is_active=True),
+            User.objects.filter(role__in=User.TECHNICIAN_SPACE_ROLES, is_active=True),
             self.request.user,
         ).order_by("first_name", "last_name", "username")
         tickets = scope_ticket_queryset(
@@ -564,7 +568,7 @@ class MaintenanceProgramListView(LoginRequiredMixin, MaintenanceManagerRequiredM
             self.request.user,
         )
         tickets = scope_maintenance_ticket_queryset(
-            MaintenanceTicket.objects.select_related("client", "technician", "program", "anomaly_ticket").prefetch_related("products"),
+            MaintenanceTicket.objects.select_related("client", "technician", "program", "anomaly_ticket", "report").prefetch_related("products"),
             self.request.user,
         )
         active_tickets = tickets.exclude(
@@ -588,6 +592,11 @@ class MaintenanceProgramListView(LoginRequiredMixin, MaintenanceManagerRequiredM
                     "anomalies": tickets.filter(status=MaintenanceTicket.STATUS_ANOMALY).count(),
                 },
                 "status_choices": MaintenanceTicket.STATUS_CHOICES,
+                "maintenance_report_export_url": "/api/maintenance/rapports/mensuel/?format=pdf",
+                "maintenance_realization_rate": _percentage(
+                    tickets.filter(status=MaintenanceTicket.STATUS_DONE).count(),
+                    tickets.count(),
+                ),
             }
         )
         return context
@@ -603,6 +612,27 @@ class MaintenanceProgramCreateView(LoginRequiredMixin, MaintenanceManagerRequire
         kwargs = super().get_form_kwargs()
         kwargs["user"] = self.request.user
         return kwargs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        technicians = scope_user_queryset(
+            User.objects.filter(role__in=User.TECHNICIAN_SPACE_ROLES, is_active=True),
+            self.request.user,
+        ).order_by("first_name", "last_name", "username")
+        clients = scope_user_queryset(
+            User.objects.filter(role=User.ROLE_CLIENT, is_active=True),
+            self.request.user,
+        ).order_by("company_name", "first_name", "last_name", "username")
+        products = scope_product_queryset(Product.objects.select_related("client"), self.request.user).order_by("client__company_name", "name")
+        context.update(
+            {
+                "maintenance_technicians": technicians[:40],
+                "maintenance_clients": clients[:40],
+                "maintenance_products": products[:60],
+                "periodicity_choices": MaintenanceTicket.PERIODICITY_CHOICES,
+            }
+        )
+        return context
 
     def form_valid(self, form):
         form.instance.responsible = self.request.user
@@ -638,6 +668,55 @@ class MaintenanceTicketStartView(LoginRequiredMixin, View):
             return redirect("technician-space")
         django_messages.success(request, "Maintenance demarree.")
         return redirect("technician-space")
+
+
+class MaintenanceTicketAcknowledgeView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        maintenance_ticket = get_object_or_404(
+            scope_maintenance_ticket_queryset(MaintenanceTicket.objects.all(), request.user),
+            pk=pk,
+        )
+        try:
+            acknowledge_maintenance_ticket(maintenance_ticket, actor=request.user)
+        except ValueError as exc:
+            django_messages.error(request, str(exc))
+            return redirect("technician-space")
+        django_messages.success(request, "Reception de la maintenance confirmee.")
+        return redirect("technician-space")
+
+
+class MaintenanceTicketCancelView(LoginRequiredMixin, MaintenanceManagerRequiredMixin, View):
+    def post(self, request, pk):
+        maintenance_ticket = get_object_or_404(
+            scope_maintenance_ticket_queryset(MaintenanceTicket.objects.all(), request.user),
+            pk=pk,
+        )
+        form = MaintenanceCancelForm(request.POST)
+        if not form.is_valid():
+            django_messages.error(request, "Le motif d'annulation est obligatoire.")
+            return redirect("maintenance-program")
+        try:
+            cancel_maintenance_ticket(maintenance_ticket, reason=form.cleaned_data["reason"], actor=request.user)
+        except ValueError as exc:
+            django_messages.error(request, str(exc))
+            return redirect("maintenance-program")
+        django_messages.success(request, "Maintenance annulee avec motif archive.")
+        return redirect("maintenance-program")
+
+
+class MaintenanceReportValidateView(LoginRequiredMixin, MaintenanceManagerRequiredMixin, View):
+    def post(self, request, pk):
+        maintenance_ticket = get_object_or_404(
+            scope_maintenance_ticket_queryset(MaintenanceTicket.objects.select_related("technician", "client"), request.user),
+            pk=pk,
+        )
+        try:
+            validate_maintenance_report(maintenance_ticket, actor=request.user)
+        except ValueError as exc:
+            django_messages.error(request, str(exc))
+            return redirect("maintenance-program")
+        django_messages.success(request, "Rapport de maintenance valide par le responsable.")
+        return redirect("maintenance-program")
 
 
 class MaintenanceTicketCloseView(LoginRequiredMixin, FormView):
@@ -679,6 +758,9 @@ class MaintenanceTicketCloseView(LoginRequiredMixin, FormView):
                 observations=form.cleaned_data["observations"],
                 parts_used=form.cleaned_data.get("parts_used", ""),
                 anomaly_detected=form.cleaned_data.get("anomaly_detected", False),
+                photo_files=form.cleaned_data.get("maintenance_photos", []),
+                client_signed_by=form.cleaned_data.get("client_signed_by", ""),
+                client_signature_file=form.cleaned_data.get("client_signature_file"),
                 new_date=form.cleaned_data.get("new_date"),
                 postponement_reason=form.cleaned_data.get("postponement_reason", ""),
             )

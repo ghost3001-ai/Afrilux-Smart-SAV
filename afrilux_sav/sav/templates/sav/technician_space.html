@@ -148,6 +148,12 @@
                 <p>{{ item.instructions|default:"Aucune instruction particuliere."|truncatechars:140 }}</p>
                 <div class="chip-row">
                     <span class="badge badge--{{ item.status|badge_tone }}">{{ item.get_status_display }}</span>
+                    {% if not item.acknowledged_at and item.status != "in_progress" %}
+                        <form method="post" action="{% url 'maintenance-ticket-acknowledge' item.pk %}">
+                            {% csrf_token %}
+                            <button class="button button--ghost" type="submit">Accuser reception</button>
+                        </form>
+                    {% endif %}
                     {% if item.status != "in_progress" %}
                         <form method="post" action="{% url 'maintenance-ticket-start' item.pk %}">
                             {% csrf_token %}

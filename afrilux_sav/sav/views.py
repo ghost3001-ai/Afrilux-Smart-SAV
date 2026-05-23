@@ -41,6 +41,7 @@ from .models import (
     KnowledgeArticle,
     MaintenanceProgram,
     MaintenanceReport,
+    MaintenanceReportPhoto,
     MaintenanceTicket,
     Message,
     Notification,
@@ -120,7 +121,9 @@ from .services import (
     compute_ticket_monthly_series,
     compute_ticket_sla_deadline,
     compute_ticket_volume_series,
+    acknowledge_maintenance_ticket,
     assign_ticket_to_technician,
+    cancel_maintenance_ticket,
     credit_account_for_ticket,
     dispatch_due_reports,
     build_maintenance_period_report,
@@ -139,6 +142,7 @@ from .services import (
     run_automation_rules_for_ticket,
     run_predictive_analysis,
     start_maintenance_ticket,
+    validate_maintenance_report,
     scope_equipment_category_queryset,
     scope_generated_report_queryset,
     scope_ai_action_queryset,
@@ -536,12 +540,13 @@ class MaintenanceProgramViewSet(AuditedModelViewSet):
 
 class MaintenanceTicketViewSet(AuditedModelViewSet):
     serializer_class = MaintenanceTicketSerializer
+    parser_classes = [parsers.JSONParser, parsers.MultiPartParser, parsers.FormParser]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["title", "client__username", "client__company_name", "technician__username", "location"]
     ordering_fields = ["scheduled_date", "priority", "status", "created_at"]
 
     def get_permissions(self):
-        if self.action in {"demarrer", "cloturer", "reporter"}:
+        if self.action in {"accuser_reception", "demarrer", "cloturer", "reporter", "annuler", "valider"}:
             return [IsInternalUser()]
         if self.request.method in {"POST", "PUT", "PATCH", "DELETE"}:
             return [IsInternalUser()]
@@ -556,7 +561,7 @@ class MaintenanceTicketViewSet(AuditedModelViewSet):
             "client",
             "anomaly_ticket",
             "report",
-        ).prefetch_related("products")
+        ).prefetch_related("products", "report__photo_files")
         queryset = scope_maintenance_ticket_queryset(queryset, self.request.user)
         technician = self.request.query_params.get("technicien") or self.request.query_params.get("technician")
         client = self.request.query_params.get("client")
@@ -610,6 +615,15 @@ class MaintenanceTicketViewSet(AuditedModelViewSet):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(self.get_serializer(maintenance_ticket).data)
 
+    @action(detail=True, methods=["post"], url_path="accuser-reception")
+    def accuser_reception(self, request, pk=None):
+        maintenance_ticket = self.get_object()
+        try:
+            acknowledge_maintenance_ticket(maintenance_ticket, actor=request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self.get_serializer(maintenance_ticket).data)
+
     @action(detail=True, methods=["post"], url_path="reporter")
     def reporter(self, request, pk=None):
         maintenance_ticket = self.get_object()
@@ -624,10 +638,35 @@ class MaintenanceTicketViewSet(AuditedModelViewSet):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(self.get_serializer(maintenance_ticket).data)
 
+    @action(detail=True, methods=["post"], url_path="annuler")
+    def annuler(self, request, pk=None):
+        maintenance_ticket = self.get_object()
+        try:
+            cancel_maintenance_ticket(
+                maintenance_ticket,
+                reason=request.data.get("reason") or request.data.get("motif") or request.data.get("justification"),
+                actor=request.user,
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self.get_serializer(maintenance_ticket).data)
+
+    @action(detail=True, methods=["post"], url_path="valider")
+    def valider(self, request, pk=None):
+        maintenance_ticket = self.get_object()
+        try:
+            report = validate_maintenance_report(maintenance_ticket, actor=request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        payload = self.get_serializer(maintenance_ticket).data
+        payload["report"] = MaintenanceReportSerializer(report, context=self.get_serializer_context()).data
+        return Response(payload)
+
     @action(detail=True, methods=["post"], url_path="cloturer")
     def cloturer(self, request, pk=None):
         maintenance_ticket = self.get_object()
         try:
+            photo_files = request.FILES.getlist("photos") or request.FILES.getlist("maintenance_photos")
             result = close_maintenance_ticket(
                 maintenance_ticket,
                 actor=request.user,
@@ -638,8 +677,10 @@ class MaintenanceTicketViewSet(AuditedModelViewSet):
                 observations=request.data.get("observations", ""),
                 parts_used=request.data.get("parts_used") or request.data.get("pieces_utilisees") or "",
                 anomaly_detected=request.data.get("anomaly_detected") or request.data.get("anomalie_detectee"),
-                photos=request.data.get("photos"),
+                photos=request.data.get("photo_refs") or request.data.get("photos_json"),
+                photo_files=photo_files,
                 client_signed_by=request.data.get("client_signed_by") or request.data.get("signature_client") or "",
+                client_signature_file=request.FILES.get("client_signature_file"),
                 new_date=request.data.get("new_date") or request.data.get("nouvelle_date"),
                 postponement_reason=request.data.get("postponement_reason") or request.data.get("justification") or "",
             )
@@ -660,7 +701,7 @@ class MaintenanceReportViewSet(viewsets.ReadOnlyModelViewSet):
     ordering_fields = ["actual_finished_at", "created_at"]
 
     def get_queryset(self):
-        queryset = MaintenanceReport.objects.select_related("maintenance_ticket", "technician", "organization")
+        queryset = MaintenanceReport.objects.select_related("maintenance_ticket", "technician", "organization").prefetch_related("photo_files")
         queryset = scope_maintenance_report_queryset(queryset, self.request.user)
         ticket_id = self.request.query_params.get("ticket") or self.request.query_params.get("maintenance_ticket")
         if ticket_id:
@@ -850,7 +891,7 @@ class TicketViewSet(AuditedModelViewSet):
         previous_status = ticket.status
         ticket.assigned_agent = request.user
         if ticket.status in {Ticket.STATUS_NEW, Ticket.STATUS_ASSIGNED, Ticket.STATUS_WAITING}:
-            ticket.status = Ticket.STATUS_IN_PROGRESS
+            ticket.status = Ticket.STATUS_ASSIGNED if is_support_user(request.user) else Ticket.STATUS_IN_PROGRESS
         ticket.save(update_fields=["assigned_agent", "status", "updated_at"])
         ensure_assignment_intervention(ticket, actor=request.user, note="Prise en charge manuelle du ticket.")
         self.audit("ticket_taken_ownership", ticket, {"assigned_agent": request.user.id})
@@ -873,7 +914,7 @@ class TicketViewSet(AuditedModelViewSet):
             scope_user_queryset(assignment_queryset, request.user),
             pk=technician_id,
         )
-        if technician.role == User.ROLE_TECHNICIAN:
+        if technician.role in set(User.FRONTLINE_ROLES + User.FIELD_TECHNICIAN_ROLES):
             try:
                 assign_ticket_to_technician(
                     ticket,
@@ -2080,7 +2121,28 @@ class MaintenancePeriodReportView(APIView):
         if not (has_reporting_access(request.user) or can_manage_maintenance(request.user)):
             raise PermissionDenied("Le bilan de maintenance est reserve aux responsables, admins et profils direction.")
         anchor_date = _parse_anchor_date(request.query_params.get("date"))
-        return Response(build_maintenance_period_report(periode, request.user, anchor_date=anchor_date))
+        report = build_maintenance_period_report(periode, request.user, anchor_date=anchor_date)
+        export_format = request.query_params.get("format", "").strip().lower()
+        filename = f"maintenance-{periode}-{report.get('period_label', '')}".replace(" ", "-").lower()
+        if export_format == "pdf":
+            content = export_report_pdf(report)
+            response = HttpResponse(content, content_type="application/pdf")
+            response["Content-Disposition"] = f'attachment; filename="{filename}.pdf"'
+            return response
+        if export_format == "xlsx":
+            content = export_report_xlsx(report)
+            response = HttpResponse(
+                content,
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+            response["Content-Disposition"] = f'attachment; filename="{filename}.xlsx"'
+            return response
+        if export_format == "csv":
+            content = export_report_csv(report)
+            response = HttpResponse(content, content_type="text/csv; charset=utf-8")
+            response["Content-Disposition"] = f'attachment; filename="{filename}.csv"'
+            return response
+        return Response(report)
 
 
 class TechnicianPlanningView(APIView):
@@ -2090,13 +2152,10 @@ class TechnicianPlanningView(APIView):
         if not (is_manager_user(request.user) or is_support_user(request.user)):
             raise PermissionDenied("Le planning technicien est reserve aux profils de supervision et de dispatch.")
 
-        technician = get_object_or_404(
-            scope_user_queryset(
-                User.objects.filter(role__in=User.ASSIGNABLE_ROLES, is_active=True),
-                request.user,
-            ),
-            pk=pk,
-        )
+        technician_queryset = User.objects.filter(role__in=User.TECHNICIAN_SPACE_ROLES, is_active=True)
+        if not request.user.is_superuser and request.user.organization_id:
+            technician_queryset = technician_queryset.filter(organization=request.user.organization)
+        technician = get_object_or_404(technician_queryset, pk=pk)
         date_from = _parse_anchor_date(request.query_params.get("date_from")) or timezone.localdate()
         date_to = _parse_anchor_date(request.query_params.get("date_to")) or (date_from + timedelta(days=7))
         start_dt = timezone.make_aware(datetime.combine(date_from, time.min))

@@ -18,6 +18,7 @@ from .models import (
     KnowledgeArticle,
     MaintenanceProgram,
     MaintenanceReport,
+    MaintenanceReportPhoto,
     MaintenanceTicket,
     Message,
     Notification,
@@ -39,7 +40,9 @@ from .services import (
     ESCALATION_TARGET_CFAO_MANAGER,
     ESCALATION_TARGET_CFAO_WORKS,
     ESCALATION_TARGET_CHIEF_TECHNICIAN,
-    ESCALATION_TARGET_HVAC_MANAGER,
+    ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV,
+    ESCALATION_TARGET_HEAD_SAV,
+    ESCALATION_TARGET_SUPERVISOR,
     generate_client_username,
     is_admin_user,
     provision_client_account,
@@ -463,10 +466,33 @@ class ChecklistTemplateSerializer(serializers.ModelSerializer):
         ]
 
 
+class MaintenanceReportPhotoSerializer(serializers.ModelSerializer):
+    uploaded_by_name = serializers.SerializerMethodField()
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MaintenanceReportPhoto
+        fields = ["id", "report", "uploaded_by", "uploaded_by_name", "file", "file_url", "note", "created_at", "updated_at"]
+        read_only_fields = ["uploaded_by", "uploaded_by_name", "file_url", "created_at", "updated_at"]
+
+    def get_uploaded_by_name(self, obj):
+        return str(obj.uploaded_by) if obj.uploaded_by else None
+
+    def get_file_url(self, obj):
+        request = self.context.get("request")
+        if not obj.file:
+            return ""
+        url = obj.file.url
+        return request.build_absolute_uri(url) if request else url
+
+
 class MaintenanceReportSerializer(serializers.ModelSerializer):
     technician_name = serializers.SerializerMethodField()
+    validated_by_name = serializers.SerializerMethodField()
     ticket_title = serializers.CharField(source="maintenance_ticket.title", read_only=True)
     organization_name = serializers.CharField(source="organization.display_name", read_only=True)
+    report_pdf_url = serializers.SerializerMethodField()
+    photo_files = MaintenanceReportPhotoSerializer(many=True, read_only=True)
 
     class Meta:
         model = MaintenanceReport
@@ -478,6 +504,9 @@ class MaintenanceReportSerializer(serializers.ModelSerializer):
             "ticket_title",
             "technician",
             "technician_name",
+            "validated_by",
+            "validated_by_name",
+            "validated_at",
             "actual_started_at",
             "actual_finished_at",
             "checklist_completed",
@@ -485,16 +514,43 @@ class MaintenanceReportSerializer(serializers.ModelSerializer):
             "parts_used",
             "anomaly_detected",
             "photos",
+            "photo_files",
             "client_signed_by",
             "client_signature_file",
+            "report_pdf",
+            "report_pdf_url",
+            "report_generated_at",
             "final_status",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["organization", "organization_name", "technician_name", "ticket_title", "created_at", "updated_at"]
+        read_only_fields = [
+            "organization",
+            "organization_name",
+            "technician_name",
+            "validated_by",
+            "validated_by_name",
+            "validated_at",
+            "ticket_title",
+            "report_pdf_url",
+            "photo_files",
+            "report_generated_at",
+            "created_at",
+            "updated_at",
+        ]
 
     def get_technician_name(self, obj):
         return str(obj.technician)
+
+    def get_validated_by_name(self, obj):
+        return str(obj.validated_by) if obj.validated_by else None
+
+    def get_report_pdf_url(self, obj):
+        request = self.context.get("request")
+        if not obj.report_pdf:
+            return ""
+        url = obj.report_pdf.url
+        return request.build_absolute_uri(url) if request else url
 
 
 class MaintenanceTicketSerializer(serializers.ModelSerializer):
@@ -531,6 +587,7 @@ class MaintenanceTicketSerializer(serializers.ModelSerializer):
             "service",
             "periodicity",
             "scheduled_date",
+            "initial_scheduled_date",
             "status",
             "checklist",
             "instructions",
@@ -541,7 +598,10 @@ class MaintenanceTicketSerializer(serializers.ModelSerializer):
             "postponed_to",
             "postponement_reason",
             "notified_at",
+            "acknowledged_at",
             "overdue_alerted_at",
+            "cancelled_at",
+            "cancellation_reason",
             "anomaly_ticket",
             "anomaly_ticket_reference",
             "is_late",
@@ -561,7 +621,9 @@ class MaintenanceTicketSerializer(serializers.ModelSerializer):
             "started_at",
             "finished_at",
             "notified_at",
+            "acknowledged_at",
             "overdue_alerted_at",
+            "cancelled_at",
             "anomaly_ticket",
             "anomaly_ticket_reference",
             "is_late",
@@ -589,6 +651,8 @@ class MaintenanceTicketSerializer(serializers.ModelSerializer):
         client = attrs.get("client") or getattr(self.instance, "client", None)
         products = attrs.get("products")
         organization = attrs.get("organization") or getattr(self.instance, "organization", None) or getattr(program, "organization", None)
+        if technician and technician.role not in set(User.TECHNICIAN_SPACE_ROLES):
+            raise serializers.ValidationError({"technician": "Selectionnez un technicien terrain ou responsable technique habilite."})
         if technician and organization and technician.organization_id and technician.organization_id != organization.id:
             raise serializers.ValidationError({"technician": "Le technicien appartient a une autre organisation."})
         if client and organization and client.organization_id and client.organization_id != organization.id:
@@ -1282,10 +1346,12 @@ class TicketSerializer(serializers.ModelSerializer):
     feedback = TicketFeedbackSerializer(read_only=True)
     initial_escalation_target = serializers.ChoiceField(
         choices=[
-            (ESCALATION_TARGET_CFAO_MANAGER, "Responsable CFAO / Projet Technique CFAO"),
-            (ESCALATION_TARGET_CFAO_WORKS, "Conducteur de travaux CFAO"),
-            (ESCALATION_TARGET_HVAC_MANAGER, "Responsable Froid et climatisation"),
-            (ESCALATION_TARGET_CHIEF_TECHNICIAN, "Chef Technicien Froid & Climatisation"),
+            (ESCALATION_TARGET_CFAO_MANAGER, "responsable CFAO"),
+            (ESCALATION_TARGET_CFAO_WORKS, "conducteur de travaux CFAO"),
+            (ESCALATION_TARGET_CHIEF_TECHNICIAN, "chef technicien froid & climatisation"),
+            (ESCALATION_TARGET_SUPERVISOR, "superviseur"),
+            (ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV, "expert puis Responsable SAV"),
+            (ESCALATION_TARGET_HEAD_SAV, "Responsable SAV"),
         ],
         required=False,
         allow_blank=True,

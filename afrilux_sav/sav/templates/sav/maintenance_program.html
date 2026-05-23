@@ -11,6 +11,7 @@
     </div>
     <div class="hero__actions">
         <a class="button button--ghost" href="{% url 'planning-page' %}">Planning</a>
+        <a class="button button--ghost" href="{{ maintenance_report_export_url }}">Exporter bilan PDF</a>
         <a class="button button--primary" href="{% url 'maintenance-program-create' %}">Nouveau programme</a>
     </div>
 </section>
@@ -29,7 +30,7 @@
     <article class="stat-card">
         <span>Terminees</span>
         <strong>{{ stats.done }}</strong>
-        <small>cycle prevenif</small>
+        <small>{{ maintenance_realization_rate }}% de realisation</small>
     </article>
     <article class="stat-card">
         <span>Anomalies</span>
@@ -83,6 +84,11 @@
                     <span class="badge badge--accent">Maintenance</span>
                     <span class="badge badge--{{ item.status|badge_tone }}">{{ item.get_status_display }}</span>
                 </div>
+                <form method="post" action="{% url 'maintenance-ticket-cancel' item.pk %}" class="inline-form">
+                    {% csrf_token %}
+                    <input type="text" name="reason" placeholder="Motif annulation" required>
+                    <button class="button button--ghost" type="submit">Annuler</button>
+                </form>
             </div>
         {% empty %}
             <p class="muted">Aucune maintenance active.</p>
@@ -113,7 +119,20 @@
                         <td>{{ item.client }}</td>
                         <td>{{ item.technician }}</td>
                         <td><span class="badge badge--{{ item.status|badge_tone }}">{{ item.get_status_display }}</span></td>
-                        <td>{% if item.anomaly_ticket %}<a href="{% url 'ticket-detail' item.anomaly_ticket.pk %}">{{ item.anomaly_ticket.reference }}</a>{% else %}-{% endif %}</td>
+                        <td>
+                            {% if item.anomaly_ticket %}<a href="{% url 'ticket-detail' item.anomaly_ticket.pk %}">{{ item.anomaly_ticket.reference }}</a>{% else %}-{% endif %}
+                            {% if item.report %}
+                                {% if item.report.report_pdf %}<a class="button button--ghost" href="{{ item.report.report_pdf.url }}" target="_blank" rel="noopener">PDF</a>{% endif %}
+                                {% if not item.report.validated_at %}
+                                    <form method="post" action="{% url 'maintenance-report-validate' item.pk %}">
+                                        {% csrf_token %}
+                                        <button class="button button--primary" type="submit">Valider</button>
+                                    </form>
+                                {% else %}
+                                    <span class="badge badge--success">Valide</span>
+                                {% endif %}
+                            {% endif %}
+                        </td>
                     </tr>
                 {% empty %}
                     <tr>

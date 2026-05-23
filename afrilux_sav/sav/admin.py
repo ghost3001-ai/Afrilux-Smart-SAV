@@ -17,6 +17,7 @@ from .models import (
     KnowledgeArticle,
     MaintenanceProgram,
     MaintenanceReport,
+    MaintenanceReportPhoto,
     MaintenanceTicket,
     Message,
     Notification,
@@ -299,9 +300,16 @@ class MaintenanceTicketAdmin(admin.ModelAdmin):
 
 @admin.register(MaintenanceReport)
 class MaintenanceReportAdmin(admin.ModelAdmin):
-    list_display = ("maintenance_ticket", "technician", "final_status", "anomaly_detected", "actual_finished_at")
+    list_display = ("maintenance_ticket", "technician", "final_status", "anomaly_detected", "actual_finished_at", "report_pdf")
     list_filter = ("organization", "final_status", "anomaly_detected")
     search_fields = ("maintenance_ticket__title", "technician__username", "observations", "parts_used")
+
+
+@admin.register(MaintenanceReportPhoto)
+class MaintenanceReportPhotoAdmin(admin.ModelAdmin):
+    list_display = ("report", "uploaded_by", "organization", "created_at")
+    list_filter = ("organization", "created_at")
+    search_fields = ("report__maintenance_ticket__title", "uploaded_by__username", "note")
 
 
 @admin.register(ChecklistTemplate)

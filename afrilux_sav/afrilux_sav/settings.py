@@ -64,6 +64,26 @@ def _hostname_from_url(value: str) -> str:
         return ""
 
 
+def _database_config_from_url(value: str) -> dict:
+    parsed_url = urlparse(value)
+    if parsed_url.scheme not in {"postgres", "postgresql"}:
+        raise ImproperlyConfigured(
+            "DATABASE_URL doit utiliser le scheme postgres:// ou postgresql://."
+        )
+    if not parsed_url.hostname:
+        raise ImproperlyConfigured("DATABASE_URL doit contenir un hostname PostgreSQL.")
+
+    return {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": parsed_url.path.lstrip("/") or "afrilux_sav",
+        "USER": parsed_url.username or "",
+        "PASSWORD": parsed_url.password or "",
+        "HOST": parsed_url.hostname,
+        "PORT": str(parsed_url.port or ""),
+        "CONN_MAX_AGE": int(os.getenv("DJANGO_DB_CONN_MAX_AGE", "60")),
+    }
+
+
 def _argon2_hasher_available() -> bool:
     if importlib.util.find_spec("argon2") is None:
         return False
@@ -167,8 +187,11 @@ WSGI_APPLICATION = "afrilux_sav.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 DATABASE_ENGINE = os.getenv("DJANGO_DB_ENGINE", "").strip()
-if not DATABASE_ENGINE and os.getenv("DJANGO_DB_HOST", "").strip():
+if DATABASE_URL:
+    DATABASE_ENGINE = "django.db.backends.postgresql"
+elif not DATABASE_ENGINE and os.getenv("DJANGO_DB_HOST", "").strip():
     DATABASE_ENGINE = "django.db.backends.postgresql"
 DATABASE_ENGINE = DATABASE_ENGINE or "django.db.backends.sqlite3"
 
@@ -176,18 +199,25 @@ DATABASE_NAME_DEFAULT = "afrilux_sav"
 if DATABASE_ENGINE == "django.db.backends.sqlite3":
     DATABASE_NAME_DEFAULT = str(BASE_DIR / "db.sqlite3")
 
-DATABASES = {
-    "default": {
-        "ENGINE": DATABASE_ENGINE,
-        "NAME": os.getenv("DJANGO_DB_NAME", DATABASE_NAME_DEFAULT),
-        "USER": os.getenv("DJANGO_DB_USER", ""),
-        "PASSWORD": os.getenv("DJANGO_DB_PASSWORD", ""),
-        "HOST": os.getenv("DJANGO_DB_HOST", ""),
-        "PORT": os.getenv("DJANGO_DB_PORT", ""),
-        "CONN_MAX_AGE": int(os.getenv("DJANGO_DB_CONN_MAX_AGE", "60")),
+if DATABASE_URL:
+    DATABASES = {"default": _database_config_from_url(DATABASE_URL)}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": DATABASE_ENGINE,
+            "NAME": os.getenv("DJANGO_DB_NAME", DATABASE_NAME_DEFAULT),
+            "USER": os.getenv("DJANGO_DB_USER", ""),
+            "PASSWORD": os.getenv("DJANGO_DB_PASSWORD", ""),
+            "HOST": os.getenv("DJANGO_DB_HOST", ""),
+            "PORT": os.getenv("DJANGO_DB_PORT", ""),
+            "CONN_MAX_AGE": int(os.getenv("DJANGO_DB_CONN_MAX_AGE", "60")),
+        }
     }
-}
 if "postgresql" in DATABASE_ENGINE:
+    if not DATABASES["default"]["HOST"]:
+        raise ImproperlyConfigured(
+            "Configuration PostgreSQL incomplete: definir DATABASE_URL ou DJANGO_DB_HOST."
+        )
     DATABASES["default"]["OPTIONS"] = {}
     sslmode = os.getenv("DJANGO_DB_SSLMODE", "prefer").strip()
     if sslmode:

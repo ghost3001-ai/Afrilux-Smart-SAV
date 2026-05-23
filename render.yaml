@@ -38,6 +38,10 @@ services:
         fromDatabase:
           name: afrilux-sav-db
           property: password
+      - key: DATABASE_URL
+        fromDatabase:
+          name: afrilux-sav-db
+          property: connectionString
       - key: DJANGO_DB_SSLMODE
         value: prefer
       - key: REDIS_URL
@@ -55,6 +59,26 @@ services:
         value: "true"
       - key: DJANGO_RUN_SCHEDULER_IN_WEB
         value: "true"
+      - key: DJANGO_BOOTSTRAP_ON_STARTUP
+        value: "true"
+      - key: BOOTSTRAP_ORGANIZATION_NAME
+        value: AFRILUX SMART SOLUTIONS
+      - key: BOOTSTRAP_ORGANIZATION_SLUG
+        value: afrilux-smart
+      - key: BOOTSTRAP_SUPPORT_EMAIL
+        value: siege@afriluxsa.local
+      - key: BOOTSTRAP_SUPPORT_PHONE
+        value: "+237698762455"
+      - key: BOOTSTRAP_CITY
+        value: Douala
+      - key: BOOTSTRAP_COUNTRY
+        value: Cameroun
+      - key: BOOTSTRAP_ADMIN_USERNAME
+        value: aziz
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        value: johnarthurclinton@afrilux.local
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
       - key: SCHEDULER_INTERVAL_SECONDS
         value: "60"
       - key: SCHEDULER_SKIP_BACKUP

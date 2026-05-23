@@ -19,6 +19,7 @@ import sys
 
 from django.contrib import admin
 from django.conf import settings
+from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 from django.contrib.staticfiles.views import serve as serve_staticfiles
 from django.urls import include, path, re_path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
@@ -37,6 +38,9 @@ urlpatterns = [
 ]
 
 if settings.DEBUG or "runserver" in sys.argv:
+    urlpatterns += staticfiles_urlpatterns()
+
+if "test" in sys.argv:
     urlpatterns += [
         re_path(r"^static/(?P<path>.*)$", serve_staticfiles, {"insecure": True}),
     ]
