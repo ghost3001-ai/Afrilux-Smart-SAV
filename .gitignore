@@ -16,6 +16,8 @@ afrilux_sav/db.sqlite3
 afrilux_sav/media/
 afrilux_sav/backups/
 afrilux_sav/staticfiles/
+media/
+docs/_cdc_v3_extracted.txt
 
 afrilux_sav_mobile/.dart_tool/
 afrilux_sav_mobile/.flutter-plugins

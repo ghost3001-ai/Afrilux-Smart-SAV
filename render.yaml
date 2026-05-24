@@ -91,6 +91,8 @@ services:
         value: "true"
       - key: CSRF_COOKIE_SECURE
         value: "true"
+      - key: SECURE_HSTS_SECONDS
+        value: "31536000"
 
   - type: keyvalue
     name: afrilux-sav-redis

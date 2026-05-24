@@ -3,30 +3,37 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
 from .models import (
     AccountCredit,
+    Agency,
     AIActionLog,
     AuditLog,
     AutomationRule,
     ChecklistTemplate,
     ClientContact,
+    ClientSite,
     DeviceRegistration,
     EquipmentCategory,
+    EquipmentLocationHistory,
     FinancialTransaction,
     GeneratedReport,
     Intervention,
     InterventionMedia,
+    InterventionPartUsage,
     KnowledgeArticle,
+    MaintenancePartUsage,
     MaintenanceProgram,
     MaintenanceReport,
     MaintenanceReportPhoto,
     MaintenanceTicket,
     Message,
     Notification,
+    OfflineSyncOperation,
     Organization,
     OfferRecommendation,
     PredictiveAlert,
     Product,
     ProductTelemetry,
     SlaRule,
+    SparePart,
     SupportSession,
     Ticket,
     TicketAssignment,
@@ -48,6 +55,13 @@ class OrganizationAdmin(admin.ModelAdmin):
     search_fields = ("name", "brand_name", "slug", "support_email", "support_phone", "city", "country")
 
 
+@admin.register(Agency)
+class AgencyAdmin(admin.ModelAdmin):
+    list_display = ("name", "code", "organization", "city", "region", "is_active")
+    list_filter = ("organization", "city", "region", "is_active")
+    search_fields = ("name", "code", "city", "region", "address", "organization__name")
+
+
 class MessageInline(admin.TabularInline):
     model = Message
     extra = 0
@@ -65,6 +79,11 @@ class SupportSessionInline(admin.TabularInline):
 
 class ClientContactInline(admin.TabularInline):
     model = ClientContact
+    extra = 0
+
+
+class ClientSiteInline(admin.TabularInline):
+    model = ClientSite
     extra = 0
 
 
@@ -93,6 +112,11 @@ class InterventionMediaInline(admin.TabularInline):
     extra = 0
 
 
+class InterventionPartUsageInline(admin.TabularInline):
+    model = InterventionPartUsage
+    extra = 0
+
+
 class TicketAssignmentInline(admin.TabularInline):
     model = TicketAssignment
     extra = 0
@@ -111,6 +135,7 @@ class UserAdmin(BaseUserAdmin):
             {
                 "fields": (
                     "organization",
+                    "agency",
                     "role",
                     "phone",
                     "professional_email",
@@ -138,6 +163,7 @@ class UserAdmin(BaseUserAdmin):
             {
                 "fields": (
                     "organization",
+                    "agency",
                     "role",
                     "phone",
                     "professional_email",
@@ -160,6 +186,7 @@ class UserAdmin(BaseUserAdmin):
         "username",
         "email",
         "organization",
+        "agency",
         "role",
         "company_name",
         "client_status",
@@ -167,8 +194,8 @@ class UserAdmin(BaseUserAdmin):
         "is_verified",
         "is_staff",
     )
-    list_filter = ("organization", "role", "client_status", "technician_status", "is_verified", "is_staff", "is_superuser", "is_active")
-    inlines = [ClientContactInline]
+    list_filter = ("organization", "agency", "role", "client_status", "technician_status", "is_verified", "is_staff", "is_superuser", "is_active")
+    inlines = [ClientContactInline, ClientSiteInline]
 
 
 @admin.register(Product)
@@ -177,16 +204,18 @@ class ProductAdmin(admin.ModelAdmin):
         "name",
         "serial_number",
         "equipment_category",
+        "site",
         "equipment_type",
         "brand",
         "model_reference",
         "organization",
         "client",
         "status",
+        "location_status",
         "health_score",
         "warranty_end",
     )
-    list_filter = ("organization", "equipment_category", "equipment_type", "status", "iot_enabled")
+    list_filter = ("organization", "equipment_category", "equipment_type", "status", "location_status", "iot_enabled")
     search_fields = ("name", "serial_number", "sku", "brand", "model_reference", "client__username", "client__company_name", "organization__name")
     inlines = [ProductTelemetryInline, PredictiveAlertInline]
 
@@ -237,7 +266,14 @@ class InterventionAdmin(admin.ModelAdmin):
     list_display = ("ticket", "agent", "intervention_type", "status", "scheduled_for", "time_spent_minutes", "report_generated_at")
     list_filter = ("intervention_type", "status")
     search_fields = ("ticket__reference", "agent__username", "action_taken", "diagnosis")
-    inlines = [InterventionMediaInline]
+    inlines = [InterventionPartUsageInline, InterventionMediaInline]
+
+
+@admin.register(InterventionPartUsage)
+class InterventionPartUsageAdmin(admin.ModelAdmin):
+    list_display = ("intervention", "spare_part", "reference_snapshot", "quantity", "unit_snapshot")
+    list_filter = ("organization", "category_snapshot")
+    search_fields = ("intervention__ticket__reference", "spare_part__reference", "name_snapshot", "reference_snapshot")
 
 
 @admin.register(SupportSession)
@@ -261,11 +297,32 @@ class ClientContactAdmin(admin.ModelAdmin):
     search_fields = ("client__username", "client__company_name", "first_name", "last_name", "email", "phone")
 
 
+@admin.register(ClientSite)
+class ClientSiteAdmin(admin.ModelAdmin):
+    list_display = ("name", "client", "agency", "city", "is_primary", "is_active")
+    list_filter = ("organization", "agency", "city", "is_primary", "is_active")
+    search_fields = ("name", "code", "address", "city", "client__username", "client__company_name")
+
+
 @admin.register(EquipmentCategory)
 class EquipmentCategoryAdmin(admin.ModelAdmin):
     list_display = ("name", "code", "organization", "is_active")
     list_filter = ("organization", "is_active")
     search_fields = ("name", "code", "description", "organization__name")
+
+
+@admin.register(SparePart)
+class SparePartAdmin(admin.ModelAdmin):
+    list_display = ("reference", "name", "category", "equipment_category", "organization", "unit", "is_active")
+    list_filter = ("organization", "category", "equipment_category", "is_active")
+    search_fields = ("reference", "name", "category", "description")
+
+
+@admin.register(EquipmentLocationHistory)
+class EquipmentLocationHistoryAdmin(admin.ModelAdmin):
+    list_display = ("product", "from_site", "to_site", "to_location_status", "moved_by", "moved_at")
+    list_filter = ("organization", "to_location_status", "moved_at")
+    search_fields = ("product__serial_number", "from_location", "to_location", "reason")
 
 
 @admin.register(TicketAssignment)
@@ -303,6 +360,13 @@ class MaintenanceReportAdmin(admin.ModelAdmin):
     list_display = ("maintenance_ticket", "technician", "final_status", "anomaly_detected", "actual_finished_at", "report_pdf")
     list_filter = ("organization", "final_status", "anomaly_detected")
     search_fields = ("maintenance_ticket__title", "technician__username", "observations", "parts_used")
+
+
+@admin.register(MaintenancePartUsage)
+class MaintenancePartUsageAdmin(admin.ModelAdmin):
+    list_display = ("report", "spare_part", "reference_snapshot", "quantity", "unit_snapshot")
+    list_filter = ("organization", "category_snapshot")
+    search_fields = ("report__maintenance_ticket__title", "spare_part__reference", "name_snapshot", "reference_snapshot")
 
 
 @admin.register(MaintenanceReportPhoto)
@@ -360,6 +424,13 @@ class DeviceRegistrationAdmin(admin.ModelAdmin):
     list_display = ("user", "platform", "device_id", "is_active", "last_seen_at", "updated_at")
     list_filter = ("platform", "is_active")
     search_fields = ("user__username", "token", "device_id", "app_version")
+
+
+@admin.register(OfflineSyncOperation)
+class OfflineSyncOperationAdmin(admin.ModelAdmin):
+    list_display = ("user", "method", "endpoint", "status", "client_created_at", "applied_at", "created_at")
+    list_filter = ("organization", "method", "status", "created_at")
+    search_fields = ("user__username", "endpoint", "operation_uuid", "error_message")
 
 
 @admin.register(OfferRecommendation)

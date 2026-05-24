@@ -16,25 +16,31 @@ from rest_framework.test import APIClient
 from .forms import TicketCreateForm
 from .models import (
     AccountCredit,
+    Agency,
     AIActionLog,
     AuditLog,
+    ClientSite,
     DeviceRegistration,
     EquipmentCategory,
+    EquipmentLocationHistory,
     GeneratedReport,
     FinancialTransaction,
     KnowledgeArticle,
     Intervention,
+    InterventionPartUsage,
     MaintenanceProgram,
     MaintenanceReport,
     MaintenanceReportPhoto,
     MaintenanceTicket,
     Message,
     Notification,
+    OfflineSyncOperation,
     Organization,
     PredictiveAlert,
     Product,
     ProductTelemetry,
     SlaRule,
+    SparePart,
     TicketAttachment,
     TicketAssignment,
     TicketFeedback,
@@ -2400,6 +2406,214 @@ class SavPlatformTests(TestCase):
 
         self.assertRegex(ticket.reference, r"^ASS-SAV-\d{2}-\d{4}-\d{5}$")
 
+    def test_cdc_v3_equipment_status_and_ticket_domains_are_available(self):
+        self.assertEqual(self.product.status, Product.STATUS_OPERATIONAL)
+        self.product.status = Product.STATUS_ACTIVE
+        self.product.save()
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.status, Product.STATUS_OPERATIONAL)
+
+        domain_values = {value for value, _label in Ticket.BUSINESS_DOMAIN_CHOICES}
+        self.assertIn(Ticket.DOMAIN_CFAO, domain_values)
+        self.assertIn(Ticket.DOMAIN_MONETICS, domain_values)
+        self.assertIn(Ticket.DOMAIN_GEOLOCATION, domain_values)
+
+    def test_agency_scope_limits_responsable_to_own_zone(self):
+        douala = Agency.objects.create(organization=self.organization, name="Agence Douala", city="Douala")
+        garoua = Agency.objects.create(organization=self.organization, name="Agence Garoua", city="Garoua")
+        self.manager.agency = douala
+        self.manager.save(update_fields=["agency"])
+        self.client_user.agency = douala
+        self.client_user.save(update_fields=["agency"])
+        garoua_client = User.objects.create_user(
+            username="client_garoua",
+            password="secret123",
+            organization=self.organization,
+            agency=garoua,
+            role=User.ROLE_CLIENT,
+            company_name="Client Garoua",
+        )
+        garoua_product = Product.objects.create(
+            client=garoua_client,
+            name="Climatiseur agence nord",
+            sku="GAR-CLIM",
+            serial_number="GAR-0001",
+        )
+        douala_ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            title="Ticket Douala",
+            description="Visible par le responsable Douala.",
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+        Ticket.objects.create(
+            client=garoua_client,
+            product=garoua_product,
+            title="Ticket Garoua",
+            description="Ne doit pas apparaitre dans le scope Douala.",
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+
+        response = self.api.get(reverse("sav_api:ticket-list"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.data["results"] if isinstance(response.data, dict) and "results" in response.data else response.data
+        references = {item["reference"] for item in payload}
+        self.assertIn(douala_ticket.reference, references)
+        self.assertNotIn("Ticket Garoua", {item["title"] for item in payload})
+
+    def test_product_transfer_location_records_history_and_new_status(self):
+        workshop_note = "Atelier central Douala - banc de test"
+
+        response = self.api.post(
+            reverse("sav_api:product-transfer-location", args=[self.product.pk]),
+            {
+                "to_location": workshop_note,
+                "to_location_status": Product.LOCATION_WORKSHOP,
+                "reason": "Diagnostic approfondi en atelier.",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.location_status, Product.LOCATION_WORKSHOP)
+        self.assertEqual(self.product.detailed_location, workshop_note)
+        history = EquipmentLocationHistory.objects.get(product=self.product)
+        self.assertEqual(history.from_client, self.client_user)
+        self.assertEqual(history.to_client, self.client_user)
+        self.assertEqual(history.to_location_status, Product.LOCATION_WORKSHOP)
+        self.assertEqual(history.moved_by, self.manager)
+
+    def test_product_transfer_to_client_site_updates_client_site_relation(self):
+        site = ClientSite.objects.create(
+            client=self.client_user,
+            agency=Agency.objects.create(organization=self.organization, name="Agence Bonanjo", city="Douala"),
+            name="Siege Bonanjo",
+            address="Bonanjo, Douala",
+            city="Douala",
+        )
+
+        response = self.api.post(
+            reverse("sav_api:product-transfer-location", args=[self.product.pk]),
+            {
+                "to_site": site.pk,
+                "to_location_status": Product.LOCATION_INSTALLED,
+                "reason": "Installation sur le site principal.",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.site, site)
+        self.assertEqual(self.product.installation_address, "Bonanjo, Douala")
+
+    def test_spare_part_catalog_usage_snapshots_reference_on_intervention(self):
+        part_response = self.api.post(
+            reverse("sav_api:spare-part-list"),
+            {
+                "name": "Filtre climatisation 18000 BTU",
+                "reference": "CLIM-FILT-18K",
+                "category": "Froid",
+                "equipment_category": self.category.pk,
+                "unit": "piece",
+            },
+            format="json",
+        )
+        self.assertEqual(part_response.status_code, 201)
+        spare_part = SparePart.objects.get(reference="CLIM-FILT-18K")
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            assigned_agent=self.agent,
+            title="Remplacement filtre",
+            description="Intervention avec piece referencee.",
+            status=Ticket.STATUS_IN_PROGRESS,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+        intervention = Intervention.objects.create(
+            ticket=ticket,
+            agent=self.agent,
+            diagnosis="Filtre encrasse.",
+            action_taken="Remplacement du filtre.",
+        )
+
+        usage_response = self.api.post(
+            reverse("sav_api:intervention-part-usage-list"),
+            {
+                "intervention": intervention.pk,
+                "spare_part": spare_part.pk,
+                "quantity": "2.00",
+                "note": "Deux filtres remplaces.",
+            },
+            format="json",
+        )
+
+        self.assertEqual(usage_response.status_code, 201)
+        usage = InterventionPartUsage.objects.get(intervention=intervention)
+        self.assertEqual(usage.reference_snapshot, "CLIM-FILT-18K")
+        self.assertEqual(usage.name_snapshot, "Filtre climatisation 18000 BTU")
+        self.assertEqual(str(usage.quantity), "2.00")
+
+    def test_knowledge_base_filters_internal_articles_from_client(self):
+        KnowledgeArticle.objects.create(
+            organization=self.organization,
+            title="Procedure interne serveur",
+            category="depannage",
+            equipment_category=self.category,
+            summary="Procedure reservee aux techniciens.",
+            content="Acces interne uniquement.",
+            status=KnowledgeArticle.STATUS_PUBLISHED,
+            audience=KnowledgeArticle.AUDIENCE_INTERNAL,
+        )
+
+        self.api.force_authenticate(user=self.client_user)
+        client_response = self.api.get(reverse("sav_api:knowledge-article-list"))
+        self.assertEqual(client_response.status_code, 200)
+        client_payload = (
+            client_response.data["results"]
+            if isinstance(client_response.data, dict) and "results" in client_response.data
+            else client_response.data
+        )
+        client_titles = {item["title"] for item in client_payload}
+        self.assertIn("Guide de verification du cablage", client_titles)
+        self.assertNotIn("Procedure interne serveur", client_titles)
+
+        self.api.force_authenticate(user=self.manager)
+        manager_response = self.api.get(reverse("sav_api:knowledge-article-list"))
+        self.assertEqual(manager_response.status_code, 200)
+        manager_payload = (
+            manager_response.data["results"]
+            if isinstance(manager_response.data, dict) and "results" in manager_response.data
+            else manager_response.data
+        )
+        manager_titles = {item["title"] for item in manager_payload}
+        self.assertIn("Procedure interne serveur", manager_titles)
+
+    def test_offline_sync_operation_can_be_queued_by_mobile_client(self):
+        self.api.force_authenticate(user=self.technician)
+
+        response = self.api.post(
+            reverse("sav_api:offline-sync-list"),
+            {
+                "endpoint": "/api/maintenance/tickets/42/cloturer/",
+                "method": OfflineSyncOperation.METHOD_POST,
+                "payload": {
+                    "observations": "Rapport saisi hors ligne.",
+                    "final_status": MaintenanceTicket.STATUS_DONE,
+                },
+                "client_created_at": timezone.now().isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        operation = OfflineSyncOperation.objects.get(endpoint="/api/maintenance/tickets/42/cloturer/")
+        self.assertEqual(operation.user, self.technician)
+        self.assertEqual(operation.organization, self.organization)
+        self.assertEqual(operation.status, OfflineSyncOperation.STATUS_PENDING)
+
     def test_maintenance_program_publish_creates_planned_tickets(self):
         program = MaintenanceProgram.objects.create(
             organization=self.organization,
@@ -2472,7 +2686,42 @@ class SavPlatformTests(TestCase):
         self.assertTrue(MaintenanceReport.objects.filter(maintenance_ticket=maintenance_ticket).exists())
         self.assertIsNotNone(maintenance_ticket.anomaly_ticket)
         self.assertEqual(maintenance_ticket.anomaly_ticket.category, Ticket.CATEGORY_BREAKDOWN)
+        self.assertEqual(maintenance_ticket.anomaly_ticket.business_domain, Ticket.DOMAIN_COOLING)
         self.assertTrue(maintenance_ticket.anomaly_ticket.reference.startswith("ASS-SAV-"))
+
+    def test_cfao_maintenance_anomaly_generates_cfao_incident_ticket(self):
+        maintenance_ticket = MaintenanceTicket.objects.create(
+            organization=self.organization,
+            responsible=self.manager,
+            technician=self.technician,
+            client=self.client_user,
+            title="Controle CFAO",
+            service=MaintenanceProgram.SERVICE_CFAO,
+            periodicity=MaintenanceTicket.PERIOD_QUARTERLY,
+            scheduled_date=timezone.localdate(),
+            status=MaintenanceTicket.STATUS_IN_PROGRESS,
+            checklist=["Controle plan", "Verification dossier technique"],
+            priority=Ticket.PRIORITY_NORMAL,
+            started_at=timezone.now() - timedelta(minutes=30),
+        )
+        self.api.force_authenticate(user=self.technician)
+
+        response = self.api.post(
+            reverse("sav_api:maintenance-ticket-cloturer", args=[maintenance_ticket.pk]),
+            {
+                "final_status": MaintenanceTicket.STATUS_ANOMALY,
+                "actual_started_at": (timezone.now() - timedelta(minutes=30)).isoformat(),
+                "actual_finished_at": timezone.now().isoformat(),
+                "checklist_completed": ["Controle plan", "Verification dossier technique"],
+                "observations": "Anomalie detectee sur le dossier technique CFAO.",
+                "anomaly_detected": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        maintenance_ticket.refresh_from_db()
+        self.assertEqual(maintenance_ticket.anomaly_ticket.business_domain, Ticket.DOMAIN_CFAO)
 
     def test_maintenance_ticket_acknowledge_and_cancel_actions(self):
         maintenance_ticket = MaintenanceTicket.objects.create(

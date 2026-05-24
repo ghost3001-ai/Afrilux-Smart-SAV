@@ -19,28 +19,35 @@ from .ai import OpenAIResponsesClient
 from .comms import create_external_channel_notifications, deliver_notification
 from .models import (
     AccountCredit,
+    Agency,
     AIActionLog,
     AuditLog,
     AutomationRule,
     ChecklistTemplate,
     ClientContact,
+    ClientSite,
     EquipmentCategory,
+    EquipmentLocationHistory,
     FinancialTransaction,
     GeneratedReport,
     Intervention,
     InterventionMedia,
+    InterventionPartUsage,
     KnowledgeArticle,
+    MaintenancePartUsage,
     MaintenanceProgram,
     MaintenanceReport,
     MaintenanceReportPhoto,
     MaintenanceTicket,
     Message,
     Notification,
+    OfflineSyncOperation,
     Organization,
     OfferRecommendation,
     PredictiveAlert,
     Product,
     SlaRule,
+    SparePart,
     SupportSession,
     TicketFeedback,
     Ticket,
@@ -260,6 +267,65 @@ def has_backoffice_access(user):
     return bool(is_internal_user(user) or is_read_only_user(user))
 
 
+GLOBAL_AGENCY_SCOPE_ROLES = {
+    User.ROLE_ADMIN,
+    User.ROLE_AUDITOR,
+}
+
+
+def should_scope_to_agency(user):
+    return bool(
+        user
+        and user.is_authenticated
+        and getattr(user, "agency_id", None)
+        and not user.is_superuser
+        and getattr(user, "role", "") not in GLOBAL_AGENCY_SCOPE_ROLES
+    )
+
+
+def _apply_user_agency_scope(queryset, user):
+    if not should_scope_to_agency(user):
+        return queryset
+    return queryset.filter(Q(agency=user.agency) | Q(sites__agency=user.agency)).distinct()
+
+
+def _apply_client_site_agency_scope(queryset, user):
+    if not should_scope_to_agency(user):
+        return queryset
+    return queryset.filter(Q(agency=user.agency) | Q(client__agency=user.agency)).distinct()
+
+
+def _apply_product_agency_scope(queryset, user):
+    if not should_scope_to_agency(user):
+        return queryset
+    return queryset.filter(Q(client__agency=user.agency) | Q(site__agency=user.agency)).distinct()
+
+
+def _apply_ticket_agency_scope(queryset, user):
+    if not should_scope_to_agency(user):
+        return queryset
+    return queryset.filter(
+        Q(client__agency=user.agency)
+        | Q(product__client__agency=user.agency)
+        | Q(product__site__agency=user.agency)
+        | Q(created_by__agency=user.agency)
+        | Q(assigned_agent__agency=user.agency)
+        | Q(interventions__agent__agency=user.agency)
+    ).distinct()
+
+
+def _apply_maintenance_agency_scope(queryset, user):
+    if not should_scope_to_agency(user):
+        return queryset
+    return queryset.filter(
+        Q(client__agency=user.agency)
+        | Q(products__client__agency=user.agency)
+        | Q(products__site__agency=user.agency)
+        | Q(technician__agency=user.agency)
+        | Q(responsible__agency=user.agency)
+    ).distinct()
+
+
 def can_manage_maintenance(user):
     return bool(
         user
@@ -321,14 +387,25 @@ def scope_user_queryset(queryset, user):
         return queryset
     if has_oversight_access(user):
         if user.organization_id:
-            return queryset.filter(organization=user.organization)
-        return queryset
+            queryset = queryset.filter(organization=user.organization)
+        return _apply_user_agency_scope(queryset, user)
     if getattr(user, "role", "") in set(User.INTERNAL_ROLES):
         queryset = queryset.filter(role=User.ROLE_CLIENT)
         if user.organization_id:
-            return queryset.filter(organization=user.organization)
-        return queryset
+            queryset = queryset.filter(organization=user.organization)
+        return _apply_user_agency_scope(queryset, user)
     return queryset.filter(id=user.id)
+
+
+def scope_agency_queryset(queryset, user):
+    if not user or not user.is_authenticated:
+        return queryset.none()
+    if user.is_superuser or not user.organization_id:
+        return queryset
+    queryset = queryset.filter(organization=user.organization)
+    if should_scope_to_agency(user):
+        queryset = queryset.filter(id=user.agency_id)
+    return queryset
 
 
 def scope_ticket_queryset(queryset, user):
@@ -343,6 +420,7 @@ def scope_ticket_queryset(queryset, user):
                 | Q(client__organization=user.organization)
                 | Q(product__organization=user.organization)
             ).distinct()
+        queryset = _apply_ticket_agency_scope(queryset, user)
         if is_admin_user(user) or getattr(user, "role", "") == User.ROLE_HEAD_SAV:
             return queryset
         if is_support_user(user):
@@ -359,7 +437,14 @@ def scope_ticket_queryset(queryset, user):
 
 
 def scope_product_queryset(queryset, user):
-    return scope_by_access(queryset, user, "client", "organization")
+    if not user or not user.is_authenticated:
+        return queryset.none()
+    if has_backoffice_access(user):
+        if user.is_superuser or not user.organization_id:
+            return queryset
+        queryset = queryset.filter(Q(organization=user.organization) | Q(client__organization=user.organization)).distinct()
+        return _apply_product_agency_scope(queryset, user)
+    return queryset.filter(client=user)
 
 
 def scope_equipment_category_queryset(queryset, user):
@@ -406,7 +491,36 @@ def scope_ticket_assignment_queryset(queryset, user):
 
 
 def scope_client_contact_queryset(queryset, user):
-    return scope_by_access(queryset, user, "client", "organization")
+    queryset = scope_by_access(queryset, user, "client", "organization")
+    if should_scope_to_agency(user):
+        return queryset.filter(Q(client__agency=user.agency) | Q(client__sites__agency=user.agency)).distinct()
+    return queryset
+
+
+def scope_client_site_queryset(queryset, user):
+    queryset = scope_by_access(queryset, user, "client", "organization")
+    return _apply_client_site_agency_scope(queryset, user)
+
+
+def scope_spare_part_queryset(queryset, user):
+    if not user or not user.is_authenticated:
+        return queryset.none()
+    if user.is_superuser or not user.organization_id:
+        return queryset
+    return queryset.filter(Q(organization=user.organization) | Q(organization__isnull=True))
+
+
+def scope_equipment_location_history_queryset(queryset, user):
+    return scope_by_access(queryset, user, "product__client", "organization")
+
+
+def scope_intervention_part_usage_queryset(queryset, user):
+    return _scope_ticket_related_queryset(queryset, user, "intervention__ticket")
+
+
+def scope_maintenance_part_usage_queryset(queryset, user):
+    visible_reports = scope_maintenance_report_queryset(MaintenanceReport.objects.all(), user)
+    return queryset.filter(report__in=visible_reports)
 
 
 def scope_support_session_queryset(queryset, user):
@@ -451,7 +565,22 @@ def scope_financial_transaction_queryset(queryset, user):
 
 
 def scope_ticket_feedback_queryset(queryset, user):
-    return scope_by_access(queryset, user, "ticket__client", "organization")
+    queryset = scope_by_access(queryset, user, "ticket__client", "organization")
+    if should_scope_to_agency(user):
+        return queryset.filter(Q(ticket__client__agency=user.agency) | Q(ticket__product__site__agency=user.agency)).distinct()
+    return queryset
+
+
+def scope_offline_sync_operation_queryset(queryset, user):
+    if not user or not user.is_authenticated:
+        return queryset.none()
+    if user.is_superuser:
+        return queryset
+    if has_backoffice_access(user):
+        if user.organization_id:
+            return queryset.filter(organization=user.organization)
+        return queryset
+    return queryset.filter(user=user)
 
 
 def scope_ai_action_queryset(queryset, user):
@@ -485,7 +614,14 @@ def scope_maintenance_program_queryset(queryset, user):
         return queryset
     if can_manage_maintenance(user) or is_read_only_user(user):
         if user.organization_id:
-            return queryset.filter(organization=user.organization)
+            queryset = queryset.filter(organization=user.organization)
+        if should_scope_to_agency(user):
+            queryset = queryset.filter(
+                Q(responsible__agency=user.agency)
+                | Q(tickets__client__agency=user.agency)
+                | Q(tickets__products__site__agency=user.agency)
+                | Q(tickets__technician__agency=user.agency)
+            ).distinct()
         return queryset
     if getattr(user, "role", "") in set(User.ASSIGNABLE_ROLES):
         return queryset.filter(tickets__technician=user).distinct()
@@ -499,12 +635,12 @@ def scope_maintenance_ticket_queryset(queryset, user):
         return queryset
     if can_manage_maintenance(user) or is_read_only_user(user):
         if user.organization_id:
-            return queryset.filter(
+            queryset = queryset.filter(
                 Q(organization=user.organization)
                 | Q(client__organization=user.organization)
                 | Q(technician__organization=user.organization)
             ).distinct()
-        return queryset
+        return _apply_maintenance_agency_scope(queryset, user)
     if getattr(user, "role", "") in set(User.ASSIGNABLE_ROLES):
         return queryset.filter(technician=user)
     if getattr(user, "role", "") == User.ROLE_CLIENT:
@@ -592,6 +728,64 @@ def field_technician_queryset_for_organization(organization=None):
     if scoped_queryset.exists():
         return scoped_queryset
     return queryset.filter(organization__isnull=True)
+
+
+def transfer_product_location(
+    *,
+    product,
+    to_client=None,
+    to_site=None,
+    to_location="",
+    to_location_status=Product.LOCATION_INSTALLED,
+    moved_by=None,
+    reason="",
+):
+    if to_site is not None:
+        to_client = to_site.client
+        if not to_location:
+            to_location = to_site.address
+    if to_client is None:
+        to_client = product.client
+    if to_location_status not in {choice[0] for choice in Product.LOCATION_STATUS_CHOICES}:
+        raise ValueError("Statut de localisation equipement invalide.")
+    if product.organization_id and to_client.organization_id and product.organization_id != to_client.organization_id:
+        raise ValueError("Impossible de transferer un equipement vers une autre organisation.")
+    if to_site is not None and to_site.client_id != to_client.id:
+        raise ValueError("Le site cible n'appartient pas au client cible.")
+
+    history = EquipmentLocationHistory.objects.create(
+        product=product,
+        from_client=product.client,
+        from_site=product.site,
+        from_location=product.detailed_location or product.installation_address,
+        from_location_status=product.location_status,
+        to_client=to_client,
+        to_site=to_site,
+        to_location=to_location,
+        to_location_status=to_location_status,
+        moved_by=moved_by if getattr(moved_by, "is_authenticated", False) else None,
+        reason=reason,
+    )
+    product.client = to_client
+    product.site = to_site
+    product.location_status = to_location_status
+    if to_location:
+        product.detailed_location = to_location
+    if to_site and to_site.address:
+        product.installation_address = to_site.address
+    product.save()
+    log_audit_event(
+        actor=moved_by if getattr(moved_by, "is_authenticated", False) else None,
+        action="equipment_location_transferred",
+        instance=product,
+        details={
+            "history_id": history.id,
+            "to_client_id": to_client.id if to_client else None,
+            "to_site_id": to_site.id if to_site else None,
+            "to_location_status": to_location_status,
+        },
+    )
+    return history
 
 
 def _select_least_loaded_agent_for_roles(*, roles, organization=None, exclude_user_ids=None):
@@ -1273,6 +1467,7 @@ def generate_intervention_pdf(intervention, persist=True, force=False):
     buffer = BytesIO()
     document = SimpleDocTemplate(buffer, pagesize=A4)
     styles = getSampleStyleSheet()
+    parts_text = intervention.parts_used or _part_usage_records_summary(intervention.part_usages.select_related("spare_part").all()) or "-"
     data = [
         ["Numero ticket", intervention.ticket.reference],
         ["Client", str(intervention.ticket.client)],
@@ -1283,7 +1478,7 @@ def generate_intervention_pdf(intervention, persist=True, force=False):
         ["Lieu", intervention.location_snapshot or intervention.ticket.location or "-"],
         ["Diagnostic", intervention.diagnosis or "-"],
         ["Action effectuee", intervention.action_taken or "-"],
-        ["Pieces utilisees", intervention.parts_used or "-"],
+        ["Pieces utilisees", parts_text],
         ["Temps passe", f"{intervention.time_spent_minutes} min"],
         ["Signature client", intervention.client_signed_by or "-"],
     ]
@@ -1333,6 +1528,7 @@ def generate_maintenance_report_pdf(report, persist=True, force=False):
     maintenance_ticket = report.maintenance_ticket
     products = list(maintenance_ticket.products.all())
     product_label = ", ".join(product.serial_number for product in products) if products else "-"
+    parts_text = report.parts_used or _part_usage_records_summary(report.part_usages.select_related("spare_part").all()) or "-"
     checklist_rows = [["Operation realisee"]]
     checklist_rows.extend([[str(item)] for item in report.checklist_completed or ["-"]])
     data = [
@@ -1378,7 +1574,7 @@ def generate_maintenance_report_pdf(report, persist=True, force=False):
             Paragraph(report.observations or "-", styles["BodyText"]),
             Spacer(1, 12),
             Paragraph("Pieces / consommables", styles["Heading2"]),
-            Paragraph(report.parts_used or "-", styles["BodyText"]),
+            Paragraph(parts_text, styles["BodyText"]),
         ]
     )
     photo_items = list(report.photo_files.all()[:5])
@@ -1645,6 +1841,20 @@ def assign_ticket_to_technician(ticket, technician, *, actor=None, note=""):
         raise ValueError("La cible doit etre active et disponible.")
     if ticket.organization_id and technician.organization_id and ticket.organization_id != technician.organization_id:
         raise ValueError("Le technicien doit appartenir a la meme organisation que le ticket.")
+    if should_scope_to_agency(actor):
+        ticket_agency_ids = {
+            item
+            for item in [
+                getattr(ticket.client, "agency_id", None),
+                getattr(getattr(ticket.product, "client", None), "agency_id", None),
+                getattr(getattr(ticket.product, "site", None), "agency_id", None),
+            ]
+            if item
+        }
+        if technician.agency_id and technician.agency_id != actor.agency_id:
+            raise ValueError("Le technicien cible appartient a une autre agence.")
+        if ticket_agency_ids and actor.agency_id not in ticket_agency_ids:
+            raise ValueError("Ce ticket appartient a une autre agence.")
 
     previous_status = ticket.status
     previous_assigned_agent = ticket.assigned_agent
@@ -1852,10 +2062,173 @@ def _coerce_id_list(value):
     return ids
 
 
+def _coerce_decimal_quantity(value, default=Decimal("1.00")):
+    if value in (None, ""):
+        return default
+    try:
+        quantity = Decimal(str(value))
+    except Exception as exc:
+        raise ValueError("La quantite de piece doit etre numerique.") from exc
+    if quantity <= 0:
+        raise ValueError("La quantite de piece doit etre superieure a zero.")
+    return quantity
+
+
+def _part_queryset_for_organization(organization):
+    queryset = SparePart.objects.filter(is_active=True)
+    if organization is not None:
+        queryset = queryset.filter(Q(organization=organization) | Q(organization__isnull=True))
+    return queryset
+
+
+def _normalize_part_usage_payloads(*, organization=None, spare_parts=None, structured_parts_used=None):
+    payloads = []
+    part_queryset = _part_queryset_for_organization(organization)
+
+    for item in spare_parts or []:
+        if isinstance(item, SparePart):
+            part = item
+            if organization and part.organization_id and part.organization_id != organization.id:
+                raise ValueError("Une piece selectionnee appartient a une autre organisation.")
+        else:
+            try:
+                part_id = int(str(item).strip())
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Les identifiants de pieces doivent etre numeriques.") from exc
+            part = part_queryset.filter(pk=part_id).first()
+            if part is None:
+                raise ValueError("Piece catalogue introuvable ou inactive.")
+        payloads.append(
+            {
+                "spare_part": part,
+                "quantity": Decimal("1.00"),
+                "note": "",
+            }
+        )
+
+    for item in _coerce_json_list(structured_parts_used, "pieces_catalogue"):
+        if isinstance(item, str):
+            name = item.strip()
+            if not name:
+                continue
+            payloads.append(
+                {
+                    "spare_part": None,
+                    "name_snapshot": name[:180],
+                    "reference_snapshot": "",
+                    "category_snapshot": "",
+                    "unit_snapshot": "piece",
+                    "quantity": Decimal("1.00"),
+                    "note": "",
+                }
+            )
+            continue
+        if not isinstance(item, dict):
+            raise ValueError("Chaque piece catalogue doit etre un objet JSON ou une ligne texte.")
+
+        part = None
+        part_id = item.get("spare_part") or item.get("spare_part_id") or item.get("part_id") or item.get("piece_id")
+        reference = str(item.get("reference") or item.get("ref") or "").strip()
+        if part_id:
+            try:
+                part = part_queryset.filter(pk=int(part_id)).first()
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Les identifiants de pieces doivent etre numeriques.") from exc
+        elif reference:
+            part = part_queryset.filter(reference__iexact=reference).first()
+        if (part_id or reference) and part is None:
+            raise ValueError("Piece catalogue introuvable ou inactive.")
+
+        payloads.append(
+            {
+                "spare_part": part,
+                "name_snapshot": str(item.get("name") or item.get("designation") or (part.name if part else ""))[:180],
+                "reference_snapshot": str(reference or (part.reference if part else ""))[:120],
+                "category_snapshot": str(item.get("category") or (part.category if part else ""))[:120],
+                "unit_snapshot": str(item.get("unit") or item.get("unite") or (part.unit if part else "piece"))[:40],
+                "quantity": _coerce_decimal_quantity(item.get("quantity") or item.get("quantite") or item.get("qty")),
+                "note": str(item.get("note") or item.get("comment") or "")[:1000],
+            }
+        )
+    return payloads
+
+
+def _part_usage_summary(payloads):
+    lines = []
+    for payload in payloads:
+        part = payload.get("spare_part")
+        reference = payload.get("reference_snapshot") or (part.reference if part else "")
+        name = payload.get("name_snapshot") or (part.name if part else "")
+        quantity = payload.get("quantity") or Decimal("1.00")
+        unit = payload.get("unit_snapshot") or (part.unit if part else "piece")
+        label = " - ".join(chunk for chunk in [reference, name] if chunk) or "Piece"
+        lines.append(f"{label} x {quantity:g} {unit}".strip())
+    return "\n".join(lines)
+
+
+def _part_usage_records_summary(records):
+    lines = []
+    for usage in records:
+        part = usage.spare_part
+        reference = usage.reference_snapshot or (part.reference if part else "")
+        name = usage.name_snapshot or (part.name if part else "")
+        quantity = usage.quantity or Decimal("1.00")
+        unit = usage.unit_snapshot or (part.unit if part else "piece")
+        label = " - ".join(chunk for chunk in [reference, name] if chunk) or "Piece"
+        lines.append(f"{label} x {quantity:g} {unit}".strip())
+    return "\n".join(lines)
+
+
+def record_intervention_part_usages(intervention, *, spare_parts=None, structured_parts_used=None, replace=False):
+    payloads = _normalize_part_usage_payloads(
+        organization=intervention.organization,
+        spare_parts=spare_parts,
+        structured_parts_used=structured_parts_used,
+    )
+    if replace:
+        intervention.part_usages.all().delete()
+    created = []
+    for payload in payloads:
+        created.append(
+            InterventionPartUsage.objects.create(
+                intervention=intervention,
+                organization=intervention.organization,
+                **payload,
+            )
+        )
+    if created and not (intervention.parts_used or "").strip():
+        intervention.parts_used = _part_usage_summary(payloads)
+        intervention.save(update_fields=["parts_used", "updated_at"])
+    return created
+
+
+def record_maintenance_part_usages(report, *, spare_parts=None, structured_parts_used=None, replace=False):
+    payloads = _normalize_part_usage_payloads(
+        organization=report.organization,
+        spare_parts=spare_parts,
+        structured_parts_used=structured_parts_used,
+    )
+    if replace:
+        report.part_usages.all().delete()
+    created = []
+    for payload in payloads:
+        created.append(
+            MaintenancePartUsage.objects.create(
+                report=report,
+                organization=report.organization,
+                **payload,
+            )
+        )
+    if created and not (report.parts_used or "").strip():
+        report.parts_used = _part_usage_summary(payloads)
+        report.save(update_fields=["parts_used", "updated_at"])
+    return created
+
+
 def _business_domain_for_maintenance_service(service):
     mapping = {
         MaintenanceProgram.SERVICE_IT: Ticket.DOMAIN_IT,
-        MaintenanceProgram.SERVICE_CFAO: Ticket.DOMAIN_OTHER,
+        MaintenanceProgram.SERVICE_CFAO: Ticket.DOMAIN_CFAO,
         MaintenanceProgram.SERVICE_GENERATOR: Ticket.DOMAIN_GENERATOR,
         MaintenanceProgram.SERVICE_COOLING: Ticket.DOMAIN_COOLING,
     }
@@ -2126,6 +2499,8 @@ def close_maintenance_ticket(
     checklist_completed=None,
     observations="",
     parts_used="",
+    spare_parts=None,
+    structured_parts_used=None,
     anomaly_detected=None,
     photos=None,
     client_signed_by="",
@@ -2175,6 +2550,12 @@ def close_maintenance_ticket(
     report, _created = MaintenanceReport.objects.update_or_create(
         maintenance_ticket=maintenance_ticket,
         defaults=report_defaults,
+    )
+    record_maintenance_part_usages(
+        report,
+        spare_parts=spare_parts,
+        structured_parts_used=structured_parts_used,
+        replace=True,
     )
     photo_records = []
     for uploaded_file in photo_files or []:
@@ -3453,6 +3834,40 @@ def notify_ticket_status_change(ticket, previous_status, *, actor=None):
                     message=f"Le ticket '{ticket.title}' a ete resolu.",
                 )
             )
+        if not hasattr(ticket, "feedback") and not Notification.objects.filter(
+            ticket=ticket,
+            recipient=ticket.client,
+            event_type="ticket_csat_request",
+        ).exists():
+            notifications.extend(
+                create_external_channel_notifications(
+                    recipient=ticket.client,
+                    ticket=ticket,
+                    event_type="ticket_csat_request",
+                    subject=f"Evaluation satisfaction {ticket.reference}",
+                    message=(
+                        "Votre ticket est resolu. Merci d'evaluer l'intervention: "
+                        "Satisfait / Moyen / Mecontent, avec un commentaire si besoin."
+                    ),
+                )
+            )
+    if ticket.status == Ticket.STATUS_CLOSED and not hasattr(ticket, "feedback") and not Notification.objects.filter(
+        ticket=ticket,
+        recipient=ticket.client,
+        event_type="ticket_csat_request",
+    ).exists():
+        notifications.extend(
+            create_external_channel_notifications(
+                recipient=ticket.client,
+                ticket=ticket,
+                event_type="ticket_csat_request",
+                subject=f"Evaluation satisfaction {ticket.reference}",
+                message=(
+                    "Votre ticket est ferme. Merci d'evaluer l'intervention: "
+                    "Satisfait / Moyen / Mecontent, avec un commentaire si besoin."
+                ),
+            )
+        )
     if previous_status in {Ticket.STATUS_RESOLVED, Ticket.STATUS_CLOSED} and ticket.status == Ticket.STATUS_NEW:
         recipients = manager_queryset_for_organization(ticket.organization)
         if ticket.assigned_agent_id:

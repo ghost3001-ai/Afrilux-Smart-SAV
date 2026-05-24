@@ -27,30 +27,37 @@ from .comms import (
 )
 from .models import (
     AccountCredit,
+    Agency,
     AIActionLog,
     AuditLog,
     AutomationRule,
     ChecklistTemplate,
     ClientContact,
+    ClientSite,
     DeviceRegistration,
     EquipmentCategory,
+    EquipmentLocationHistory,
     FinancialTransaction,
     GeneratedReport,
     Intervention,
     InterventionMedia,
+    InterventionPartUsage,
     KnowledgeArticle,
+    MaintenancePartUsage,
     MaintenanceProgram,
     MaintenanceReport,
     MaintenanceReportPhoto,
     MaintenanceTicket,
     Message,
     Notification,
+    OfflineSyncOperation,
     Organization,
     OfferRecommendation,
     PredictiveAlert,
     Product,
     ProductTelemetry,
     SlaRule,
+    SparePart,
     SupportSession,
     TicketAttachment,
     TicketAssignment,
@@ -71,30 +78,37 @@ from .reporting import (
 )
 from .serializers import (
     AccountCreditSerializer,
+    AgencySerializer,
     AIActionLogSerializer,
     AuditLogSerializer,
     AutomationRuleSerializer,
+    ClientSiteSerializer,
     ClientContactSerializer,
     ClientRegistrationSerializer,
     DeviceRegistrationSerializer,
     EquipmentCategorySerializer,
+    EquipmentLocationHistorySerializer,
     FinancialTransactionSerializer,
     GeneratedReportSerializer,
     InterventionSerializer,
     InterventionMediaSerializer,
+    InterventionPartUsageSerializer,
     KnowledgeArticleSerializer,
     ChecklistTemplateSerializer,
+    MaintenancePartUsageSerializer,
     MaintenanceProgramSerializer,
     MaintenanceReportSerializer,
     MaintenanceTicketSerializer,
     MessageSerializer,
     NotificationSerializer,
+    OfflineSyncOperationSerializer,
     OfferRecommendationSerializer,
     PredictiveAlertSerializer,
     ProductSerializer,
     ProductTelemetrySerializer,
     PublicOrganizationSerializer,
     SlaRuleSerializer,
+    SparePartSerializer,
     SupportSessionSerializer,
     TicketAttachmentSerializer,
     TicketAssignmentSerializer,
@@ -142,8 +156,11 @@ from .services import (
     run_automation_rules_for_ticket,
     run_predictive_analysis,
     start_maintenance_ticket,
+    transfer_product_location,
     validate_maintenance_report,
+    scope_agency_queryset,
     scope_equipment_category_queryset,
+    scope_equipment_location_history_queryset,
     scope_generated_report_queryset,
     scope_ai_action_queryset,
     scope_audit_log_queryset,
@@ -151,6 +168,9 @@ from .services import (
     scope_by_client_relation,
     scope_knowledge_article_queryset,
     scope_checklist_template_queryset,
+    scope_client_site_queryset,
+    scope_intervention_part_usage_queryset,
+    scope_maintenance_part_usage_queryset,
     scope_maintenance_program_queryset,
     scope_maintenance_report_queryset,
     scope_maintenance_ticket_queryset,
@@ -158,8 +178,10 @@ from .services import (
     scope_message_queryset,
     scope_notification_queryset,
     scope_offer_queryset,
+    scope_offline_sync_operation_queryset,
     scope_predictive_alert_queryset,
     scope_product_queryset,
+    scope_spare_part_queryset,
     scope_support_session_queryset,
     scope_sla_rule_queryset,
     scope_attachment_queryset,
@@ -356,6 +378,69 @@ class ClientViewSet(UserViewSet):
         self.audit("client_updated", instance)
 
 
+class AgencyViewSet(AuditedModelViewSet):
+    serializer_class = AgencySerializer
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["name", "code", "city", "region", "organization__name"]
+    ordering_fields = ["name", "city", "created_at"]
+
+    def get_permissions(self):
+        if self.request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            return [IsManagerUser()]
+        return [IsAuthenticatedSavUser()]
+
+    def get_queryset(self):
+        return scope_agency_queryset(Agency.objects.select_related("organization").all(), self.request.user)
+
+    def perform_create(self, serializer):
+        organization = serializer.validated_data.get("organization") or getattr(self.request.user, "organization", None)
+        if (
+            organization
+            and not self.request.user.is_superuser
+            and self.request.user.organization_id
+            and organization.id != self.request.user.organization_id
+        ):
+            raise PermissionDenied("Vous ne pouvez pas creer une agence pour une autre organisation.")
+        instance = serializer.save(organization=organization)
+        self.audit("agency_created", instance)
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        self.audit("agency_updated", instance)
+
+
+class ClientSiteViewSet(AuditedModelViewSet):
+    serializer_class = ClientSiteSerializer
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["name", "code", "address", "city", "client__username", "client__company_name"]
+    ordering_fields = ["name", "city", "created_at"]
+
+    def get_permissions(self):
+        if self.request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            return [IsInternalUser()]
+        return [IsAuthenticatedSavUser()]
+
+    def get_queryset(self):
+        queryset = ClientSite.objects.select_related("organization", "client", "agency").all()
+        return scope_client_site_queryset(queryset, self.request.user)
+
+    def perform_create(self, serializer):
+        client = serializer.validated_data.get("client")
+        if (
+            client
+            and not self.request.user.is_superuser
+            and self.request.user.organization_id
+            and client.organization_id != self.request.user.organization_id
+        ):
+            raise PermissionDenied("Vous ne pouvez pas creer un site pour une autre organisation.")
+        instance = serializer.save()
+        self.audit("client_site_created", instance)
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        self.audit("client_site_updated", instance)
+
+
 class EquipmentCategoryViewSet(AuditedModelViewSet):
     serializer_class = EquipmentCategorySerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -388,6 +473,38 @@ class EquipmentCategoryViewSet(AuditedModelViewSet):
         self.audit("equipment_category_updated", instance)
 
 
+class SparePartViewSet(AuditedModelViewSet):
+    serializer_class = SparePartSerializer
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["name", "reference", "category", "description"]
+    ordering_fields = ["name", "reference", "category", "created_at"]
+
+    def get_permissions(self):
+        if self.request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            return [IsInternalUser()]
+        return [IsAuthenticatedSavUser()]
+
+    def get_queryset(self):
+        queryset = SparePart.objects.select_related("organization", "equipment_category").all()
+        return scope_spare_part_queryset(queryset, self.request.user)
+
+    def perform_create(self, serializer):
+        organization = serializer.validated_data.get("organization") or getattr(self.request.user, "organization", None)
+        if (
+            organization
+            and not self.request.user.is_superuser
+            and self.request.user.organization_id
+            and organization.id != self.request.user.organization_id
+        ):
+            raise PermissionDenied("Vous ne pouvez pas creer une piece pour une autre organisation.")
+        instance = serializer.save(organization=organization)
+        self.audit("spare_part_created", instance)
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        self.audit("spare_part_updated", instance)
+
+
 class ProductViewSet(AuditedModelViewSet):
     serializer_class = ProductSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -395,18 +512,24 @@ class ProductViewSet(AuditedModelViewSet):
     ordering_fields = ["name", "warranty_end", "health_score", "created_at"]
 
     def get_permissions(self):
-        if self.action == "predictive_analysis":
+        if self.action in {"predictive_analysis", "transfer_location"}:
             return [IsInternalUser()]
         if self.request.method in {"POST", "PUT", "PATCH", "DELETE"}:
             return [IsInternalUser()]
         return [IsAuthenticatedSavUser()]
 
     def get_queryset(self):
-        queryset = Product.objects.select_related("client", "equipment_category").all()
+        queryset = Product.objects.select_related("client", "equipment_category", "site").all()
         queryset = scope_product_queryset(queryset, self.request.user)
         equipment_category = self.request.query_params.get("equipment_category")
         if equipment_category:
             queryset = queryset.filter(equipment_category_id=equipment_category)
+        site = self.request.query_params.get("site")
+        if site:
+            queryset = queryset.filter(site_id=site)
+        location_status = self.request.query_params.get("location_status")
+        if location_status:
+            queryset = queryset.filter(location_status=location_status)
         return queryset
 
     def perform_create(self, serializer):
@@ -440,6 +563,48 @@ class ProductViewSet(AuditedModelViewSet):
         product = self.get_object()
         result = run_predictive_analysis(product, approved_by=request.user)
         return Response(result)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsInternalUser], url_path="transfer-location")
+    def transfer_location(self, request, pk=None):
+        product = self.get_object()
+        to_site = None
+        to_client = product.client
+        if request.data.get("to_site"):
+            to_site = get_object_or_404(scope_client_site_queryset(ClientSite.objects.all(), request.user), pk=request.data["to_site"])
+            to_client = to_site.client
+        elif request.data.get("to_client"):
+            to_client = get_object_or_404(scope_user_queryset(User.objects.filter(role=User.ROLE_CLIENT), request.user), pk=request.data["to_client"])
+        history = transfer_product_location(
+            product=product,
+            to_client=to_client,
+            to_site=to_site,
+            to_location=request.data.get("to_location", ""),
+            to_location_status=request.data.get("to_location_status", Product.LOCATION_INSTALLED),
+            moved_by=request.user,
+            reason=request.data.get("reason", ""),
+        )
+        serializer = EquipmentLocationHistorySerializer(history, context=self.get_serializer_context())
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class EquipmentLocationHistoryViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = EquipmentLocationHistorySerializer
+    permission_classes = [IsAuthenticatedSavUser]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["product__serial_number", "to_location", "reason"]
+    ordering_fields = ["moved_at", "created_at"]
+
+    def get_queryset(self):
+        queryset = EquipmentLocationHistory.objects.select_related(
+            "organization",
+            "product",
+            "from_client",
+            "from_site",
+            "to_client",
+            "to_site",
+            "moved_by",
+        ).all()
+        return scope_equipment_location_history_queryset(queryset, self.request.user)
 
 
 class EquipmentViewSet(ProductViewSet):
@@ -707,6 +872,32 @@ class MaintenanceReportViewSet(viewsets.ReadOnlyModelViewSet):
         if ticket_id:
             queryset = queryset.filter(maintenance_ticket_id=ticket_id)
         return queryset
+
+
+class MaintenancePartUsageViewSet(AuditedModelViewSet):
+    serializer_class = MaintenancePartUsageSerializer
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ["created_at", "quantity"]
+
+    def get_permissions(self):
+        if self.request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            return [IsInternalUser()]
+        return [IsAuthenticatedSavUser()]
+
+    def get_queryset(self):
+        queryset = MaintenancePartUsage.objects.select_related("organization", "report__maintenance_ticket", "spare_part").all()
+        return scope_maintenance_part_usage_queryset(queryset, self.request.user)
+
+    def perform_create(self, serializer):
+        report = serializer.validated_data["report"]
+        if not can_manage_maintenance(self.request.user) and report.technician_id != self.request.user.id:
+            raise PermissionDenied("Vous ne pouvez declarer des pieces que sur vos rapports de maintenance.")
+        instance = serializer.save(organization=report.organization)
+        self.audit("maintenance_part_usage_created", instance)
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        self.audit("maintenance_part_usage_updated", instance)
 
 
 class TicketViewSet(AuditedModelViewSet):
@@ -1408,6 +1599,32 @@ class InterventionMediaViewSet(
         )
 
 
+class InterventionPartUsageViewSet(AuditedModelViewSet):
+    serializer_class = InterventionPartUsageSerializer
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ["created_at", "quantity"]
+
+    def get_permissions(self):
+        if self.request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            return [IsInternalUser()]
+        return [IsAuthenticatedSavUser()]
+
+    def get_queryset(self):
+        queryset = InterventionPartUsage.objects.select_related("organization", "intervention__ticket", "spare_part").all()
+        return scope_intervention_part_usage_queryset(queryset, self.request.user)
+
+    def perform_create(self, serializer):
+        intervention = serializer.validated_data["intervention"]
+        if not can_record_ticket_intervention(self.request.user, intervention.ticket):
+            raise PermissionDenied("Vous ne pouvez declarer des pieces que sur vos interventions autorisees.")
+        instance = serializer.save(organization=intervention.organization)
+        self.audit("intervention_part_usage_created", instance)
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        self.audit("intervention_part_usage_updated", instance)
+
+
 class TicketAssignmentViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = TicketAssignmentSerializer
     permission_classes = [IsAuthenticatedSavUser]
@@ -1604,7 +1821,7 @@ class KnowledgeArticleViewSet(AuditedModelViewSet):
         return [IsAuthenticatedSavUser()]
 
     def get_queryset(self):
-        queryset = KnowledgeArticle.objects.select_related("product").all()
+        queryset = KnowledgeArticle.objects.select_related("product", "equipment_category").all()
         return scope_knowledge_article_queryset(queryset, self.request.user)
 
     def perform_create(self, serializer):
@@ -1739,6 +1956,50 @@ class DeviceRegistrationViewSet(viewsets.GenericViewSet):
 
         updated = queryset.update(is_active=False, last_seen_at=timezone.now())
         return Response({"updated": updated})
+
+
+class OfflineSyncOperationViewSet(
+    mixins.ListModelMixin,
+    mixins.CreateModelMixin,
+    mixins.RetrieveModelMixin,
+    viewsets.GenericViewSet,
+):
+    serializer_class = OfflineSyncOperationSerializer
+    permission_classes = [IsAuthenticatedSavUser]
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ["created_at", "client_created_at", "status"]
+
+    def get_queryset(self):
+        queryset = OfflineSyncOperation.objects.select_related("organization", "user", "device").all()
+        queryset = scope_offline_sync_operation_queryset(queryset, self.request.user)
+        status_value = self.request.query_params.get("status")
+        if status_value:
+            queryset = queryset.filter(status=status_value)
+        return queryset
+
+    def perform_create(self, serializer):
+        device = serializer.validated_data.get("device")
+        if device and device.user_id != self.request.user.id:
+            raise PermissionDenied("Vous ne pouvez synchroniser qu'un appareil lie a votre compte.")
+        instance = serializer.save(user=self.request.user)
+        log_audit_event(self.request.user, "offline_sync_operation_queued", instance, {"endpoint": instance.endpoint})
+
+    @action(detail=True, methods=["post"], permission_classes=[IsInternalUser], url_path="mark-applied")
+    def mark_applied(self, request, pk=None):
+        operation = self.get_object()
+        operation.status = OfflineSyncOperation.STATUS_APPLIED
+        operation.error_message = ""
+        operation.applied_at = timezone.now()
+        operation.save(update_fields=["status", "error_message", "applied_at", "updated_at"])
+        return Response(self.get_serializer(operation).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsInternalUser], url_path="mark-failed")
+    def mark_failed(self, request, pk=None):
+        operation = self.get_object()
+        operation.status = OfflineSyncOperation.STATUS_FAILED
+        operation.error_message = request.data.get("error_message", "")
+        operation.save(update_fields=["status", "error_message", "updated_at"])
+        return Response(self.get_serializer(operation).data)
 
 
 class OfferRecommendationViewSet(AuditedModelViewSet):

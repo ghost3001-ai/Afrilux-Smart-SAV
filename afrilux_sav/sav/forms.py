@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from .file_validation import MAX_TICKET_ATTACHMENT_BYTES, validate_ticket_attachment_file
 from .models import (
+    ClientSite,
     EquipmentCategory,
     Intervention,
     InterventionMedia,
@@ -17,8 +18,10 @@ from .models import (
     Message,
     Organization,
     Product,
+    SparePart,
     Ticket,
     TicketAttachment,
+    TicketFeedback,
     User,
 )
 from .services import (
@@ -613,6 +616,13 @@ class TicketAttachmentForm(forms.ModelForm):
 
 
 class InterventionForm(forms.ModelForm):
+    spare_parts = forms.ModelMultipleChoiceField(
+        label="Pieces catalogue",
+        queryset=SparePart.objects.none(),
+        required=False,
+        widget=forms.SelectMultiple,
+        help_text="Selectionnez les pieces/consommables depuis le referentiel. Les quantites peuvent etre precisees dans le JSON avance.",
+    )
     intervention_media = MultipleFileField(
         required=False,
         label="Photos intervention",
@@ -632,6 +642,7 @@ class InterventionForm(forms.ModelForm):
             "diagnosis",
             "action_taken",
             "parts_used",
+            "spare_parts",
             "structured_parts_used",
             "time_spent_minutes",
             "technical_report",
@@ -662,6 +673,7 @@ class InterventionForm(forms.ModelForm):
         "diagnosis",
         "action_taken",
         "parts_used",
+        "spare_parts",
         "structured_parts_used",
         "time_spent_minutes",
         "technical_report",
@@ -678,6 +690,19 @@ class InterventionForm(forms.ModelForm):
         if user and user.is_authenticated and not user.is_superuser and user.organization_id:
             agent_queryset = agent_queryset.filter(organization=user.organization)
         self.fields["agent"].queryset = agent_queryset.order_by("first_name", "last_name", "username")
+        part_queryset = SparePart.objects.filter(is_active=True)
+        organization = None
+        if ticket and ticket.organization_id:
+            organization = ticket.organization
+        elif user and user.is_authenticated and user.organization_id:
+            organization = user.organization
+        if organization:
+            part_queryset = part_queryset.filter(Q(organization=organization) | Q(organization__isnull=True))
+        if ticket and ticket.product_id and ticket.product.equipment_category_id:
+            part_queryset = part_queryset.filter(
+                Q(equipment_category=ticket.product.equipment_category) | Q(equipment_category__isnull=True)
+            )
+        self.fields["spare_parts"].queryset = part_queryset.order_by("category", "name", "reference")
         if user and user.is_authenticated and user.role in User.ASSIGNABLE_ROLES:
             for field_name in list(self.fields):
                 if field_name not in self.TECHNICIAN_ALLOWED_FIELDS:
@@ -853,6 +878,13 @@ class MaintenanceClosureForm(forms.Form):
     )
     observations = forms.CharField(label="Observations techniques", widget=forms.Textarea(attrs={"rows": 4}))
     parts_used = forms.CharField(label="Pieces / consommables utilises", required=False, widget=forms.Textarea(attrs={"rows": 2}))
+    spare_parts = forms.ModelMultipleChoiceField(
+        label="Pieces catalogue",
+        queryset=SparePart.objects.none(),
+        required=False,
+        widget=forms.SelectMultiple,
+        help_text="Selectionnez les consommables depuis le referentiel afin de conserver des statistiques exploitables.",
+    )
     anomaly_detected = forms.TypedChoiceField(
         label="Anomalie detectee ?",
         choices=((False, "Non"), (True, "Oui")),
@@ -875,14 +907,32 @@ class MaintenanceClosureForm(forms.Form):
         widget=forms.Textarea(attrs={"rows": 2}),
     )
 
-    def __init__(self, *args, maintenance_ticket=None, **kwargs):
+    def __init__(self, *args, maintenance_ticket=None, user=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.maintenance_ticket = maintenance_ticket
+        self.user = user
         now = timezone.localtime()
         self.initial.setdefault("actual_started_at", maintenance_ticket.started_at if maintenance_ticket else now)
         self.initial.setdefault("actual_finished_at", now)
         if maintenance_ticket and not self.initial.get("checklist_completed"):
             self.initial["checklist_completed"] = json.dumps(maintenance_ticket.checklist or [], indent=2)
+        part_queryset = SparePart.objects.filter(is_active=True)
+        organization = None
+        if maintenance_ticket and maintenance_ticket.organization_id:
+            organization = maintenance_ticket.organization
+        elif user and user.is_authenticated and user.organization_id:
+            organization = user.organization
+        if organization:
+            part_queryset = part_queryset.filter(Q(organization=organization) | Q(organization__isnull=True))
+        if maintenance_ticket:
+            category_ids = [
+                product.equipment_category_id
+                for product in maintenance_ticket.products.all()
+                if product.equipment_category_id
+            ]
+            if category_ids:
+                part_queryset = part_queryset.filter(Q(equipment_category_id__in=category_ids) | Q(equipment_category__isnull=True))
+        self.fields["spare_parts"].queryset = part_queryset.order_by("category", "name", "reference")
 
     def clean_checklist_completed(self):
         value = (self.cleaned_data.get("checklist_completed") or "").strip()
@@ -933,6 +983,7 @@ class ProductForm(forms.ModelForm):
         model = Product
         fields = [
             "client",
+            "site",
             "equipment_category",
             "name",
             "sku",
@@ -946,6 +997,8 @@ class ProductForm(forms.ModelForm):
             "installation_address",
             "detailed_location",
             "status",
+            "location_status",
+            "current_location_notes",
             "iot_enabled",
             "health_score",
             "counter_total",
@@ -966,17 +1019,22 @@ class ProductForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         client_queryset = User.objects.filter(role=User.ROLE_CLIENT, is_active=True)
         category_queryset = EquipmentCategory.objects.filter(is_active=True)
+        site_queryset = ClientSite.objects.filter(is_active=True)
         if user and user.is_authenticated and not user.is_superuser and user.organization_id:
             client_queryset = client_queryset.filter(organization=user.organization)
             category_queryset = category_queryset.filter(organization=user.organization)
+            site_queryset = site_queryset.filter(organization=user.organization)
         self.fields["client"].queryset = client_queryset.order_by("company_name", "username")
         self.fields["equipment_category"].queryset = category_queryset.order_by("name")
+        self.fields["site"].queryset = site_queryset.order_by("client__company_name", "name")
+        self.fields["site"].required = False
         self.fields["equipment_category"].required = False
         self.fields["brand"].required = False
         self.fields["model_reference"].required = False
         self.fields["sku"].required = False
         self.fields["installation_address"].required = False
         self.fields["detailed_location"].required = False
+        self.fields["current_location_notes"].required = False
         self.fields["contract_reference"].required = False
         self.fields["notes"].required = False
         self.fields["health_score"].help_text = "Valeur entre 0 et 100."
@@ -992,7 +1050,32 @@ class ProductForm(forms.ModelForm):
     def clean(self):
         cleaned_data = super().clean()
         client = cleaned_data.get("client")
+        site = cleaned_data.get("site")
         equipment_category = cleaned_data.get("equipment_category")
         if client and equipment_category and client.organization_id != equipment_category.organization_id:
             self.add_error("equipment_category", "La categorie selectionnee n'appartient pas a l'organisation du client.")
+        if client and site and site.client_id != client.id:
+            self.add_error("site", "Le site selectionne n'appartient pas au client.")
         return cleaned_data
+
+
+class TicketFeedbackForm(forms.ModelForm):
+    class Meta:
+        model = TicketFeedback
+        fields = ["rating", "comment"]
+        widgets = {
+            "rating": forms.RadioSelect(
+                choices=(
+                    (5, "Satisfait"),
+                    (3, "Moyen"),
+                    (1, "Mecontent"),
+                )
+            ),
+            "comment": forms.Textarea(attrs={"rows": 3, "placeholder": "Commentaire optionnel"}),
+        }
+
+    def clean_rating(self):
+        value = self.cleaned_data.get("rating")
+        if value not in {1, 3, 5}:
+            raise ValidationError("Choisissez Satisfait, Moyen ou Mecontent.")
+        return value

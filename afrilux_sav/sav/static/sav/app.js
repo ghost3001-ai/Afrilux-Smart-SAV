@@ -468,7 +468,129 @@ function initializeSupportChat() {
   });
 }
 
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) {
+    return;
+  }
+  navigator.serviceWorker.register("/service-worker.js").catch(() => undefined);
+}
+
+function serializeOfflineForm(form) {
+  const payload = {};
+  const formData = new FormData(form);
+  formData.forEach((value, key) => {
+    if (value instanceof File) {
+      return;
+    }
+    if (payload[key] === undefined) {
+      payload[key] = value;
+    } else if (Array.isArray(payload[key])) {
+      payload[key].push(value);
+    } else {
+      payload[key] = [payload[key], value];
+    }
+  });
+  return payload;
+}
+
+function readOfflineQueue() {
+  try {
+    return JSON.parse(localStorage.getItem("afrilux-offline-queue") || "[]");
+  } catch (_error) {
+    return [];
+  }
+}
+
+function writeOfflineQueue(queue) {
+  localStorage.setItem("afrilux-offline-queue", JSON.stringify(queue));
+}
+
+async function flushOfflineQueue() {
+  if (!navigator.onLine) {
+    return;
+  }
+  const queue = readOfflineQueue();
+  if (!queue.length) {
+    return;
+  }
+  const remaining = [];
+  for (const operation of queue) {
+    try {
+      const response = await fetch("/api/offline-sync/", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": getCookie("csrftoken"),
+        },
+        body: JSON.stringify(operation),
+      });
+      if (!response.ok) {
+        remaining.push(operation);
+      }
+    } catch (_error) {
+      remaining.push(operation);
+    }
+  }
+  writeOfflineQueue(remaining);
+}
+
+function initializeOfflineDrafts() {
+  const forms = Array.from(document.querySelectorAll("form")).filter((form) => {
+    const action = form.getAttribute("action") || window.location.pathname;
+    return (
+      form.hasAttribute("data-offline-draft")
+      || action.includes("/interventions/")
+      || action.includes("/maintenance/tickets/")
+      || action.includes("/tickets/new/")
+    );
+  });
+
+  forms.forEach((form) => {
+    const action = form.getAttribute("action") || window.location.pathname;
+    const storageKey = `afrilux-draft:${action}`;
+    try {
+      const draft = JSON.parse(localStorage.getItem(storageKey) || "{}");
+      Object.entries(draft).forEach(([name, value]) => {
+        const field = form.querySelector(`[name="${CSS.escape(name)}"]`);
+        if (field && field.type !== "file" && !field.value) {
+          field.value = value;
+        }
+      });
+    } catch (_error) {
+      localStorage.removeItem(storageKey);
+    }
+
+    form.addEventListener("input", () => {
+      localStorage.setItem(storageKey, JSON.stringify(serializeOfflineForm(form)));
+    });
+
+    form.addEventListener("submit", (event) => {
+      if (navigator.onLine) {
+        localStorage.removeItem(storageKey);
+        return;
+      }
+      event.preventDefault();
+      const operation = {
+        endpoint: action,
+        method: (form.getAttribute("method") || "POST").toUpperCase(),
+        payload: serializeOfflineForm(form),
+        client_created_at: new Date().toISOString(),
+      };
+      const queue = readOfflineQueue();
+      queue.push(operation);
+      writeOfflineQueue(queue);
+      localStorage.removeItem(storageKey);
+      window.alert("Connexion indisponible. Le rapport est conserve localement et sera synchronise au retour du reseau.");
+    });
+  });
+
+  window.addEventListener("online", flushOfflineQueue);
+  flushOfflineQueue();
+}
+
 document.addEventListener("DOMContentLoaded", () => {
+  registerServiceWorker();
   fadeFlashes();
   initializeThemeToggle();
   initializeClientRegistration();
@@ -477,4 +599,5 @@ document.addEventListener("DOMContentLoaded", () => {
   initializePlanningBoard();
   initializeMaintenanceProgramBuilder();
   initializeSupportChat();
+  initializeOfflineDrafts();
 });

@@ -279,6 +279,24 @@
 	                    <strong>Feedback client: {{ ticket.feedback.rating }}/5</strong>
 	                    <p>{{ ticket.feedback.comment|default:"Aucun commentaire" }}</p>
 	                </div>
+	            {% elif can_submit_feedback %}
+	                <hr class="divider">
+	                <form method="post" action="{% url 'ticket-feedback-create-web' ticket.pk %}" class="form-grid" data-offline-draft>
+	                    {% csrf_token %}
+	                    <div class="field field--full">
+	                        <span>Evaluation satisfaction</span>
+	                        <div class="segmented segmented--feedback">
+	                            {{ feedback_form.rating }}
+	                        </div>
+	                        {% if feedback_form.rating.errors %}<small class="field__error">{{ feedback_form.rating.errors|striptags }}</small>{% endif %}
+	                    </div>
+	                    <label class="field field--full">
+	                        <span>Commentaire</span>
+	                        {{ feedback_form.comment }}
+	                        {% if feedback_form.comment.errors %}<small class="field__error">{{ feedback_form.comment.errors|striptags }}</small>{% endif %}
+	                    </label>
+	                    <button class="button button--primary" type="submit">Envoyer l'evaluation</button>
+	                </form>
 	            {% endif %}
 	        </article>
 	    {% endif %}

@@ -1,10 +1,11 @@
+import json
 from datetime import datetime, timedelta
 
 from django.contrib import messages as django_messages
 from django.contrib.auth import login
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.db.models import Avg, Count, Q
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
@@ -23,6 +24,7 @@ from .forms import (
     MessageForm,
     ProductForm,
     SupportAssistantQuestionForm,
+    TicketFeedbackForm,
     TicketEscalationForm,
     TicketTechnicianAssignmentForm,
     TicketAttachmentForm,
@@ -46,6 +48,7 @@ from .models import (
     Product,
     SlaRule,
     TicketAttachment,
+    TicketFeedback,
     Ticket,
     User,
 )
@@ -107,6 +110,7 @@ from .services import (
     validate_maintenance_report,
     role_workspace_name,
     notify_ticket_status_change,
+    record_intervention_part_usages,
 )
 
 
@@ -263,6 +267,75 @@ class HomeRedirectView(View):
         if request.user.is_authenticated:
             return redirect(_workspace_redirect_url(request.user))
         return redirect("login")
+
+
+class WebManifestView(View):
+    def get(self, request, *args, **kwargs):
+        return JsonResponse(
+            {
+                "name": "Afrilux Smart SAV",
+                "short_name": "Afrilux SAV",
+                "start_url": "/workspace/",
+                "scope": "/",
+                "display": "standalone",
+                "background_color": "#F7F2EC",
+                "theme_color": "#D5671D",
+                "description": "Helpdesk SAV avec support terrain et synchronisation hors ligne.",
+                "icons": [
+                    {
+                        "src": "/static/sav/images/afrilux-smart-solutions-logo.jpeg",
+                        "sizes": "192x192",
+                        "type": "image/jpeg",
+                    }
+                ],
+            },
+            content_type="application/manifest+json",
+        )
+
+
+class ServiceWorkerView(View):
+    def get(self, request, *args, **kwargs):
+        script = """
+const CACHE_NAME = "afrilux-sav-offline-v1";
+const CORE_ASSETS = [
+  "/login/",
+  "/workspace/",
+  "/static/sav/styles.css",
+  "/static/sav/app.js",
+  "/static/sav/images/afrilux-smart-solutions-logo.jpeg"
+];
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)).catch(() => undefined));
+  self.skipWaiting();
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))))
+  );
+  self.clients.claim();
+});
+
+self.addEventListener("fetch", (event) => {
+  const request = event.request;
+  if (request.method !== "GET" || new URL(request.url).origin !== self.location.origin) {
+    return;
+  }
+  event.respondWith(
+    fetch(request)
+      .then((response) => {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)).catch(() => undefined);
+        return response;
+      })
+      .catch(() => caches.match(request).then((cached) => cached || caches.match("/workspace/") || caches.match("/login/")))
+  );
+});
+"""
+        response = HttpResponse(script.strip(), content_type="application/javascript")
+        response["Service-Worker-Allowed"] = "/"
+        return response
 
 
 class RoleWorkspaceRedirectView(LoginRequiredMixin, View):
@@ -739,6 +812,7 @@ class MaintenanceTicketCloseView(LoginRequiredMixin, FormView):
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
         kwargs["maintenance_ticket"] = self.maintenance_ticket
+        kwargs["user"] = self.request.user
         return kwargs
 
     def get_context_data(self, **kwargs):
@@ -757,6 +831,7 @@ class MaintenanceTicketCloseView(LoginRequiredMixin, FormView):
                 checklist_completed=form.cleaned_data["checklist_completed"],
                 observations=form.cleaned_data["observations"],
                 parts_used=form.cleaned_data.get("parts_used", ""),
+                spare_parts=form.cleaned_data.get("spare_parts"),
                 anomaly_detected=form.cleaned_data.get("anomaly_detected", False),
                 photo_files=form.cleaned_data.get("maintenance_photos", []),
                 client_signed_by=form.cleaned_data.get("client_signed_by", ""),
@@ -1066,6 +1141,13 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
             ticket.status == Ticket.STATUS_RESOLVED
             and (user.role == User.ROLE_CLIENT and ticket.client_id == user.id)
         )
+        context["can_submit_feedback"] = (
+            user.role == User.ROLE_CLIENT
+            and ticket.client_id == user.id
+            and ticket.status in {Ticket.STATUS_RESOLVED, Ticket.STATUS_CLOSED}
+            and not hasattr(ticket, "feedback")
+        )
+        context["feedback_form"] = TicketFeedbackForm()
         context["can_reopen"] = can_participate and ticket.status in {Ticket.STATUS_RESOLVED, Ticket.STATUS_CLOSED}
         context["client_contacts"] = ticket.client.contacts.order_by("-is_primary", "first_name", "last_name")[:8]
         context["assignment_history"] = ticket.assignment_history.select_related("technician", "assigned_by").all()[:12]
@@ -1085,6 +1167,13 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
                 "reason": f"Avoir commercial {ticket.reference}",
             }
         )
+        if ticket.organization and ticket.organization.personal_data_access_logging_enabled:
+            log_audit_event(
+                user,
+                "personal_data_viewed",
+                ticket,
+                {"surface": "ticket_detail", "client_id": ticket.client_id},
+            )
         return context
 
 
@@ -1117,6 +1206,33 @@ class TicketConfirmResolutionView(LoginRequiredMixin, View):
         log_audit_event(request.user, "ticket_resolution_confirmed_web", ticket, {"via": "portal"})
         notify_ticket_status_change(ticket, previous_status, actor=request.user)
         django_messages.success(request, "La resolution a ete validee et le ticket est maintenant ferme.")
+        return redirect("ticket-detail", pk=pk)
+
+
+class TicketFeedbackCreateView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.select_related("client"), request.user), pk=pk)
+        if request.user.role != User.ROLE_CLIENT or ticket.client_id != request.user.id:
+            django_messages.error(request, "Seul le client proprietaire peut evaluer ce ticket.")
+            return redirect("ticket-detail", pk=pk)
+        if ticket.status not in {Ticket.STATUS_RESOLVED, Ticket.STATUS_CLOSED}:
+            django_messages.error(request, "L'evaluation est disponible apres resolution ou fermeture.")
+            return redirect("ticket-detail", pk=pk)
+        if hasattr(ticket, "feedback"):
+            django_messages.info(request, "Une evaluation existe deja pour ce ticket.")
+            return redirect("ticket-detail", pk=pk)
+        form = TicketFeedbackForm(request.POST)
+        if not form.is_valid():
+            django_messages.error(request, "Impossible d'enregistrer l'evaluation. Verifiez votre choix.")
+            return redirect("ticket-detail", pk=pk)
+        feedback = form.save(commit=False)
+        feedback.ticket = ticket
+        feedback.client = request.user
+        feedback.organization = ticket.organization
+        feedback.submitted_at = timezone.now()
+        feedback.save()
+        log_audit_event(request.user, "ticket_feedback_created_web", feedback, {"ticket_reference": ticket.reference})
+        django_messages.success(request, "Merci, votre evaluation a ete enregistree.")
         return redirect("ticket-detail", pk=pk)
 
 
@@ -1315,6 +1431,12 @@ class TicketInterventionCreateView(LoginRequiredMixin, InternalRequiredMixin, Vi
         if not intervention.location_snapshot:
             intervention.location_snapshot = ticket.location
         intervention.save()
+        record_intervention_part_usages(
+            intervention,
+            spare_parts=form.cleaned_data.get("spare_parts"),
+            structured_parts_used=form.cleaned_data.get("structured_parts_used"),
+            replace=True,
+        )
 
         for uploaded_file in form.cleaned_data.get("intervention_media", []):
             intervention.media.create(
@@ -1492,7 +1614,12 @@ class ProductDetailView(LoginRequiredMixin, DetailView):
 
     def get_queryset(self):
         return scope_product_queryset(
-            Product.objects.select_related("client").prefetch_related("telemetry", "predictive_alerts", "tickets"),
+            Product.objects.select_related("client", "site", "equipment_category").prefetch_related(
+                "telemetry",
+                "predictive_alerts",
+                "tickets",
+                "location_history",
+            ),
             self.request.user,
         )
 
@@ -1510,6 +1637,14 @@ class ProductDetailView(LoginRequiredMixin, DetailView):
             self.request.user,
         ).order_by("-created_at")[:8]
         context["knowledge_articles"] = product.knowledge_articles.filter(status=KnowledgeArticle.STATUS_PUBLISHED)[:6]
+        context["location_history"] = product.location_history.select_related("from_site", "to_site", "moved_by").all()[:8]
+        if product.organization and product.organization.personal_data_access_logging_enabled:
+            log_audit_event(
+                self.request.user,
+                "personal_data_viewed",
+                product,
+                {"surface": "product_detail", "client_id": product.client_id},
+            )
         return context
 
 

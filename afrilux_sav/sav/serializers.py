@@ -4,30 +4,37 @@ from rest_framework import serializers
 from .file_validation import MAX_TICKET_ATTACHMENT_BYTES, validate_ticket_attachment_file
 from .models import (
     AccountCredit,
+    Agency,
     AIActionLog,
     AuditLog,
     AutomationRule,
     ChecklistTemplate,
     ClientContact,
+    ClientSite,
     DeviceRegistration,
     EquipmentCategory,
+    EquipmentLocationHistory,
     FinancialTransaction,
     GeneratedReport,
     Intervention,
     InterventionMedia,
+    InterventionPartUsage,
     KnowledgeArticle,
+    MaintenancePartUsage,
     MaintenanceProgram,
     MaintenanceReport,
     MaintenanceReportPhoto,
     MaintenanceTicket,
     Message,
     Notification,
+    OfflineSyncOperation,
     Organization,
     OfferRecommendation,
     PredictiveAlert,
     Product,
     ProductTelemetry,
     SlaRule,
+    SparePart,
     SupportSession,
     TicketAttachment,
     TicketAssignment,
@@ -97,6 +104,28 @@ class PublicOrganizationSerializer(serializers.ModelSerializer):
         ]
 
 
+class AgencySerializer(serializers.ModelSerializer):
+    organization_name = serializers.CharField(source="organization.display_name", read_only=True)
+
+    class Meta:
+        model = Agency
+        fields = [
+            "id",
+            "organization",
+            "organization_name",
+            "name",
+            "code",
+            "city",
+            "region",
+            "address",
+            "phone",
+            "email",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+
+
 class ClientContactSerializer(serializers.ModelSerializer):
     client_name = serializers.SerializerMethodField()
     organization_name = serializers.CharField(source="organization.display_name", read_only=True)
@@ -124,6 +153,48 @@ class ClientContactSerializer(serializers.ModelSerializer):
         return str(obj.client)
 
 
+class ClientSiteSerializer(serializers.ModelSerializer):
+    client_name = serializers.SerializerMethodField()
+    organization_name = serializers.CharField(source="organization.display_name", read_only=True)
+    agency_name = serializers.CharField(source="agency.name", read_only=True)
+
+    class Meta:
+        model = ClientSite
+        fields = [
+            "id",
+            "organization",
+            "organization_name",
+            "client",
+            "client_name",
+            "agency",
+            "agency_name",
+            "name",
+            "code",
+            "address",
+            "city",
+            "region",
+            "gps_latitude",
+            "gps_longitude",
+            "is_primary",
+            "notes",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["organization", "organization_name", "client_name", "agency_name", "created_at", "updated_at"]
+
+    def get_client_name(self, obj):
+        return str(obj.client)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        client = attrs.get("client") or getattr(self.instance, "client", None)
+        agency = attrs.get("agency") or getattr(self.instance, "agency", None)
+        if agency and client and client.organization_id and agency.organization_id != client.organization_id:
+            raise serializers.ValidationError({"agency": "L'agence appartient a une autre organisation que le client."})
+        return attrs
+
+
 class EquipmentCategorySerializer(serializers.ModelSerializer):
     organization_name = serializers.CharField(source="organization.display_name", read_only=True)
 
@@ -136,6 +207,29 @@ class EquipmentCategorySerializer(serializers.ModelSerializer):
             "name",
             "code",
             "description",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class SparePartSerializer(serializers.ModelSerializer):
+    organization_name = serializers.CharField(source="organization.display_name", read_only=True)
+    equipment_category_name = serializers.CharField(source="equipment_category.name", read_only=True)
+
+    class Meta:
+        model = SparePart
+        fields = [
+            "id",
+            "organization",
+            "organization_name",
+            "name",
+            "reference",
+            "category",
+            "equipment_category",
+            "equipment_category_name",
+            "description",
+            "unit",
             "is_active",
             "created_at",
             "updated_at",
@@ -238,6 +332,7 @@ class GeneratedReportSerializer(serializers.ModelSerializer):
 class UserSerializer(serializers.ModelSerializer):
     organization_name = serializers.CharField(source="organization.display_name", read_only=True)
     organization_slug = serializers.CharField(source="organization.slug", read_only=True)
+    agency_name = serializers.CharField(source="agency.name", read_only=True)
     organization_primary_color = serializers.CharField(source="organization.primary_color", read_only=True)
     organization_accent_color = serializers.CharField(source="organization.accent_color", read_only=True)
     organization_portal_tagline = serializers.CharField(source="organization.portal_tagline", read_only=True)
@@ -258,6 +353,8 @@ class UserSerializer(serializers.ModelSerializer):
             "organization",
             "organization_name",
             "organization_slug",
+            "agency",
+            "agency_name",
             "organization_primary_color",
             "organization_accent_color",
             "organization_portal_tagline",
@@ -303,6 +400,7 @@ class UserSerializer(serializers.ModelSerializer):
             role = User.ROLE_TECHNICIAN
             attrs["role"] = role
         organization = attrs.get("organization") or getattr(self.instance, "organization", None)
+        agency = attrs.get("agency") or getattr(self.instance, "agency", None)
         professional_email = (attrs.get("professional_email") or "").strip().lower()
         password = attrs.get("password", "")
 
@@ -319,6 +417,10 @@ class UserSerializer(serializers.ModelSerializer):
             attrs["username"] = generate_client_username(email)
         if role == User.ROLE_CLIENT and organization and not attrs.get("company_name") and not getattr(self.instance, "company_name", ""):
             attrs["company_name"] = organization.display_name
+        if agency and organization and agency.organization_id != organization.id:
+            raise serializers.ValidationError({"agency": "L'agence selectionnee appartient a une autre organisation."})
+        if agency and not organization:
+            attrs["organization"] = agency.organization
         return attrs
 
     def create(self, validated_data):
@@ -393,6 +495,7 @@ class ProductSerializer(serializers.ModelSerializer):
     client_name = serializers.SerializerMethodField()
     organization_name = serializers.CharField(source="organization.display_name", read_only=True)
     equipment_category_name = serializers.CharField(source="equipment_category.name", read_only=True)
+    site_name = serializers.CharField(source="site.name", read_only=True)
     is_under_warranty = serializers.BooleanField(read_only=True)
 
     class Meta:
@@ -405,6 +508,8 @@ class ProductSerializer(serializers.ModelSerializer):
             "client_name",
             "equipment_category",
             "equipment_category_name",
+            "site",
+            "site_name",
             "name",
             "sku",
             "serial_number",
@@ -418,6 +523,8 @@ class ProductSerializer(serializers.ModelSerializer):
             "installation_address",
             "detailed_location",
             "status",
+            "location_status",
+            "current_location_notes",
             "iot_enabled",
             "health_score",
             "counter_total",
@@ -438,11 +545,63 @@ class ProductSerializer(serializers.ModelSerializer):
         client = attrs.get("client") or getattr(self.instance, "client", None)
         organization = attrs.get("organization") or getattr(self.instance, "organization", None)
         equipment_category = attrs.get("equipment_category") or getattr(self.instance, "equipment_category", None)
+        site = attrs.get("site") or getattr(self.instance, "site", None)
         if client and organization and client.organization_id != organization.id:
             raise serializers.ValidationError("Le client selectionne n'appartient pas a cette organisation.")
         if equipment_category and organization and equipment_category.organization_id and equipment_category.organization_id != organization.id:
             raise serializers.ValidationError("La categorie d'equipement selectionnee appartient a une autre organisation.")
+        if site and client and site.client_id != client.id:
+            raise serializers.ValidationError({"site": "Le site selectionne appartient a un autre client."})
+        if site and organization and site.organization_id and site.organization_id != organization.id:
+            raise serializers.ValidationError({"site": "Le site selectionne appartient a une autre organisation."})
         return attrs
+
+
+class EquipmentLocationHistorySerializer(serializers.ModelSerializer):
+    product_reference = serializers.CharField(source="product.serial_number", read_only=True)
+    organization_name = serializers.CharField(source="organization.display_name", read_only=True)
+    from_site_name = serializers.CharField(source="from_site.name", read_only=True)
+    to_site_name = serializers.CharField(source="to_site.name", read_only=True)
+    moved_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EquipmentLocationHistory
+        fields = [
+            "id",
+            "organization",
+            "organization_name",
+            "product",
+            "product_reference",
+            "from_client",
+            "from_site",
+            "from_site_name",
+            "from_location",
+            "from_location_status",
+            "to_client",
+            "to_site",
+            "to_site_name",
+            "to_location",
+            "to_location_status",
+            "moved_by",
+            "moved_by_name",
+            "reason",
+            "moved_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "organization",
+            "organization_name",
+            "product_reference",
+            "from_site_name",
+            "to_site_name",
+            "moved_by_name",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_moved_by_name(self, obj):
+        return str(obj.moved_by) if obj.moved_by else None
 
 
 class ChecklistTemplateSerializer(serializers.ModelSerializer):
@@ -551,6 +710,34 @@ class MaintenanceReportSerializer(serializers.ModelSerializer):
             return ""
         url = obj.report_pdf.url
         return request.build_absolute_uri(url) if request else url
+
+
+class MaintenancePartUsageSerializer(serializers.ModelSerializer):
+    spare_part_label = serializers.SerializerMethodField()
+    organization_name = serializers.CharField(source="organization.display_name", read_only=True)
+
+    class Meta:
+        model = MaintenancePartUsage
+        fields = [
+            "id",
+            "organization",
+            "organization_name",
+            "report",
+            "spare_part",
+            "spare_part_label",
+            "name_snapshot",
+            "reference_snapshot",
+            "category_snapshot",
+            "quantity",
+            "unit_snapshot",
+            "note",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["organization", "organization_name", "spare_part_label", "created_at", "updated_at"]
+
+    def get_spare_part_label(self, obj):
+        return str(obj.spare_part) if obj.spare_part else ""
 
 
 class MaintenanceTicketSerializer(serializers.ModelSerializer):
@@ -870,6 +1057,43 @@ class InterventionSerializer(InterventionInlineSerializer):
         return attrs
 
 
+class InterventionPartUsageSerializer(serializers.ModelSerializer):
+    spare_part_label = serializers.SerializerMethodField()
+    intervention_reference = serializers.CharField(source="intervention.ticket.reference", read_only=True)
+    organization_name = serializers.CharField(source="organization.display_name", read_only=True)
+
+    class Meta:
+        model = InterventionPartUsage
+        fields = [
+            "id",
+            "organization",
+            "organization_name",
+            "intervention",
+            "intervention_reference",
+            "spare_part",
+            "spare_part_label",
+            "name_snapshot",
+            "reference_snapshot",
+            "category_snapshot",
+            "quantity",
+            "unit_snapshot",
+            "note",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "organization",
+            "organization_name",
+            "intervention_reference",
+            "spare_part_label",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_spare_part_label(self, obj):
+        return str(obj.spare_part) if obj.spare_part else ""
+
+
 class SupportSessionInlineSerializer(serializers.ModelSerializer):
     client_name = serializers.SerializerMethodField()
     agent_name = serializers.SerializerMethodField()
@@ -967,6 +1191,7 @@ class PredictiveAlertSerializer(serializers.ModelSerializer):
 
 class KnowledgeArticleSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name", read_only=True)
+    equipment_category_name = serializers.CharField(source="equipment_category.name", read_only=True)
     organization_name = serializers.CharField(source="organization.display_name", read_only=True)
 
     class Meta:
@@ -978,6 +1203,9 @@ class KnowledgeArticleSerializer(serializers.ModelSerializer):
             "title",
             "slug",
             "category",
+            "equipment_category",
+            "equipment_category_name",
+            "business_domain",
             "product",
             "product_name",
             "summary",
@@ -1044,6 +1272,48 @@ class DeviceRegistrationSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+
+class OfflineSyncOperationSerializer(serializers.ModelSerializer):
+    user_name = serializers.SerializerMethodField()
+    organization_name = serializers.CharField(source="organization.display_name", read_only=True)
+
+    class Meta:
+        model = OfflineSyncOperation
+        fields = [
+            "id",
+            "organization",
+            "organization_name",
+            "user",
+            "user_name",
+            "device",
+            "operation_uuid",
+            "endpoint",
+            "method",
+            "payload",
+            "status",
+            "error_message",
+            "client_created_at",
+            "applied_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "organization",
+            "organization_name",
+            "user",
+            "user_name",
+            "operation_uuid",
+            "status",
+            "error_message",
+            "applied_at",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_user_name(self, obj):
+        return str(obj.user)
 
 
 class OfferRecommendationSerializer(serializers.ModelSerializer):

@@ -30,6 +30,7 @@ from .web_views import (
     RoleWorkspaceRedirectView,
     ReportingPageView,
     SupportPageView,
+    ServiceWorkerView,
     TechnicianSpaceView,
     TicketAgenticResolutionView,
     TicketAssignTechnicianView,
@@ -40,6 +41,7 @@ from .web_views import (
     TicketCreateView,
     TicketDetailView,
     TicketEscalateView,
+    TicketFeedbackCreateView,
     TicketInterventionCreateView,
     TicketInterventionPdfView,
     TicketListView,
@@ -47,10 +49,13 @@ from .web_views import (
     TicketReopenView,
     TicketUpdateView,
     TechnicianPlanningPageView,
+    WebManifestView,
 )
 
 urlpatterns = [
     path("", HomeRedirectView.as_view(), name="home"),
+    path("manifest.webmanifest", WebManifestView.as_view(), name="web-manifest"),
+    path("service-worker.js", ServiceWorkerView.as_view(), name="service-worker"),
     path(
         "login/",
         LoginView.as_view(
@@ -84,6 +89,7 @@ urlpatterns = [
     path("tickets/<int:pk>/message/", TicketMessageCreateView.as_view(), name="ticket-message-create"),
     path("tickets/<int:pk>/attachments/", TicketAttachmentCreateView.as_view(), name="ticket-attachment-create"),
     path("tickets/<int:pk>/confirm-resolution/", TicketConfirmResolutionView.as_view(), name="ticket-confirm-resolution"),
+    path("tickets/<int:pk>/feedback/", TicketFeedbackCreateView.as_view(), name="ticket-feedback-create-web"),
     path("tickets/<int:pk>/reopen/", TicketReopenView.as_view(), name="ticket-reopen-web"),
     path("tickets/<int:pk>/escalate/", TicketEscalateView.as_view(), name="ticket-escalate-web"),
     path("tickets/<int:pk>/assign-technician/", TicketAssignTechnicianView.as_view(), name="ticket-assign-technician-web"),

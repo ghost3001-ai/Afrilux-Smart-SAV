@@ -4,7 +4,9 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="{{ sav_shell.organization_primary_color|default:'#D5671D' }}">
     <title>{% block title %}Afrilux SAV{% endblock %}</title>
+    <link rel="manifest" href="{% url 'web-manifest' %}">
     <link rel="stylesheet" href="{% static 'sav/styles.css' %}">
     {% if sav_shell.organization_primary_color %}
         <style>

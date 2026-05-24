@@ -47,6 +47,14 @@ class Organization(TimeStampedModel):
     city = models.CharField(max_length=120, blank=True)
     country = models.CharField(max_length=120, blank=True)
     reporting_emails = models.TextField(blank=True, help_text="Liste d'emails separes par des virgules pour les rapports automatiques.")
+    personal_data_access_logging_enabled = models.BooleanField(
+        default=True,
+        help_text="Journalise les consultations des fiches clients/equipements contenant des donnees personnelles.",
+    )
+    ticket_retention_years = models.PositiveSmallIntegerField(
+        default=5,
+        help_text="Duree de conservation active des tickets clos avant archivage logique.",
+    )
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -69,6 +77,34 @@ class Organization(TimeStampedModel):
     def save(self, *args, **kwargs):
         if not self.slug:
             self.slug = _generate_unique_slug(self.__class__, self.display_name, self.pk)
+        super().save(*args, **kwargs)
+
+
+class Agency(TimeStampedModel):
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="agencies",
+    )
+    name = models.CharField(max_length=180)
+    code = models.SlugField(max_length=80, blank=True)
+    city = models.CharField(max_length=120, blank=True)
+    region = models.CharField(max_length=120, blank=True)
+    address = models.CharField(max_length=255, blank=True)
+    phone = models.CharField(max_length=20, blank=True)
+    email = models.EmailField(blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["organization__name", "city", "name"]
+        unique_together = [("organization", "code")]
+
+    def __str__(self):
+        return f"{self.name} - {self.city}" if self.city else self.name
+
+    def save(self, *args, **kwargs):
+        if not self.code:
+            self.code = _generate_unique_slug(self.__class__, self.name, self.pk, field_name="code")
         super().save(*args, **kwargs)
 
 
@@ -203,6 +239,13 @@ class User(AbstractUser):
         null=True,
         blank=True,
     )
+    agency = models.ForeignKey(
+        Agency,
+        on_delete=models.SET_NULL,
+        related_name="users",
+        null=True,
+        blank=True,
+    )
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default=ROLE_CLIENT)
     phone = models.CharField(max_length=20, blank=True)
     company_name = models.CharField(max_length=255, blank=True)
@@ -254,6 +297,8 @@ class User(AbstractUser):
         return full_name or self.username
 
     def save(self, *args, **kwargs):
+        if self.agency_id and not self.organization_id:
+            self.organization = self.agency.organization
         if self.role == self.ROLE_FIELD_TECHNICIAN:
             self.role = self.ROLE_TECHNICIAN
         if self.role == self.ROLE_EXPERT:
@@ -332,6 +377,55 @@ class ClientContact(TimeStampedModel):
         super().save(*args, **kwargs)
 
 
+class ClientSite(TimeStampedModel):
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.SET_NULL,
+        related_name="client_sites",
+        null=True,
+        blank=True,
+    )
+    client = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="sites",
+        limit_choices_to={"role": User.ROLE_CLIENT},
+    )
+    agency = models.ForeignKey(
+        Agency,
+        on_delete=models.SET_NULL,
+        related_name="client_sites",
+        null=True,
+        blank=True,
+    )
+    name = models.CharField(max_length=180)
+    code = models.SlugField(max_length=100, blank=True)
+    address = models.CharField(max_length=255, blank=True)
+    city = models.CharField(max_length=120, blank=True)
+    region = models.CharField(max_length=120, blank=True)
+    gps_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    gps_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    is_primary = models.BooleanField(default=False)
+    notes = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["client__company_name", "client__username", "-is_primary", "name"]
+        unique_together = [("client", "code")]
+
+    def __str__(self):
+        return f"{self.client} - {self.name}"
+
+    def save(self, *args, **kwargs):
+        if self.client_id and self.client.organization_id:
+            self.organization = self.client.organization
+        elif self.agency_id and self.agency.organization_id:
+            self.organization = self.agency.organization
+        if not self.code:
+            self.code = _generate_unique_slug(self.__class__, self.name, self.pk, field_name="code")
+        super().save(*args, **kwargs)
+
+
 class EquipmentCategory(TimeStampedModel):
     organization = models.ForeignKey(
         Organization,
@@ -355,6 +449,46 @@ class EquipmentCategory(TimeStampedModel):
     def save(self, *args, **kwargs):
         if not self.code:
             self.code = _generate_unique_slug(self.__class__, self.name, self.pk, field_name="code")
+        super().save(*args, **kwargs)
+
+
+class SparePart(TimeStampedModel):
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.SET_NULL,
+        related_name="spare_parts",
+        null=True,
+        blank=True,
+    )
+    name = models.CharField(max_length=180)
+    reference = models.CharField(max_length=120)
+    category = models.CharField(max_length=120, blank=True)
+    equipment_category = models.ForeignKey(
+        EquipmentCategory,
+        on_delete=models.SET_NULL,
+        related_name="spare_parts",
+        null=True,
+        blank=True,
+    )
+    description = models.TextField(blank=True)
+    unit = models.CharField(max_length=40, default="piece")
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["category", "name", "reference"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "reference"],
+                name="sav_sparepart_unique_reference_per_organization",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.reference} - {self.name}"
+
+    def save(self, *args, **kwargs):
+        if self.equipment_category_id and self.equipment_category.organization_id and not self.organization_id:
+            self.organization = self.equipment_category.organization
         super().save(*args, **kwargs)
 
 
@@ -441,16 +575,40 @@ class FinancialTransaction(TimeStampedModel):
 
 
 class Product(TimeStampedModel):
+    STATUS_OPERATIONAL = "operational"
+    STATUS_BROKEN = "broken"
+    STATUS_MAINTENANCE = "maintenance"
+    STATUS_OUT_OF_SERVICE = "out_of_service"
+
     STATUS_ACTIVE = "active"
     STATUS_IN_SERVICE = "in_service"
     STATUS_REPLACED = "replaced"
     STATUS_RETIRED = "retired"
 
+    LEGACY_STATUS_MAP = {
+        STATUS_ACTIVE: STATUS_OPERATIONAL,
+        STATUS_IN_SERVICE: STATUS_OPERATIONAL,
+        STATUS_REPLACED: STATUS_OUT_OF_SERVICE,
+        STATUS_RETIRED: STATUS_OUT_OF_SERVICE,
+    }
+
     STATUS_CHOICES = (
-        (STATUS_ACTIVE, "Active"),
-        (STATUS_IN_SERVICE, "En service"),
-        (STATUS_REPLACED, "Remplace"),
-        (STATUS_RETIRED, "Retire"),
+        (STATUS_OPERATIONAL, "Operationnel"),
+        (STATUS_BROKEN, "En panne"),
+        (STATUS_MAINTENANCE, "En maintenance"),
+        (STATUS_OUT_OF_SERVICE, "Hors service"),
+    )
+
+    LOCATION_INSTALLED = "installed"
+    LOCATION_WORKSHOP = "workshop"
+    LOCATION_TRANSIT = "transit"
+    LOCATION_STORAGE = "storage"
+
+    LOCATION_STATUS_CHOICES = (
+        (LOCATION_INSTALLED, "Installe chez le client"),
+        (LOCATION_WORKSHOP, "En atelier"),
+        (LOCATION_TRANSIT, "En transit"),
+        (LOCATION_STORAGE, "En stockage"),
     )
 
     organization = models.ForeignKey(
@@ -468,6 +626,13 @@ class Product(TimeStampedModel):
     )
     equipment_category = models.ForeignKey(
         EquipmentCategory,
+        on_delete=models.SET_NULL,
+        related_name="products",
+        null=True,
+        blank=True,
+    )
+    site = models.ForeignKey(
+        ClientSite,
         on_delete=models.SET_NULL,
         related_name="products",
         null=True,
@@ -495,7 +660,9 @@ class Product(TimeStampedModel):
     warranty_end = models.DateField(null=True, blank=True)
     installation_address = models.CharField(max_length=255, blank=True)
     detailed_location = models.CharField(max_length=255, blank=True)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_OPERATIONAL)
+    location_status = models.CharField(max_length=20, choices=LOCATION_STATUS_CHOICES, default=LOCATION_INSTALLED)
+    current_location_notes = models.TextField(blank=True)
     iot_enabled = models.BooleanField(default=False)
     health_score = models.PositiveSmallIntegerField(default=100)
     counter_total = models.PositiveIntegerField(default=0)
@@ -518,6 +685,13 @@ class Product(TimeStampedModel):
         return f"{self.name} ({self.serial_number})"
 
     def save(self, *args, **kwargs):
+        self.status = self.LEGACY_STATUS_MAP.get(self.status, self.status)
+        if self.site_id:
+            self.client = self.site.client
+            if self.site.organization_id:
+                self.organization = self.site.organization
+            if self.site.address and not self.installation_address:
+                self.installation_address = self.site.address
         if self.client_id and self.client.organization_id:
             self.organization = self.client.organization
         if self.equipment_category_id and self.equipment_category.organization_id and not self.organization_id:
@@ -529,6 +703,71 @@ class Product(TimeStampedModel):
         if not self.warranty_end:
             return False
         return self.warranty_end >= timezone.localdate()
+
+
+class EquipmentLocationHistory(TimeStampedModel):
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.SET_NULL,
+        related_name="equipment_location_history",
+        null=True,
+        blank=True,
+    )
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="location_history")
+    from_client = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="equipment_moves_from",
+        null=True,
+        blank=True,
+        limit_choices_to={"role": User.ROLE_CLIENT},
+    )
+    from_site = models.ForeignKey(
+        ClientSite,
+        on_delete=models.SET_NULL,
+        related_name="equipment_moves_from",
+        null=True,
+        blank=True,
+    )
+    from_location = models.CharField(max_length=255, blank=True)
+    from_location_status = models.CharField(max_length=20, choices=Product.LOCATION_STATUS_CHOICES, blank=True)
+    to_client = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="equipment_moves_to",
+        null=True,
+        blank=True,
+        limit_choices_to={"role": User.ROLE_CLIENT},
+    )
+    to_site = models.ForeignKey(
+        ClientSite,
+        on_delete=models.SET_NULL,
+        related_name="equipment_moves_to",
+        null=True,
+        blank=True,
+    )
+    to_location = models.CharField(max_length=255, blank=True)
+    to_location_status = models.CharField(max_length=20, choices=Product.LOCATION_STATUS_CHOICES, default=Product.LOCATION_INSTALLED)
+    moved_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="equipment_location_moves",
+        null=True,
+        blank=True,
+    )
+    reason = models.TextField(blank=True)
+    moved_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["-moved_at", "-created_at"]
+
+    def __str__(self):
+        return f"{self.product.serial_number} -> {self.to_location_status}"
+
+    def save(self, *args, **kwargs):
+        if self.product_id and self.product.organization_id:
+            self.organization = self.product.organization
+        super().save(*args, **kwargs)
 
 
 class Ticket(TimeStampedModel):
@@ -622,18 +861,34 @@ class Ticket(TimeStampedModel):
     )
 
     DOMAIN_IT = "it"
+    DOMAIN_MONETICS = "monetics"
+    DOMAIN_CFAO = "cfao"
     DOMAIN_COOLING = "cooling"
     DOMAIN_GENERATOR = "generator"
     DOMAIN_VIDEO = "video"
+    DOMAIN_GEOLOCATION = "geolocation"
     DOMAIN_OTHER = "other"
 
     BUSINESS_DOMAIN_CHOICES = (
         (DOMAIN_IT, "Informatique"),
+        (DOMAIN_MONETICS, "Monetique"),
+        (DOMAIN_CFAO, "CFAO"),
         (DOMAIN_COOLING, "Froid & Climatisation"),
         (DOMAIN_GENERATOR, "Groupe electrogene"),
         (DOMAIN_VIDEO, "Videosurveillance"),
+        (DOMAIN_GEOLOCATION, "Geolocalisation"),
         (DOMAIN_OTHER, "Autre"),
     )
+    DOMAIN_REFERENCE_CODES = {
+        DOMAIN_IT: "IT",
+        DOMAIN_MONETICS: "MO",
+        DOMAIN_CFAO: "CF",
+        DOMAIN_COOLING: "FR",
+        DOMAIN_GENERATOR: "GE",
+        DOMAIN_VIDEO: "VD",
+        DOMAIN_GEOLOCATION: "GL",
+        DOMAIN_OTHER: "SAV",
+    }
 
     CATEGORY_BREAKDOWN = "breakdown"
     CATEGORY_INSTALLATION = "installation"
@@ -703,6 +958,8 @@ class Ticket(TimeStampedModel):
     resolved_at = models.DateTimeField(null=True, blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)
     resolution_summary = models.TextField(blank=True)
+    archived_at = models.DateTimeField(null=True, blank=True)
+    archive_reason = models.CharField(max_length=255, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -763,8 +1020,11 @@ class Ticket(TimeStampedModel):
                     self.reference = ""
             raise
 
-    @staticmethod
-    def generate_reference():
+    @property
+    def service_reference_code(self):
+        return "SAV"
+
+    def generate_reference(self):
         year = timezone.localdate().year
         month = timezone.localdate().month
         prefix = f"ASS-SAV-{month:02d}-{year}-"
@@ -1028,6 +1288,46 @@ class Intervention(models.Model):
             self.organization = self.ticket.organization
         if self.ticket_id and not self.location_snapshot:
             self.location_snapshot = self.ticket.location
+        super().save(*args, **kwargs)
+
+
+class InterventionPartUsage(TimeStampedModel):
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.SET_NULL,
+        related_name="intervention_part_usages",
+        null=True,
+        blank=True,
+    )
+    intervention = models.ForeignKey(Intervention, on_delete=models.CASCADE, related_name="part_usages")
+    spare_part = models.ForeignKey(SparePart, on_delete=models.SET_NULL, related_name="intervention_usages", null=True, blank=True)
+    name_snapshot = models.CharField(max_length=180, blank=True)
+    reference_snapshot = models.CharField(max_length=120, blank=True)
+    category_snapshot = models.CharField(max_length=120, blank=True)
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("1.00"))
+    unit_snapshot = models.CharField(max_length=40, blank=True)
+    note = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+    def __str__(self):
+        return f"{self.intervention.ticket.reference} - {self.reference_snapshot or self.name_snapshot}"
+
+    def save(self, *args, **kwargs):
+        if self.intervention_id and self.intervention.organization_id:
+            self.organization = self.intervention.organization
+        if self.spare_part_id:
+            if not self.name_snapshot:
+                self.name_snapshot = self.spare_part.name
+            if not self.reference_snapshot:
+                self.reference_snapshot = self.spare_part.reference
+            if not self.category_snapshot:
+                self.category_snapshot = self.spare_part.category
+            if not self.unit_snapshot:
+                self.unit_snapshot = self.spare_part.unit
+            if self.spare_part.organization_id and not self.organization_id:
+                self.organization = self.spare_part.organization
         super().save(*args, **kwargs)
 
 
@@ -1352,6 +1652,46 @@ class MaintenanceReport(TimeStampedModel):
         super().save(*args, **kwargs)
 
 
+class MaintenancePartUsage(TimeStampedModel):
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.SET_NULL,
+        related_name="maintenance_part_usages",
+        null=True,
+        blank=True,
+    )
+    report = models.ForeignKey(MaintenanceReport, on_delete=models.CASCADE, related_name="part_usages")
+    spare_part = models.ForeignKey(SparePart, on_delete=models.SET_NULL, related_name="maintenance_usages", null=True, blank=True)
+    name_snapshot = models.CharField(max_length=180, blank=True)
+    reference_snapshot = models.CharField(max_length=120, blank=True)
+    category_snapshot = models.CharField(max_length=120, blank=True)
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("1.00"))
+    unit_snapshot = models.CharField(max_length=40, blank=True)
+    note = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+    def __str__(self):
+        return f"{self.report.maintenance_ticket.title} - {self.reference_snapshot or self.name_snapshot}"
+
+    def save(self, *args, **kwargs):
+        if self.report_id and self.report.organization_id:
+            self.organization = self.report.organization
+        if self.spare_part_id:
+            if not self.name_snapshot:
+                self.name_snapshot = self.spare_part.name
+            if not self.reference_snapshot:
+                self.reference_snapshot = self.spare_part.reference
+            if not self.category_snapshot:
+                self.category_snapshot = self.spare_part.category
+            if not self.unit_snapshot:
+                self.unit_snapshot = self.spare_part.unit
+            if self.spare_part.organization_id and not self.organization_id:
+                self.organization = self.spare_part.organization
+        super().save(*args, **kwargs)
+
+
 class MaintenanceReportPhoto(TimeStampedModel):
     organization = models.ForeignKey(
         Organization,
@@ -1599,6 +1939,14 @@ class KnowledgeArticle(TimeStampedModel):
     title = models.CharField(max_length=255)
     slug = models.SlugField(max_length=255, unique=True, blank=True)
     category = models.CharField(max_length=100, blank=True)
+    equipment_category = models.ForeignKey(
+        EquipmentCategory,
+        on_delete=models.SET_NULL,
+        related_name="knowledge_articles",
+        null=True,
+        blank=True,
+    )
+    business_domain = models.CharField(max_length=20, choices=Ticket.BUSINESS_DOMAIN_CHOICES, default=Ticket.DOMAIN_OTHER)
     product = models.ForeignKey(Product, on_delete=models.SET_NULL, related_name="knowledge_articles", null=True, blank=True)
     summary = models.TextField(blank=True)
     content = models.TextField()
@@ -1617,6 +1965,8 @@ class KnowledgeArticle(TimeStampedModel):
     def save(self, *args, **kwargs):
         if self.product_id and self.product.organization_id:
             self.organization = self.product.organization
+        elif self.equipment_category_id and self.equipment_category.organization_id:
+            self.organization = self.equipment_category.organization
         if not self.slug:
             self.slug = _generate_unique_slug(self.__class__, self.title, self.pk)
         super().save(*args, **kwargs)
@@ -1707,6 +2057,69 @@ class DeviceRegistration(TimeStampedModel):
 
     def __str__(self):
         return f"{self.user} - {self.platform}"
+
+
+class OfflineSyncOperation(TimeStampedModel):
+    STATUS_PENDING = "pending"
+    STATUS_APPLIED = "applied"
+    STATUS_FAILED = "failed"
+
+    STATUS_CHOICES = (
+        (STATUS_PENDING, "En attente"),
+        (STATUS_APPLIED, "Synchronisee"),
+        (STATUS_FAILED, "Echec"),
+    )
+
+    METHOD_POST = "POST"
+    METHOD_PUT = "PUT"
+    METHOD_PATCH = "PATCH"
+    METHOD_DELETE = "DELETE"
+
+    METHOD_CHOICES = (
+        (METHOD_POST, "POST"),
+        (METHOD_PUT, "PUT"),
+        (METHOD_PATCH, "PATCH"),
+        (METHOD_DELETE, "DELETE"),
+    )
+
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.SET_NULL,
+        related_name="offline_sync_operations",
+        null=True,
+        blank=True,
+    )
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="offline_sync_operations")
+    device = models.ForeignKey(
+        DeviceRegistration,
+        on_delete=models.SET_NULL,
+        related_name="offline_sync_operations",
+        null=True,
+        blank=True,
+    )
+    operation_uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    endpoint = models.CharField(max_length=255)
+    method = models.CharField(max_length=10, choices=METHOD_CHOICES, default=METHOD_POST)
+    payload = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    error_message = models.TextField(blank=True)
+    client_created_at = models.DateTimeField(null=True, blank=True)
+    applied_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["status", "created_at"]
+
+    def __str__(self):
+        return f"{self.user} - {self.method} {self.endpoint} ({self.status})"
+
+    def save(self, *args, **kwargs):
+        if self.user_id and self.user.organization_id:
+            self.organization = self.user.organization
+        elif self.device_id and self.device.user.organization_id:
+            self.organization = self.device.user.organization
+        if self.status == self.STATUS_APPLIED and not self.applied_at:
+            self.applied_at = timezone.now()
+        super().save(*args, **kwargs)
 
 
 class OfferRecommendation(models.Model):
