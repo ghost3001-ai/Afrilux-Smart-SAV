@@ -465,28 +465,46 @@ class ClientRegistrationSerializer(serializers.Serializer):
         if attrs["password"] != attrs["password_confirm"]:
             raise serializers.ValidationError({"password_confirm": "Les mots de passe ne correspondent pas."})
         validate_password(attrs["password"])
+        email = (attrs.get("email") or "").strip().lower()
+        organization = attrs.get("organization")
         client_type = (attrs.get("client_type") or "").strip().lower()
         company_name = (attrs.get("company_name") or "").strip()
         if client_type == "enterprise" and not company_name:
             raise serializers.ValidationError({"company_name": "Le champ Entreprise est obligatoire pour ce type de client."})
         if client_type and client_type != "enterprise":
             attrs["company_name"] = ""
+        existing = User.objects.filter(email__iexact=email).select_related("organization").order_by("id").first()
+        if existing:
+            if existing.role != User.ROLE_CLIENT:
+                raise serializers.ValidationError({"email": "Cet email est deja utilise par un compte interne."})
+            if (
+                existing.organization_id
+                and organization
+                and existing.organization_id != organization.id
+                and existing.organization.slug != "contacts-entrants"
+            ):
+                raise serializers.ValidationError({"email": "Cet email est deja rattache a une autre organisation."})
+            if existing.has_usable_password():
+                raise serializers.ValidationError({"email": "Un compte client existe deja avec cet email."})
         return attrs
 
     def create(self, validated_data):
-        user, created = provision_client_account(
-            organization=validated_data["organization"],
-            email=validated_data["email"],
-            password=validated_data["password"],
-            first_name=validated_data["first_name"],
-            last_name=validated_data.get("last_name", ""),
-            phone=validated_data.get("phone", ""),
-            company_name=validated_data.get("company_name", ""),
-            client_type=validated_data.get("client_type", ""),
-            sector=validated_data.get("sector", ""),
-            tax_identifier=validated_data.get("tax_identifier", ""),
-            address=validated_data.get("address", ""),
-        )
+        try:
+            user, created = provision_client_account(
+                organization=validated_data["organization"],
+                email=validated_data["email"],
+                password=validated_data["password"],
+                first_name=validated_data["first_name"],
+                last_name=validated_data.get("last_name", ""),
+                phone=validated_data.get("phone", ""),
+                company_name=validated_data.get("company_name", ""),
+                client_type=validated_data.get("client_type", ""),
+                sector=validated_data.get("sector", ""),
+                tax_identifier=validated_data.get("tax_identifier", ""),
+                address=validated_data.get("address", ""),
+            )
+        except ValueError as exc:
+            raise serializers.ValidationError({"detail": str(exc)}) from exc
         self.context["account_created"] = created
         return user
 

@@ -1639,6 +1639,27 @@ class SavPlatformTests(TestCase):
         self.assertEqual(created.client_type, "individual")
         self.assertEqual(created.company_name, "")
 
+    def test_public_registration_existing_email_returns_validation_error(self):
+        response = self.client.post(
+            reverse("sav_api:public-register"),
+            json.dumps(
+                {
+                    "organization": self.organization.id,
+                    "first_name": "Client",
+                    "last_name": "Existant",
+                    "email": self.client_user.email,
+                    "phone": "+237677000103",
+                    "client_type": "individual",
+                    "password": "ClientPass123!",
+                    "password_confirm": "ClientPass123!",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("email", response.json())
+
     def test_web_login_accepts_email_identifier(self):
         user = User.objects.create_user(
             username="email_client",
