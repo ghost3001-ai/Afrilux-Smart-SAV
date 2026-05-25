@@ -1053,10 +1053,31 @@ class ProductForm(forms.ModelForm):
         self.fields["sku"].required = False
         self.fields["installation_address"].required = False
         self.fields["detailed_location"].required = False
+        self.fields["location_status"].required = False
+        self.fields["location_status"].initial = Product.LOCATION_INSTALLED
         self.fields["current_location_notes"].required = False
         self.fields["contract_reference"].required = False
         self.fields["notes"].required = False
         self.fields["health_score"].help_text = "Valeur entre 0 et 100."
+        legacy_status_choices = [
+            (value, label)
+            for value, label in (
+                (Product.STATUS_ACTIVE, "Operationnel (ancien statut)"),
+                (Product.STATUS_IN_SERVICE, "Operationnel (ancien statut)"),
+                (Product.STATUS_REPLACED, "Hors service (ancien statut)"),
+                (Product.STATUS_RETIRED, "Hors service (ancien statut)"),
+            )
+            if value not in dict(self.fields["status"].choices)
+        ]
+        if legacy_status_choices:
+            self.fields["status"].choices = list(self.fields["status"].choices) + legacy_status_choices
+
+    def clean_status(self):
+        value = self.cleaned_data.get("status")
+        return Product.LEGACY_STATUS_MAP.get(value, value)
+
+    def clean_location_status(self):
+        return self.cleaned_data.get("location_status") or Product.LOCATION_INSTALLED
 
     def clean_health_score(self):
         value = self.cleaned_data.get("health_score")

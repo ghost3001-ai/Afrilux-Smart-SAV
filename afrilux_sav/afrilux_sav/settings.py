@@ -121,6 +121,9 @@ ALLOWED_HOSTS = _env_list("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,10.0.2.2,
 for derived_host in {RENDER_EXTERNAL_HOSTNAME, _hostname_from_url(SAV_PUBLIC_BASE_URL)}:
     if derived_host and derived_host not in ALLOWED_HOSTS:
         ALLOWED_HOSTS.append(derived_host)
+for dev_host in {"testserver"}:
+    if (DEBUG or "test" in sys.argv) and dev_host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(dev_host)
 SERVE_STATIC_LOCAL = _env_bool("DJANGO_SERVE_STATIC_LOCAL", bool(os.getenv("RENDER")))
 USE_WHITENOISE_STATIC_STORAGE = (
     SERVE_STATIC_LOCAL

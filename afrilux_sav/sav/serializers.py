@@ -403,6 +403,8 @@ class UserSerializer(serializers.ModelSerializer):
         agency = attrs.get("agency") or getattr(self.instance, "agency", None)
         professional_email = (attrs.get("professional_email") or "").strip().lower()
         password = attrs.get("password", "")
+        client_type = (attrs.get("client_type") or getattr(self.instance, "client_type", "") or "").strip().lower()
+        company_name = (attrs.get("company_name") or "").strip()
 
         if self.instance is None and not password:
             raise serializers.ValidationError({"password": "Le mot de passe est obligatoire a la creation."})
@@ -411,12 +413,20 @@ class UserSerializer(serializers.ModelSerializer):
 
         if email:
             attrs["email"] = email
+            existing = User.objects.filter(email__iexact=email).order_by("id")
+            if self.instance is not None:
+                existing = existing.exclude(pk=self.instance.pk)
+            if existing.exists():
+                raise serializers.ValidationError({"email": "Cet email est deja utilise par un autre compte."})
         if professional_email:
             attrs["professional_email"] = professional_email
         if not attrs.get("username") and email:
             attrs["username"] = generate_client_username(email)
-        if role == User.ROLE_CLIENT and organization and not attrs.get("company_name") and not getattr(self.instance, "company_name", ""):
-            attrs["company_name"] = organization.display_name
+        if role == User.ROLE_CLIENT:
+            if client_type and client_type != "enterprise":
+                attrs["company_name"] = ""
+            elif organization and not company_name and not getattr(self.instance, "company_name", ""):
+                attrs["company_name"] = organization.display_name
         if agency and organization and agency.organization_id != organization.id:
             raise serializers.ValidationError({"agency": "L'agence selectionnee appartient a une autre organisation."})
         if agency and not organization:

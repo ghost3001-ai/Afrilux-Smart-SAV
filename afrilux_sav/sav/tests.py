@@ -1660,6 +1660,48 @@ class SavPlatformTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("email", response.json())
 
+    def test_manager_can_create_individual_client_via_api(self):
+        self.api.force_authenticate(user=self.manager)
+
+        response = self.api.post(
+            reverse("sav_api:client-list"),
+            {
+                "organization": self.organization.id,
+                "first_name": "API",
+                "last_name": "Particulier",
+                "email": "api.particulier@example.com",
+                "password": "ClientPass123!",
+                "client_type": "individual",
+                "company_name": "Ne doit pas rester",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        created = User.objects.get(email="api.particulier@example.com")
+        self.assertEqual(created.role, User.ROLE_CLIENT)
+        self.assertEqual(created.client_type, "individual")
+        self.assertEqual(created.company_name, "")
+
+    def test_manager_client_creation_rejects_duplicate_email(self):
+        self.api.force_authenticate(user=self.manager)
+
+        response = self.api.post(
+            reverse("sav_api:client-list"),
+            {
+                "organization": self.organization.id,
+                "first_name": "Doublon",
+                "last_name": "Client",
+                "email": self.client_user.email,
+                "password": "ClientPass123!",
+                "client_type": "individual",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("email", response.data)
+
     def test_web_login_accepts_email_identifier(self):
         user = User.objects.create_user(
             username="email_client",
@@ -2306,7 +2348,7 @@ class SavPlatformTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.product.refresh_from_db()
         self.assertEqual(self.product.name, "Onduleur 5kVA Revise")
-        self.assertEqual(self.product.status, Product.STATUS_IN_SERVICE)
+        self.assertEqual(self.product.status, Product.STATUS_OPERATIONAL)
         self.assertEqual(self.product.health_score, 88)
         self.assertTrue(AuditLog.objects.filter(action="product_updated_web", target_id=self.product.pk).exists())
 
