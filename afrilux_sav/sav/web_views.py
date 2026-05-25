@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from django.contrib import messages as django_messages
 from django.contrib.auth import login
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
+from django.core.exceptions import ValidationError
 from django.db.models import Avg, Count, Q
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
@@ -349,7 +350,11 @@ class ClientRegisterView(FormView):
     success_url = reverse_lazy("support-page")
 
     def form_valid(self, form):
-        user = form.save()
+        try:
+            user = form.save()
+        except ValidationError as exc:
+            form.add_error(None, exc)
+            return self.form_invalid(form)
         if self.request.user.is_authenticated:
             django_messages.success(
                 self.request,

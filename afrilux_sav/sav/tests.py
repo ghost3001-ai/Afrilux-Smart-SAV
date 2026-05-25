@@ -2099,6 +2099,52 @@ class SavPlatformTests(TestCase):
         self.assertContains(response, "data-company-field")
         self.assertContains(response, "field--hidden")
 
+    def test_anonymous_user_can_create_client_from_register_page(self):
+        response = self.client.post(
+            reverse("register"),
+            {
+                "organization": self.organization.id,
+                "first_name": "Aline",
+                "last_name": "Client",
+                "email": "aline.client@example.com",
+                "phone": "+237699000222",
+                "client_type": "individual",
+                "company_name": "",
+                "sector": "Services",
+                "tax_identifier": "",
+                "address": "Douala",
+                "password1": "ClientPass123!",
+                "password2": "ClientPass123!",
+            },
+        )
+
+        self.assertRedirects(response, reverse("support-page"))
+        created = User.objects.get(email="aline.client@example.com")
+        self.assertEqual(created.role, User.ROLE_CLIENT)
+        self.assertEqual(int(self.client.session["_auth_user_id"]), created.id)
+
+    def test_register_page_existing_email_returns_form_error(self):
+        response = self.client.post(
+            reverse("register"),
+            {
+                "organization": self.organization.id,
+                "first_name": "Client",
+                "last_name": "Existant",
+                "email": self.client_user.email,
+                "phone": "+237699000333",
+                "client_type": "individual",
+                "company_name": "",
+                "sector": "",
+                "tax_identifier": "",
+                "address": "Douala",
+                "password1": "ClientPass123!",
+                "password2": "ClientPass123!",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Un compte client existe deja avec cet email")
+
     def test_planning_page_renders_for_manager(self):
         self.client.force_login(self.manager)
 

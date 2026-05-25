@@ -92,6 +92,8 @@ class ClientRegistrationForm(forms.Form):
 
     def clean(self):
         cleaned_data = super().clean()
+        organization = cleaned_data.get("organization")
+        email = (cleaned_data.get("email") or "").strip().lower()
         password1 = cleaned_data.get("password1", "")
         password2 = cleaned_data.get("password2", "")
         if password1 and password2 and password1 != password2:
@@ -107,24 +109,41 @@ class ClientRegistrationForm(forms.Form):
             self.add_error("company_name", "Le champ Entreprise est obligatoire pour un client de type Entreprise.")
         if client_type and client_type != "enterprise":
             cleaned_data["company_name"] = ""
+        if email:
+            existing = User.objects.filter(email__iexact=email).select_related("organization").order_by("id").first()
+            if existing:
+                if existing.role != User.ROLE_CLIENT:
+                    self.add_error("email", "Cet email est deja utilise par un compte interne.")
+                elif (
+                    existing.organization_id
+                    and organization
+                    and existing.organization_id != organization.id
+                    and existing.organization.slug != "contacts-entrants"
+                ):
+                    self.add_error("email", "Cet email est deja rattache a une autre organisation.")
+                elif existing.has_usable_password():
+                    self.add_error("email", "Un compte client existe deja avec cet email. Connectez-vous depuis la page de connexion.")
         return cleaned_data
 
     def save(self):
         if not self.is_valid():
             raise ValueError("Le formulaire d'inscription n'est pas valide.")
-        user, _ = provision_client_account(
-            organization=self.cleaned_data["organization"],
-            email=self.cleaned_data["email"],
-            password=self.cleaned_data["password1"],
-            first_name=self.cleaned_data["first_name"],
-            last_name=self.cleaned_data.get("last_name", ""),
-            phone=self.cleaned_data.get("phone", ""),
-            company_name=self.cleaned_data.get("company_name", ""),
-            client_type=self.cleaned_data.get("client_type", ""),
-            sector=self.cleaned_data.get("sector", ""),
-            tax_identifier=self.cleaned_data.get("tax_identifier", ""),
-            address=self.cleaned_data.get("address", ""),
-        )
+        try:
+            user, _ = provision_client_account(
+                organization=self.cleaned_data["organization"],
+                email=self.cleaned_data["email"],
+                password=self.cleaned_data["password1"],
+                first_name=self.cleaned_data["first_name"],
+                last_name=self.cleaned_data.get("last_name", ""),
+                phone=self.cleaned_data.get("phone", ""),
+                company_name=self.cleaned_data.get("company_name", ""),
+                client_type=self.cleaned_data.get("client_type", ""),
+                sector=self.cleaned_data.get("sector", ""),
+                tax_identifier=self.cleaned_data.get("tax_identifier", ""),
+                address=self.cleaned_data.get("address", ""),
+            )
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
         return user
 
 
