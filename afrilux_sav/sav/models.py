@@ -674,6 +674,11 @@ class Product(TimeStampedModel):
 
     class Meta:
         ordering = ["name", "serial_number"]
+        indexes = [
+            models.Index(fields=["organization", "status"], name="sav_product_org_status_idx"),
+            models.Index(fields=["client", "status"], name="sav_product_client_status_idx"),
+            models.Index(fields=["organization", "warranty_end"], name="sav_product_org_warranty_idx"),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["organization", "serial_number"],
@@ -1044,6 +1049,15 @@ class Ticket(TimeStampedModel):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["organization", "status"], name="sav_ticket_org_status_idx"),
+            models.Index(fields=["organization", "priority"], name="sav_ticket_org_priority_idx"),
+            models.Index(fields=["organization", "created_at"], name="sav_ticket_org_created_idx"),
+            models.Index(fields=["organization", "sla_deadline"], name="sav_ticket_org_sla_idx"),
+            models.Index(fields=["client", "status"], name="sav_ticket_client_status_idx"),
+            models.Index(fields=["assigned_agent", "status"], name="sav_ticket_agent_status_idx"),
+            models.Index(fields=["status", "sla_deadline"], name="sav_ticket_status_sla_idx"),
+        ]
 
     def __str__(self):
         return f"{self.reference or 'N/A'} - {self.title}"
@@ -1384,6 +1398,11 @@ class Intervention(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["organization", "agent", "scheduled_for"], name="sav_interv_org_agent_sched_idx"),
+            models.Index(fields=["ticket", "created_at"], name="sav_interv_ticket_created_idx"),
+            models.Index(fields=["status", "scheduled_for"], name="sav_interv_status_sched_idx"),
+        ]
 
     def __str__(self):
         return f"{self.ticket.reference} - {self.action_taken}"
@@ -1667,6 +1686,11 @@ class MaintenanceTicket(TimeStampedModel):
 
     class Meta:
         ordering = ["scheduled_date", "priority", "id"]
+        indexes = [
+            models.Index(fields=["organization", "status", "scheduled_date"], name="sav_maint_org_status_date_idx"),
+            models.Index(fields=["technician", "status", "scheduled_date"], name="sav_maint_tech_status_date_idx"),
+            models.Index(fields=["client", "scheduled_date"], name="sav_maint_client_date_idx"),
+        ]
 
     def __str__(self):
         return f"{self.title} - {self.client}"
@@ -2049,6 +2073,10 @@ class PredictiveAlert(TimeStampedModel):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["status", "severity"], name="sav_alert_status_severity_idx"),
+            models.Index(fields=["product", "status"], name="sav_alert_product_status_idx"),
+        ]
 
     def __str__(self):
         return f"{self.product.serial_number} - {self.title}"
@@ -2161,6 +2189,11 @@ class Notification(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["recipient", "status"], name="sav_notif_recipient_status_idx"),
+            models.Index(fields=["organization", "status"], name="sav_notif_org_status_idx"),
+            models.Index(fields=["channel", "status"], name="sav_notif_channel_status_idx"),
+        ]
 
     def __str__(self):
         return f"{self.recipient} - {self.subject}"

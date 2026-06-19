@@ -9,13 +9,29 @@ Le depot est maintenant prepare pour un deploiement Render via la blueprint [ren
 - 1 Redis managé `afrilux-sav-redis`
 - 1 disque persistant monte sur `/app/media`
 
-Le scheduler AFRILUX tourne dans **le meme conteneur web** via `DJANGO_RUN_SCHEDULER_IN_WEB=true`.
+Le scheduler AFRILUX ne tourne plus dans le conteneur web par defaut.
 
-Ce choix est intentionnel sur Render:
+Ce choix est important pour les performances:
 
-- les fichiers media, pieces jointes et rapports archives sont ecrits dans `/app/media`
-- les disques Render ne sont pas partageables entre plusieurs services
-- separer le scheduler dans un worker ou un cron casserait l'acces commun aux fichiers archives sans stockage objet externe
+- le service web reste reserve aux requetes utilisateurs;
+- les controles SLA, maintenances et rapports ne concurrencent plus Gunicorn toutes les 60 secondes;
+- sur un petit plan Render, cela evite les pics CPU et base de donnees apres redeploiement.
+
+Si vous voulez automatiser les taches de fond, utilisez de preference un job/cron Render qui lance:
+
+```bash
+cd /app
+python manage.py run_platform_scheduler --once --skip-backup
+```
+
+ou, plus simplement:
+
+```bash
+cd /app
+python manage.py run_sav_automation --skip-reports
+```
+
+Evitez `DJANGO_RUN_SCHEDULER_IN_WEB=true` sur les petits plans, sauf depannage temporaire.
 
 ## Deploiement
 
@@ -33,8 +49,11 @@ Ce choix est intentionnel sur Render:
 - `DJANGO_RUN_MIGRATIONS_ON_STARTUP=true`
 - `DJANGO_COLLECTSTATIC_ON_STARTUP=true`
 - `DJANGO_SERVE_STATIC_LOCAL=true`
-- `DJANGO_RUN_SCHEDULER_IN_WEB=true`
-- `SCHEDULER_INTERVAL_SECONDS=60`
+- `DJANGO_RUN_SCHEDULER_IN_WEB=false`
+- `SCHEDULER_INTERVAL_SECONDS=300`
+- `GUNICORN_WORKERS=2`
+- `SAV_SHELL_CACHE_SECONDS=30`
+- `SAV_DASHBOARD_CACHE_SECONDS=60`
 - `SCHEDULER_SKIP_BACKUP=true`
 - `SECURE_SSL_REDIRECT=true`
 - `SESSION_COOKIE_SECURE=true`
@@ -104,6 +123,29 @@ Puis lancez un redeploy. Au demarrage, le conteneur execute automatiquement:
 La commande `bootstrap_platform` est idempotente: si le compte `aziz` existe deja, il est mis a jour et son mot de passe est remplace par `BOOTSTRAP_ADMIN_PASSWORD`.
 
 Apres un deploy reussi, il est recommande de passer `DJANGO_BOOTSTRAP_ON_STARTUP=false` ou de supprimer `BOOTSTRAP_ADMIN_PASSWORD`, puis de redeployer. Cela evite de remettre le meme mot de passe a chaque redemarrage.
+
+## Si l'application devient lente apres redeploiement
+
+Verifier en premier:
+
+1. `DJANGO_RUN_SCHEDULER_IN_WEB=false`
+2. `GUNICORN_WORKERS=2` sur plan starter
+3. `REDIS_URL` renseigne et service Redis actif
+4. `SAV_SHELL_CACHE_SECONDS=30`
+5. `SAV_DASHBOARD_CACHE_SECONDS=60`
+6. migrations appliquees, notamment les index de performance
+7. `DJANGO_BOOTSTRAP_ON_STARTUP=false` apres le premier bootstrap
+
+Commandes Render utiles:
+
+```bash
+cd /app
+python manage.py check
+python manage.py migrate --noinput
+python manage.py showmigrations sav
+```
+
+Si le tableau de bord est lent au premier affichage mais rapide ensuite, c'est normal: le premier acces reconstruit le cache, les suivants le reutilisent pendant `SAV_DASHBOARD_CACHE_SECONDS`.
 
 ## Bootstrap initial avec Shell
 

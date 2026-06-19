@@ -2,9 +2,11 @@ import json
 import time
 from datetime import datetime, timedelta
 
+from django.conf import settings
 from django.contrib import messages as django_messages
 from django.contrib.auth import login
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db.models import Avg, Count, Q
 from django.http import HttpResponse, JsonResponse
@@ -444,28 +446,39 @@ class DashboardPageView(LoginRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        snapshot = _dashboard_snapshot(self.request.user)
+        cache_timeout = max(0, int(getattr(settings, "SAV_DASHBOARD_CACHE_SECONDS", 60)))
+        cache_key = (
+            "sav-dashboard:v2:"
+            f"{self.request.user.pk}:{self.request.user.role}:{self.request.user.organization_id}:{int(self.request.user.is_superuser)}"
+        )
+        cached_dashboard = cache.get(cache_key) if cache_timeout else None
+        if cached_dashboard is None:
+            snapshot = _dashboard_snapshot(self.request.user)
+            if is_internal_user(self.request.user):
+                at_risk_clients = list(
+                    scope_user_queryset(User.objects.filter(role=User.ROLE_CLIENT), self.request.user)
+                    .annotate(
+                        critical_open=Count(
+                            "tickets",
+                            filter=Q(tickets__priority=Ticket.PRIORITY_CRITICAL, tickets__status__in=OPEN_TICKET_STATUSES),
+                        ),
+                        open_total=Count("tickets", filter=Q(tickets__status__in=OPEN_TICKET_STATUSES)),
+                    )
+                    .filter(Q(critical_open__gt=0) | Q(open_total__gte=2))
+                    .order_by("-critical_open", "-open_total", "username")[:6]
+                )
+            else:
+                at_risk_clients = []
+            cached_dashboard = {"snapshot": snapshot, "at_risk_clients": at_risk_clients}
+            if cache_timeout:
+                cache.set(cache_key, cached_dashboard, cache_timeout)
+        snapshot = cached_dashboard["snapshot"]
         context.update(snapshot)
         context["analytics_form"] = AnalyticsQuestionForm(
             initial={"question": "Combien de tickets critiques avons-nous ?"}
         )
         context["client_insight"] = build_customer_insight(self.request.user) if self.request.user.role == User.ROLE_CLIENT else None
-
-        if is_internal_user(self.request.user):
-            context["at_risk_clients"] = list(
-                scope_user_queryset(User.objects.filter(role=User.ROLE_CLIENT), self.request.user)
-                .annotate(
-                    critical_open=Count(
-                        "tickets",
-                        filter=Q(tickets__priority=Ticket.PRIORITY_CRITICAL, tickets__status__in=OPEN_TICKET_STATUSES),
-                    ),
-                    open_total=Count("tickets", filter=Q(tickets__status__in=OPEN_TICKET_STATUSES)),
-                )
-                .filter(Q(critical_open__gt=0) | Q(open_total__gte=2))
-                .order_by("-critical_open", "-open_total", "username")[:6]
-            )
-        else:
-            context["at_risk_clients"] = []
+        context["at_risk_clients"] = cached_dashboard["at_risk_clients"]
         return context
 
 

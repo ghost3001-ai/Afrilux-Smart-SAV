@@ -1,3 +1,5 @@
+from django.conf import settings
+from django.core.cache import cache
 from django.urls import reverse
 
 from .models import Notification, Ticket
@@ -60,11 +62,16 @@ def sav_shell(request):
             }
         }
 
+    cache_timeout = max(0, int(getattr(settings, "SAV_SHELL_CACHE_SECONDS", 30)))
+    cache_key = f"sav-shell:v2:{user.pk}:{user.role}:{user.organization_id}:{int(user.is_superuser)}"
+    if cache_timeout:
+        cached_payload = cache.get(cache_key)
+        if cached_payload is not None:
+            return {"sav_shell": cached_payload}
+
     notifications = scope_notification_queryset(Notification.objects.all(), user)
     tickets = scope_ticket_queryset(Ticket.objects.all(), user)
-
-    return {
-        "sav_shell": {
+    payload = {
             "is_authenticated": True,
             "is_internal": is_internal_user(user),
             "has_backoffice_access": has_backoffice_access(user) or getattr(user, "is_superuser", False),
@@ -80,5 +87,7 @@ def sav_shell(request):
             "organization_primary_color": user.organization.primary_color if getattr(user, "organization_id", None) else "",
             "organization_accent_color": user.organization.accent_color if getattr(user, "organization_id", None) else "",
             **_workspace_payload(user),
-        }
     }
+    if cache_timeout:
+        cache.set(cache_key, payload, cache_timeout)
+    return {"sav_shell": payload}

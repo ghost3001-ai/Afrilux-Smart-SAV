@@ -58,7 +58,13 @@ services:
       - key: DJANGO_SERVE_STATIC_LOCAL
         value: "true"
       - key: DJANGO_RUN_SCHEDULER_IN_WEB
-        value: "true"
+        value: "false"
+      - key: GUNICORN_WORKERS
+        value: "2"
+      - key: SAV_SHELL_CACHE_SECONDS
+        value: "30"
+      - key: SAV_DASHBOARD_CACHE_SECONDS
+        value: "60"
       - key: DJANGO_BOOTSTRAP_ON_STARTUP
         value: "true"
       - key: BOOTSTRAP_ORGANIZATION_NAME
@@ -80,7 +86,7 @@ services:
       - key: BOOTSTRAP_ADMIN_PASSWORD
         sync: false
       - key: SCHEDULER_INTERVAL_SECONDS
-        value: "60"
+        value: "300"
       - key: SCHEDULER_SKIP_BACKUP
         value: "true"
       - key: SAV_BACKUP_DIR
