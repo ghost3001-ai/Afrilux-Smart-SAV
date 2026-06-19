@@ -193,7 +193,7 @@
             {% for log in recent_audits %}
                 <tr>
                     <td>{{ log.created_at|date:"d/m/Y H:i" }}</td>
-                    <td>{{ log.actor|default:"Systeme" }}</td>
+                    <td>{{ log.actor|default:"Système" }}</td>
                     <td>{{ log.action }}</td>
                     <td>{{ log.target_reference|default:log.target_model }}</td>
                 </tr>

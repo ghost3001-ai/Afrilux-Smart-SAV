@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import hmac
+import json
 from datetime import datetime, time, timedelta
 from urllib.parse import urlparse
 
@@ -114,6 +115,7 @@ from .serializers import (
     TicketAssignmentSerializer,
     TicketFeedbackSerializer,
     TicketSerializer,
+    TechnicianAvailabilitySerializer,
     UserSerializer,
     WorkflowExecutionSerializer,
 )
@@ -123,14 +125,16 @@ from .services import (
     apply_agentic_resolution,
     answer_support_question,
     build_customer_insight,
+    assign_ticket_to_team,
     can_create_ticket,
+    can_drive_ticket_workflow,
     can_manage_maintenance,
     can_record_ticket_intervention,
     calculate_sentiment,
     compute_agent_performance_rows,
     compute_average_first_response_hours,
     compute_average_resolution_hours,
-    compute_technician_status_rows,
+    compute_technician_availability_dashboard,
     compute_ticket_hotspots,
     compute_ticket_monthly_series,
     compute_ticket_sla_deadline,
@@ -146,6 +150,16 @@ from .services import (
     publish_maintenance_program,
     ensure_assignment_intervention,
     escalate_ticket,
+    close_sav_dossier,
+    confirm_planning,
+    continue_after_escalation_solution,
+    decline_ticket_escalation,
+    provide_escalation_solution,
+    propose_planning,
+    reassign_escalated_ticket,
+    request_finish_intervention,
+    request_start_intervention,
+    request_ticket_escalation,
     generate_intervention_pdf,
     has_reporting_access,
     is_admin_user,
@@ -158,6 +172,8 @@ from .services import (
     start_maintenance_ticket,
     transfer_product_location,
     validate_maintenance_report,
+    validate_finish_intervention,
+    validate_start_intervention,
     scope_agency_queryset,
     scope_equipment_category_queryset,
     scope_equipment_location_history_queryset,
@@ -200,14 +216,14 @@ from .services import (
 
 def _ticket_status_from_intervention(intervention):
     if intervention.status == Intervention.STATUS_DONE or intervention.finished_at:
-        return Ticket.STATUS_RESOLVED
+        return Ticket.STATUS_DONE
     if intervention.status == Intervention.STATUS_IN_PROGRESS or intervention.started_at:
         return Ticket.STATUS_IN_PROGRESS
     if intervention.status == Intervention.STATUS_CANCELLED:
-        return Ticket.STATUS_WAITING
+        return Ticket.STATUS_WAITING_PART
     if intervention.scheduled_for:
-        return Ticket.STATUS_ASSIGNED
-    return Ticket.STATUS_ASSIGNED if intervention.ticket.assigned_agent_id else Ticket.STATUS_NEW
+        return Ticket.STATUS_PLANNED
+    return Ticket.STATUS_ASSIGNED if intervention.ticket.assigned_agent_id else Ticket.STATUS_PENDING_ASSIGNMENT
 
 
 class AuditedModelViewSet(viewsets.ModelViewSet):
@@ -237,6 +253,16 @@ class UserViewSet(AuditedModelViewSet):
     def get_queryset(self):
         queryset = User.objects.all().order_by("first_name", "last_name", "username")
         return scope_user_queryset(queryset, self.request.user)
+
+    @action(detail=False, methods=["get"], url_path="availability-dashboard")
+    def availability_dashboard(self, request):
+        if not is_manager_user(request.user):
+            raise PermissionDenied("Acces reserve aux responsables SAV.")
+        organization = getattr(request.user, "organization", None)
+        if not organization and not request.user.is_superuser:
+            return Response([])
+        data = compute_technician_availability_dashboard(organization)
+        return Response(data)
 
     @action(detail=False, methods=["get"])
     def me(self, request):
@@ -726,7 +752,7 @@ class MaintenanceTicketViewSet(AuditedModelViewSet):
             "client",
             "anomaly_ticket",
             "report",
-        ).prefetch_related("products", "report__photo_files")
+        ).prefetch_related("products", "team_members", "report__photo_files")
         queryset = scope_maintenance_ticket_queryset(queryset, self.request.user)
         technician = self.request.query_params.get("technicien") or self.request.query_params.get("technician")
         client = self.request.query_params.get("client")
@@ -735,7 +761,7 @@ class MaintenanceTicketViewSet(AuditedModelViewSet):
         date_from = _parse_anchor_date(self.request.query_params.get("date_from"))
         date_to = _parse_anchor_date(self.request.query_params.get("date_to"))
         if technician:
-            queryset = queryset.filter(technician_id=technician)
+            queryset = queryset.filter(Q(technician_id=technician) | Q(team_members__id=technician)).distinct()
         if client:
             queryset = queryset.filter(client_id=client)
         if status_value:
@@ -743,9 +769,9 @@ class MaintenanceTicketViewSet(AuditedModelViewSet):
         if service:
             queryset = queryset.filter(service=service)
         if date_from:
-            queryset = queryset.filter(scheduled_date__gte=date_from)
+            queryset = queryset.filter(scheduled_date__gte=_start_of_day(date_from))
         if date_to:
-            queryset = queryset.filter(scheduled_date__lte=date_to)
+            queryset = queryset.filter(scheduled_date__lt=_start_of_day(date_to + timedelta(days=1)))
         return queryset
 
     def perform_create(self, serializer):
@@ -984,7 +1010,7 @@ class TicketViewSet(AuditedModelViewSet):
         if self.request.user.role == User.ROLE_CLIENT:
             ticket_kwargs["client"] = self.request.user
             serializer.validated_data["priority"] = Ticket.PRIORITY_NORMAL
-            serializer.validated_data["status"] = Ticket.STATUS_NEW
+            serializer.validated_data["status"] = Ticket.STATUS_PENDING_ASSIGNMENT
             serializer.validated_data["assigned_agent"] = None
             client = self.request.user
         else:
@@ -1009,7 +1035,33 @@ class TicketViewSet(AuditedModelViewSet):
             update_fields.append("sla_deadline")
         if update_fields:
             instance.save(update_fields=[*update_fields, "updated_at"])
-        if instance.assigned_agent_id:
+
+        # NOUVEAU : Gestion d'équipe à la création
+        team_leader_id = serializer.validated_data.get("team_leader_id") or self.request.data.get("team_leader")
+        team_members_ids = serializer.validated_data.get("team_members") or self.request.data.get("team_members", [])
+        if isinstance(team_members_ids, str):
+            team_members_ids = [int(x.strip()) for x in team_members_ids.split(",") if x.strip()]
+
+        if team_leader_id and team_members_ids:
+            # Assigner comme équipe
+            try:
+                leader = User.objects.get(pk=team_leader_id, is_active=True)
+                members = User.objects.filter(pk__in=team_members_ids, is_active=True)
+                if members.count() != len(set(team_members_ids)):
+                    raise PermissionDenied("Un ou plusieurs membres sont introuvables.")
+                assign_ticket_to_team(
+                    instance,
+                    leader=leader,
+                    members=members,
+                    actor=self.request.user,
+                    note="Assignation d'équipe à la création du ticket."
+                )
+                instance.refresh_from_db()
+            except User.DoesNotExist:
+                raise PermissionDenied(f"Le chef d'équipe avec l'ID {team_leader_id} est introuvable.")
+            except ValueError as exc:
+                raise PermissionDenied(str(exc))
+        elif instance.assigned_agent_id:
             ensure_assignment_intervention(instance, actor=self.request.user, note="Affectation initiale a la creation du ticket.")
         elif self.request.user.role == User.ROLE_HEAD_SAV and initial_escalation_target:
             previous_status = instance.status
@@ -1033,6 +1085,8 @@ class TicketViewSet(AuditedModelViewSet):
     def perform_update(self, serializer):
         if self.request.user.role != User.ROLE_HEAD_SAV:
             raise PermissionDenied("Seul le responsable SAV peut modifier directement un ticket.")
+        if serializer.instance.status == Ticket.STATUS_CLOSED:
+            raise PermissionDenied("Un ticket cloture est irreversible. Creez un nouveau ticket pour une correction.")
         previous_status = serializer.instance.status
         previous_assigned_agent_id = serializer.instance.assigned_agent_id
         client = serializer.validated_data.get("client", serializer.instance.client)
@@ -1048,7 +1102,7 @@ class TicketViewSet(AuditedModelViewSet):
             serializer.instance.status
             in {
                 Ticket.STATUS_NEW,
-                Ticket.STATUS_WAITING,
+                Ticket.STATUS_PENDING_ASSIGNMENT,
             }
             or not previous_assigned_agent_id
         ):
@@ -1081,8 +1135,8 @@ class TicketViewSet(AuditedModelViewSet):
             )
         previous_status = ticket.status
         ticket.assigned_agent = request.user
-        if ticket.status in {Ticket.STATUS_NEW, Ticket.STATUS_ASSIGNED, Ticket.STATUS_WAITING}:
-            ticket.status = Ticket.STATUS_ASSIGNED if is_support_user(request.user) else Ticket.STATUS_IN_PROGRESS
+        if ticket.status in {Ticket.STATUS_NEW, Ticket.STATUS_PENDING_ASSIGNMENT, Ticket.STATUS_ASSIGNED, Ticket.STATUS_WAITING_PART}:
+            ticket.status = Ticket.STATUS_ASSIGNED
         ticket.save(update_fields=["assigned_agent", "status", "updated_at"])
         ensure_assignment_intervention(ticket, actor=request.user, note="Prise en charge manuelle du ticket.")
         self.audit("ticket_taken_ownership", ticket, {"assigned_agent": request.user.id})
@@ -1123,7 +1177,7 @@ class TicketViewSet(AuditedModelViewSet):
         if technician.role not in set(User.ESCALATION_TARGET_ROLES):
             raise PermissionDenied("La cible doit etre un responsable d'escalade ou un technicien.")
         ticket.assigned_agent = technician
-        if ticket.status in {Ticket.STATUS_NEW, Ticket.STATUS_WAITING}:
+        if ticket.status in {Ticket.STATUS_NEW, Ticket.STATUS_PENDING_ASSIGNMENT, Ticket.STATUS_WAITING_PART, Ticket.STATUS_REASSIGNED}:
             ticket.status = Ticket.STATUS_ASSIGNED
         ticket.save(update_fields=["assigned_agent", "status", "updated_at"])
         ensure_assignment_intervention(ticket, actor=request.user, note="Affectation explicite du responsable SAV.")
@@ -1131,17 +1185,58 @@ class TicketViewSet(AuditedModelViewSet):
         notify_ticket_status_change(ticket, previous_status, actor=request.user)
         return Response(self.get_serializer(ticket).data)
 
+    @action(detail=True, methods=["post"], permission_classes=[IsInternalUser], url_path="assign-team")
+    def assign_team(self, request, pk=None):
+        ticket = self.get_object()
+        previous_status = ticket.status
+        leader_id = request.data.get("leader") or request.data.get("team_leader")
+        member_ids = request.data.get("members") or request.data.get("team_members") or []
+        if isinstance(member_ids, str):
+            member_ids = [item.strip() for item in member_ids.split(",") if item.strip()]
+        if not leader_id:
+            return Response({"detail": "Le chef d'equipe est obligatoire."}, status=status.HTTP_400_BAD_REQUEST)
+        if not member_ids:
+            return Response({"detail": "Selectionnez au moins un membre."}, status=status.HTTP_400_BAD_REQUEST)
+
+        technician_queryset = User.objects.filter(role=User.ROLE_TECHNICIAN, is_active=True)
+        leader = get_object_or_404(scope_user_queryset(technician_queryset, request.user), pk=leader_id)
+        members = list(scope_user_queryset(technician_queryset, request.user).filter(pk__in=member_ids))
+        if len(members) != len(set(str(item) for item in member_ids)):
+            return Response({"detail": "Un ou plusieurs membres sont introuvables."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            result = assign_ticket_to_team(
+                ticket,
+                leader=leader,
+                members=members,
+                actor=request.user,
+                note=str(request.data.get("note", "")).strip(),
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        notify_ticket_status_change(ticket, previous_status, actor=request.user)
+        payload = self.get_serializer(ticket).data
+        payload["team_assignment"] = result
+        return Response(payload)
+
     @action(detail=True, methods=["post"], permission_classes=[IsInternalUser])
     def escalate(self, request, pk=None):
         ticket = self.get_object()
         previous_status = ticket.status
         try:
-            result = escalate_ticket(
-                ticket,
-                actor=request.user,
-                note=str(request.data.get("note", "")).strip(),
-                target=str(request.data.get("target", "")).strip(),
-            )
+            target = str(request.data.get("target", "")).strip()
+            if target:
+                result = escalate_ticket(
+                    ticket,
+                    actor=request.user,
+                    note=str(request.data.get("note", "")).strip(),
+                    target=target,
+                )
+            else:
+                result = request_ticket_escalation(
+                    ticket,
+                    actor=request.user,
+                    reason=str(request.data.get("reason") or request.data.get("note") or "").strip(),
+                )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1151,6 +1246,70 @@ class TicketViewSet(AuditedModelViewSet):
         payload = self.get_serializer(ticket).data
         payload["escalation"] = result
         return Response(payload)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsInternalUser], url_path="escalation-solution")
+    def escalation_solution(self, request, pk=None):
+        ticket = self.get_object()
+        previous_status = ticket.status
+        try:
+            provide_escalation_solution(
+                ticket,
+                actor=request.user,
+                solution=str(request.data.get("solution", "")).strip(),
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        notify_ticket_status_change(ticket, previous_status, actor=request.user)
+        return Response(self.get_serializer(ticket).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsInternalUser], url_path="escalation-continue")
+    def escalation_continue(self, request, pk=None):
+        ticket = self.get_object()
+        previous_status = ticket.status
+        try:
+            continue_after_escalation_solution(ticket, actor=request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        notify_ticket_status_change(ticket, previous_status, actor=request.user)
+        return Response(self.get_serializer(ticket).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsInternalUser], url_path="escalation-decline")
+    def escalation_decline(self, request, pk=None):
+        ticket = self.get_object()
+        previous_status = ticket.status
+        try:
+            decline_ticket_escalation(
+                ticket,
+                actor=request.user,
+                reason=str(request.data.get("reason", "")).strip(),
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        notify_ticket_status_change(ticket, previous_status, actor=request.user)
+        return Response(self.get_serializer(ticket).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsInternalUser], url_path="escalation-reassign")
+    def escalation_reassign(self, request, pk=None):
+        ticket = self.get_object()
+        previous_status = ticket.status
+        technician_id = request.data.get("technician") or request.data.get("assigned_agent")
+        if not technician_id:
+            return Response({"detail": "Le technicien cible est obligatoire."}, status=status.HTTP_400_BAD_REQUEST)
+        technician = get_object_or_404(
+            scope_user_queryset(User.objects.filter(role=User.ROLE_TECHNICIAN, is_active=True), request.user),
+            pk=technician_id,
+        )
+        try:
+            reassign_escalated_ticket(
+                ticket,
+                technician,
+                actor=request.user,
+                note=str(request.data.get("note", "")).strip(),
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        notify_ticket_status_change(ticket, previous_status, actor=request.user)
+        return Response(self.get_serializer(ticket).data)
 
     @action(detail=True, methods=["post"])
     def reopen(self, request, pk=None):
@@ -1182,24 +1341,125 @@ class TicketViewSet(AuditedModelViewSet):
         notify_ticket_status_change(ticket, previous_status, actor=request.user)
         return Response(self.get_serializer(ticket).data)
 
-    @action(detail=True, methods=["post"], permission_classes=[IsInternalUser], url_path="close")
-    def close(self, request, pk=None):
+    @action(detail=True, methods=["post"], url_path="propose-planning")
+    def propose_planning(self, request, pk=None):
         ticket = self.get_object()
         previous_status = ticket.status
-        if ticket.status == Ticket.STATUS_CANCELLED:
-            return Response({"detail": "Un ticket annule ne peut pas etre cloture."}, status=status.HTTP_400_BAD_REQUEST)
-        if ticket.status not in {Ticket.STATUS_NEW, Ticket.STATUS_RESOLVED}:
-            return Response(
-                {"detail": "Le cahier des charges autorise la cloture directe uniquement pour un doublon nouveau ou un ticket resolu."},
-                status=status.HTTP_400_BAD_REQUEST,
+        scheduled_at_str = request.data.get("scheduled_at")
+        if not scheduled_at_str:
+            return Response({"detail": "La date 'scheduled_at' est obligatoire."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            scheduled_at = datetime.fromisoformat(scheduled_at_str)
+            if timezone.is_naive(scheduled_at):
+                scheduled_at = timezone.make_aware(scheduled_at)
+            propose_planning(ticket, scheduled_at, actor=request.user)
+            notify_ticket_status_change(ticket, previous_status, actor=request.user)
+            return Response({"detail": "Planification proposee.", "scheduled_at": scheduled_at.isoformat(), "status": ticket.status})
+        except (ValueError, TypeError) as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=["post"], url_path="confirm-planning")
+    def confirm_planning(self, request, pk=None):
+        ticket = self.get_object()
+        previous_status = ticket.status
+        accepted = request.data.get("accepted", True)
+        accepted = str(accepted).strip().lower() not in {"false", "0", "non", "no", "refuse", "refus"}
+        try:
+            confirm_planning(ticket, accepted=accepted, actor=request.user)
+            notify_ticket_status_change(ticket, previous_status, actor=request.user)
+            return Response({"detail": "Action enregistree.", "status": ticket.status})
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=["post"], url_path="request-start")
+    def request_start(self, request, pk=None):
+        ticket = self.get_object()
+        previous_status = ticket.status
+        try:
+            request_start_intervention(ticket, actor=request.user)
+            notify_ticket_status_change(ticket, previous_status, actor=request.user)
+            return Response({"detail": "Demande de debut envoyee au client."})
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=["post"], url_path="validate-start")
+    def validate_start(self, request, pk=None):
+        ticket = self.get_object()
+        previous_status = ticket.status
+        impossible = request.data.get("impossible", False)
+        impossible = str(impossible).strip().lower() in {"true", "1", "oui", "yes"}
+        reason = request.data.get("reason", "")
+        photo = request.FILES.get("photo")
+        try:
+            validate_start_intervention(ticket, actor=request.user, impossible=impossible, reason=reason, photo=photo)
+            notify_ticket_status_change(ticket, previous_status, actor=request.user)
+            return Response({"detail": "Debut d'intervention valide.", "status": ticket.status})
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=["post"], url_path="request-finish")
+    def request_finish(self, request, pk=None):
+        ticket = self.get_object()
+        previous_status = ticket.status
+        try:
+            request_finish_intervention(ticket, actor=request.user)
+            notify_ticket_status_change(ticket, previous_status, actor=request.user)
+            return Response({"detail": "Demande de fin envoyee au client."})
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=["post"], url_path="validate-finish")
+    def validate_finish(self, request, pk=None):
+        ticket = self.get_object()
+        previous_status = ticket.status
+        impossible = request.data.get("impossible", False)
+        impossible = str(impossible).strip().lower() in {"true", "1", "oui", "yes"}
+        reason = request.data.get("reason", "")
+        photo = request.FILES.get("photo")
+        try:
+            validate_finish_intervention(ticket, actor=request.user, impossible=impossible, reason=reason, photo=photo)
+            notify_ticket_status_change(ticket, previous_status, actor=request.user)
+            return Response({"detail": "Fin d'intervention validee.", "status": ticket.status})
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=["post"], url_path="close-dossier")
+    def close_dossier(self, request, pk=None):
+        ticket = self.get_object()
+        previous_status = ticket.status
+        diagnosis = request.data.get("diagnosis", "")
+        action_taken = request.data.get("action_taken", "")
+        parts = request.data.get("parts", [])
+        if isinstance(parts, str):
+            parts = parts.strip()
+            if parts.startswith("["):
+                try:
+                    parts = json.loads(parts)
+                except json.JSONDecodeError:
+                    return Response({"detail": "Le JSON des pieces utilisees est invalide."}, status=status.HTTP_400_BAD_REQUEST)
+            elif parts:
+                parts = [{"designation": line.strip()} for line in parts.splitlines() if line.strip()]
+            else:
+                parts = []
+        client_name = request.data.get("client_name", "")
+        signature = request.FILES.get("signature")
+        photos = request.FILES.getlist("photos")
+
+        try:
+            intervention = close_sav_dossier(
+                ticket,
+                diagnosis=diagnosis,
+                action_taken=action_taken,
+                parts=parts,
+                client_name=client_name,
+                signature=signature,
+                photos=photos,
+                actor=request.user
             )
-        ticket.status = Ticket.STATUS_CLOSED
-        if request.data.get("resolution_summary"):
-            ticket.resolution_summary = str(request.data.get("resolution_summary", "")).strip()
-        ticket.save(update_fields=["status", "resolution_summary", "closed_at", "updated_at"])
-        self.audit("ticket_closed", ticket, {"closed_by": request.user.id})
-        notify_ticket_status_change(ticket, previous_status, actor=request.user)
-        return Response(self.get_serializer(ticket).data)
+            notify_ticket_status_change(ticket, previous_status, actor=request.user)
+            return Response({"detail": "Dossier clos avec succes.", "report_url": intervention.report_pdf.url if intervention.report_pdf else None})
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=["post"], permission_classes=[IsAuthenticatedSavUser], url_path="confirm-resolution")
     def confirm_resolution(self, request, pk=None):
@@ -2278,7 +2538,7 @@ class DashboardView(APIView):
             "trend_7_days": compute_ticket_volume_series(tickets, days=7),
             "trend_30_days": compute_ticket_volume_series(tickets, days=30),
             "trend_12_months": compute_ticket_monthly_series(tickets, months=12),
-            "technician_status_breakdown": compute_technician_status_rows(technicians),
+            "technician_status_breakdown": compute_technician_availability_dashboard(getattr(request.user, "organization", None)),
         }
         return Response(data)
 
@@ -2290,6 +2550,10 @@ def _parse_anchor_date(raw_value):
         return datetime.fromisoformat(str(raw_value)).date()
     except ValueError:
         return None
+
+
+def _start_of_day(value):
+    return timezone.make_aware(datetime.combine(value, time.min), timezone.get_current_timezone())
 
 
 class BaseReportView(APIView):
@@ -2435,9 +2699,13 @@ class TechnicianPlanningView(APIView):
             request.user,
         ).filter(agent=technician, scheduled_for__gte=start_dt, scheduled_for__lt=end_dt)
         maintenance_tickets = scope_maintenance_ticket_queryset(
-            MaintenanceTicket.objects.select_related("client", "technician").prefetch_related("products"),
+            MaintenanceTicket.objects.select_related("client", "technician").prefetch_related("products", "team_members"),
             request.user,
-        ).filter(technician=technician, scheduled_date__gte=date_from, scheduled_date__lt=date_to)
+        ).filter(
+            Q(technician=technician) | Q(team_members=technician),
+            scheduled_date__gte=start_dt,
+            scheduled_date__lt=end_dt,
+        ).distinct()
 
         return Response(
             {
@@ -2623,3 +2891,121 @@ class EmailInboundWebhookView(APIView):
             files.extend(request.FILES.getlist(key))
         result = handle_email_inbound(payload, uploaded_files=files)
         return Response(result)
+
+
+class TechnicianAvailabilityView(APIView):
+    """
+    GET /api/technicians/availability/
+
+    Retourne la liste de tous les techniciens avec leur statut de disponibilité.
+
+    Query params:
+    - after: ISO datetime (filtre techniciens dispo après cette date)
+    - skills: comma-separated (filtre par domaines)
+    - region: string (filtre par région)
+    """
+    permission_classes = [IsManagerUser]
+
+    def get(self, request):
+        organization = request.user.organization
+        if not organization:
+            return Response(
+                {"detail": "Vous devez appartenir à une organisation."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Filtrer techniciens assignables, actifs, de la même organisation
+        technicians = User.objects.filter(
+            role__in=User.ASSIGNABLE_ROLES,
+            is_active=True,
+            organization=organization,
+        ).select_related('organization').prefetch_related('assigned_tickets')
+
+        # Filtres optionnels
+        after_param = request.query_params.get('after')
+        after_dt = None
+        if after_param:
+            try:
+                after_dt = timezone.datetime.fromisoformat(after_param.replace('Z', '+00:00'))
+            except (ValueError, AttributeError):
+                return Response(
+                    {"detail": "Format 'after' invalide. Utilisez ISO 8601."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        # Construire liste de dispo
+        availability_list = []
+        for tech in technicians:
+            # Chercher tous les tickets ouverts assignés à ce technicien
+            open_tickets = Ticket.objects.filter(
+                assigned_agent=tech,
+                status__in=[
+                    Ticket.STATUS_ASSIGNED,
+                    Ticket.STATUS_PLANNED,
+                    Ticket.STATUS_START_REQUESTED,
+                    Ticket.STATUS_IN_PROGRESS,
+                    Ticket.STATUS_COLLECTIVE_IN_PROGRESS,
+                    Ticket.STATUS_WAITING_PART,
+                ]
+            ).select_related('interventions')
+
+            # Trouver l'intervention la plus tard planifiée
+            next_available_at = timezone.now()
+            busy_until = None
+            current_tickets_count = open_tickets.count()
+
+            if open_tickets.exists():
+                latest_intervention = None
+                for ticket in open_tickets:
+                    for intervention in ticket.interventions.all():
+                        if intervention.scheduled_for:
+                            if latest_intervention is None or intervention.scheduled_for > latest_intervention.scheduled_for:
+                                latest_intervention = intervention
+
+                if latest_intervention:
+                    # Estimer fin d'intervention : +30 min (default)
+                    estimated_duration = timedelta(minutes=30)
+                    busy_until = latest_intervention.scheduled_for
+                    next_available_at = latest_intervention.scheduled_for + estimated_duration
+                    status_text = "busy"
+                else:
+                    status_text = "available"
+            else:
+                status_text = "available"
+
+            # Déterminer si peut être chef d'équipe
+            can_be_leader = tech.role in [
+                User.ROLE_CHIEF_TECHNICIAN,
+                User.ROLE_SUPERVISOR,
+                User.ROLE_HEAD_SAV,
+            ]
+            can_be_member = tech.role in User.ASSIGNABLE_ROLES
+
+            # Si after_dt fourni, filtrer seulement les dispo après
+            if after_dt and next_available_at > after_dt:
+                # Skip car pas dispo au créneau demandé
+                continue
+
+            availability_list.append({
+                'id': tech.id,
+                'name': tech.get_full_name() or tech.username,
+                'email': tech.email,
+                'role': tech.get_role_display(),
+                'status': status_text,
+                'next_available_at': next_available_at,
+                'busy_until': busy_until,
+                'can_be_leader': can_be_leader,
+                'can_be_member': can_be_member,
+                'current_tickets_count': current_tickets_count,
+            })
+
+        # Trier par prochaine disponibilité
+        availability_list.sort(key=lambda x: x['next_available_at'])
+
+        # Sérialiser
+        serializer = TechnicianAvailabilitySerializer(availability_list, many=True)
+        return Response({
+            'count': len(serializer.data),
+            'results': serializer.data,
+            'requested_at': timezone.now(),
+        })

@@ -235,9 +235,10 @@ def handle_twilio_inbound(payload: dict[str, str]) -> dict:
     if ticket is None:
         ticket = client.tickets.filter(status__in=[
             Ticket.STATUS_NEW,
+            Ticket.STATUS_PENDING_ASSIGNMENT,
             Ticket.STATUS_ASSIGNED,
             Ticket.STATUS_IN_PROGRESS,
-            Ticket.STATUS_WAITING,
+            Ticket.STATUS_WAITING_PART,
         ]).order_by("-created_at").first()
 
     if ticket is None:
@@ -247,7 +248,7 @@ def handle_twilio_inbound(payload: dict[str, str]) -> dict:
             description=body,
             category=Ticket.CATEGORY_BREAKDOWN,
             channel=Ticket.CHANNEL_WHATSAPP if channel == Message.CHANNEL_WHATSAPP else Ticket.CHANNEL_PHONE,
-            status=Ticket.STATUS_NEW,
+            status=Ticket.STATUS_PENDING_ASSIGNMENT,
             priority=Ticket.PRIORITY_NORMAL,
             sla_deadline=_default_sla_deadline(Ticket.PRIORITY_NORMAL),
         )
@@ -484,9 +485,10 @@ def handle_email_inbound(payload: dict[str, str], uploaded_files=None) -> dict:
         ticket = client.tickets.filter(
             status__in=[
                 Ticket.STATUS_NEW,
+                Ticket.STATUS_PENDING_ASSIGNMENT,
                 Ticket.STATUS_ASSIGNED,
                 Ticket.STATUS_IN_PROGRESS,
-                Ticket.STATUS_WAITING,
+                Ticket.STATUS_WAITING_PART,
             ]
         ).order_by("-created_at").first()
 
@@ -499,7 +501,7 @@ def handle_email_inbound(payload: dict[str, str], uploaded_files=None) -> dict:
             description=body or subject,
             category=infer_ticket_category_from_text(full_text, Ticket.CATEGORY_BREAKDOWN),
             channel=Ticket.CHANNEL_EMAIL,
-            status=Ticket.STATUS_NEW,
+            status=Ticket.STATUS_PENDING_ASSIGNMENT,
             priority=priority,
             sla_deadline=_default_sla_deadline(priority),
         )

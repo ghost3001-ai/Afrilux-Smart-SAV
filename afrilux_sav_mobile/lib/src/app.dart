@@ -1897,6 +1897,110 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
     await _future;
   }
 
+  Future<void> _proposePlanning() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 30)),
+    );
+    if (picked == null) return;
+    if (!mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.now(),
+    );
+    if (time == null) return;
+    final scheduledAt = DateTime(picked.year, picked.month, picked.day, time.hour, time.minute);
+
+    setState(() => _busy = true);
+    try {
+      await widget.session.api.post("tickets/${widget.ticketId}/propose-planning/", {
+        "scheduled_at": scheduledAt.toIso8601String(),
+      });
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _confirmPlanning(bool accepted) async {
+    setState(() => _busy = true);
+    try {
+      await widget.session.api.post("tickets/${widget.ticketId}/confirm-planning/", {
+        "accepted": accepted,
+      });
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _requestStart() async {
+    setState(() => _busy = true);
+    try {
+      await widget.session.api.post("tickets/${widget.ticketId}/request-start/", {});
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _validateStart({bool impossible = false, String reason = "", File? photo}) async {
+    setState(() => _busy = true);
+    try {
+      // In a real scenario, photo would be uploaded via multipart
+      await widget.session.api.post("tickets/${widget.ticketId}/validate-start/", {
+        "impossible": impossible,
+        "reason": reason,
+      });
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _requestFinish() async {
+    setState(() => _busy = true);
+    try {
+      await widget.session.api.post("tickets/${widget.ticketId}/request-finish/", {});
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _validateFinish({bool impossible = false, String reason = ""}) async {
+    setState(() => _busy = true);
+    try {
+      await widget.session.api.post("tickets/${widget.ticketId}/validate-finish/", {
+        "impossible": impossible,
+        "reason": reason,
+      });
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _runAgenticResolution() async {
     setState(() => _busy = true);
     try {

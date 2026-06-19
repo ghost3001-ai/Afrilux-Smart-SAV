@@ -215,7 +215,7 @@ class TicketForm(forms.ModelForm):
             self.fields["client"].help_text = "Votre compte client est preselectionne pour ce ticket."
             self.fields["assigned_agent"].widget = forms.HiddenInput()
             self.fields["assigned_agent"].required = False
-            self.fields["status"].initial = Ticket.STATUS_NEW
+            self.fields["status"].initial = Ticket.STATUS_PENDING_ASSIGNMENT
             self.fields["status"].widget = forms.HiddenInput()
             self.fields["status"].required = False
             self.fields["priority"].initial = Ticket.PRIORITY_NORMAL
@@ -242,7 +242,7 @@ class TicketForm(forms.ModelForm):
         if self.user and self.user.is_authenticated and self.user.role == User.ROLE_CLIENT:
             cleaned_data["client"] = self.user
             cleaned_data["assigned_agent"] = None
-            cleaned_data["status"] = Ticket.STATUS_NEW
+            cleaned_data["status"] = Ticket.STATUS_PENDING_ASSIGNMENT
             cleaned_data["priority"] = Ticket.PRIORITY_NORMAL
             client = self.user
         if client and product and product.client_id != client.id:
@@ -532,6 +532,11 @@ class MessageForm(forms.ModelForm):
     class Meta:
         model = Message
         fields = ["recipient", "message_type", "channel", "content"]
+        labels = {
+            "message_type": "Type de message",
+            "channel": "Canal",
+            "content": "Contenu",
+        }
         widgets = {
             "content": forms.Textarea(attrs={"rows": 4, "placeholder": "Ajoutez un message, une note interne ou une mise a jour..."}),
         }
@@ -576,6 +581,7 @@ class TicketEscalationForm(forms.Form):
     TARGET_HEAD_SAV = ESCALATION_TARGET_HEAD_SAV
     TARGET_EXPERT_THEN_HEAD_SAV = ESCALATION_TARGET_EXPERT_THEN_HEAD_SAV
     TARGET_CHOICES = (
+        ("", "Demander aide responsable"),
         (TARGET_CFAO_MANAGER, "Vers responsable CFAO"),
         (TARGET_CFAO_WORKS, "Vers conducteur de travaux CFAO"),
         (TARGET_CHIEF_TECHNICIAN, "Vers chef technicien froid & climatisation"),
@@ -585,15 +591,23 @@ class TicketEscalationForm(forms.Form):
     )
 
     target = forms.ChoiceField(
+        required=False,
         label="Cible d'escalade",
         choices=TARGET_CHOICES,
-        initial=TARGET_CHIEF_TECHNICIAN,
     )
     note = forms.CharField(
         required=False,
-        label="Note d'escalade",
-        widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Optionnel: motif ou contexte de l'escalade."}),
+        label="Motif d'escalade",
+        widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Expliquez le blocage ou l'aide attendue."}),
     )
+
+    def clean(self):
+        cleaned_data = super().clean()
+        target = (cleaned_data.get("target") or "").strip()
+        note = (cleaned_data.get("note") or "").strip()
+        if not target and not note:
+            self.add_error("note", "Le motif est obligatoire pour demander l'aide du responsable.")
+        return cleaned_data
 
 
 class TicketTechnicianAssignmentForm(forms.Form):
@@ -621,10 +635,131 @@ class TicketTechnicianAssignmentForm(forms.Form):
         self.fields["technician"].queryset = queryset.order_by("first_name", "last_name", "username")
 
 
+class TicketTeamAssignmentForm(forms.Form):
+    leader = forms.ModelChoiceField(
+        label="Chef d'equipe",
+        queryset=User.objects.none(),
+        empty_label="Choisir le chef",
+    )
+    members = forms.ModelMultipleChoiceField(
+        label="Membres",
+        queryset=User.objects.none(),
+        required=True,
+        widget=forms.CheckboxSelectMultiple,
+    )
+    note = forms.CharField(
+        required=False,
+        label="Consigne equipe",
+        widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Optionnel: consigne de mission pour l'equipe."}),
+    )
+
+    def __init__(self, *args, user=None, ticket=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        queryset = User.objects.filter(
+            role=User.ROLE_TECHNICIAN,
+            technician_status="available",
+            is_active=True,
+        )
+        organization = getattr(ticket, "organization", None) or getattr(user, "organization", None)
+        if organization:
+            queryset = queryset.filter(organization=organization)
+        queryset = queryset.order_by("first_name", "last_name", "username")
+        self.fields["leader"].queryset = queryset
+        self.fields["members"].queryset = queryset
+
+    def clean(self):
+        cleaned_data = super().clean()
+        leader = cleaned_data.get("leader")
+        members = list(cleaned_data.get("members") or [])
+        if leader and leader in members:
+            self.add_error("members", "Le chef d'equipe ne doit pas etre selectionne comme membre.")
+        if leader and not members:
+            self.add_error("members", "Une equipe doit contenir au moins un membre.")
+        return cleaned_data
+
+
+class TicketPlanningForm(forms.Form):
+    scheduled_at = forms.DateTimeField(
+        label="Prevu pour",
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
+    )
+
+
+class TicketValidationBypassForm(forms.Form):
+    reason = forms.CharField(
+        label="Motif",
+        widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Absent, refus, probleme technique..."}),
+    )
+    photo = forms.FileField(
+        label="Photo justificative",
+        required=True,
+        widget=forms.ClearableFileInput(attrs={"accept": "image/*,.pdf"}),
+    )
+
+
+class TicketClosureForm(forms.Form):
+    diagnosis = forms.CharField(
+        label="Diagnostic",
+        widget=forms.Textarea(attrs={"rows": 3}),
+    )
+    action_taken = forms.CharField(
+        label="Action effectuee",
+        widget=forms.Textarea(attrs={"rows": 3}),
+    )
+    parts_used = forms.CharField(
+        label="Pieces utilisees",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Une piece par ligne ou JSON liste."}),
+    )
+    client_name = forms.CharField(label="Nom du client signataire", max_length=255)
+    signature = forms.FileField(
+        label="Signature client",
+        widget=forms.ClearableFileInput(attrs={"accept": "image/*,.pdf"}),
+    )
+    photos = MultipleFileField(
+        label="Photos intervention",
+        required=False,
+        widget=MultipleFileInput(attrs={"accept": "image/*"}),
+    )
+
+    def clean_parts_used(self):
+        value = (self.cleaned_data.get("parts_used") or "").strip()
+        if not value:
+            return []
+        if value.startswith("["):
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise ValidationError("Le JSON des pieces utilisees est invalide.") from exc
+            if not isinstance(parsed, list):
+                raise ValidationError("Les pieces utilisees doivent former une liste JSON.")
+            return parsed
+        return [{"designation": line.strip()} for line in value.splitlines() if line.strip()]
+
+
+class TicketEscalationSolutionForm(forms.Form):
+    solution = forms.CharField(
+        label="Solution responsable",
+        widget=forms.Textarea(attrs={"rows": 3, "placeholder": "Texte, lien, autorisation ou document a appliquer."}),
+    )
+
+
+class TicketEscalationDeclineForm(forms.Form):
+    reason = forms.CharField(
+        label="Motif de refus",
+        widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Pourquoi l'escalade est refusee ou renvoyee."}),
+    )
+
+
 class TicketAttachmentForm(forms.ModelForm):
     class Meta:
         model = TicketAttachment
         fields = ["kind", "file", "note"]
+        labels = {
+            "kind": "Type",
+            "file": "Fichier",
+            "note": "Note",
+        }
         widgets = {
             "note": forms.TextInput(attrs={"placeholder": "Ex: capture du message d'erreur, recu client..."}),
         }
@@ -824,18 +959,18 @@ class MaintenanceProgramForm(forms.ModelForm):
         self.fields["month"].required = False
         self.fields["quarter"].required = False
         self.fields["task_lines"].help_text = (
-            "Liste JSON des maintenances a publier. Champs: title, technician_id, client_id, "
-            "product_ids, scheduled_date, periodicity, checklist, instructions."
+            "Liste JSON des maintenances a publier. Champs: title, technician_ids, client_id, "
+            "product_ids, scheduled_date (date et heure ISO), periodicity, checklist, instructions."
         )
         if not self.initial.get("task_lines") and not self.instance.pk:
             self.initial["task_lines"] = json.dumps(
                 [
                     {
                         "title": "Entretien preventif equipement client",
-                        "technician_id": "",
+                        "technician_ids": [],
                         "client_id": "",
                         "product_ids": [],
-                        "scheduled_date": timezone.localdate().isoformat(),
+                        "scheduled_date": timezone.localtime().replace(second=0, microsecond=0).isoformat(timespec="minutes"),
                         "periodicity": MaintenanceTicket.PERIOD_MONTHLY,
                         "checklist": ["Controle visuel", "Nettoyage", "Test fonctionnement"],
                         "instructions": "Verifier les points critiques et signaler toute anomalie.",
@@ -919,7 +1054,11 @@ class MaintenanceClosureForm(forms.Form):
     )
     client_signed_by = forms.CharField(label="Signature client par", required=False, max_length=255)
     client_signature_file = forms.FileField(label="Signature client scannee", required=False)
-    new_date = forms.DateField(label="Nouvelle date si report", required=False, widget=forms.DateInput(attrs={"type": "date"}))
+    new_date = forms.DateTimeField(
+        label="Nouvelle date et heure si report",
+        required=False,
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
+    )
     postponement_reason = forms.CharField(
         label="Justification du report",
         required=False,
@@ -970,7 +1109,7 @@ class MaintenanceClosureForm(forms.Form):
         final_status = cleaned_data.get("final_status")
         if final_status == MaintenanceTicket.STATUS_POSTPONED:
             if not cleaned_data.get("new_date"):
-                self.add_error("new_date", "La nouvelle date est obligatoire pour un report.")
+                self.add_error("new_date", "La nouvelle date et heure sont obligatoires pour un report.")
             if not (cleaned_data.get("postponement_reason") or "").strip():
                 self.add_error("postponement_reason", "La justification est obligatoire pour un report.")
         return cleaned_data

@@ -1,5 +1,5 @@
 import uuid
-from datetime import timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from django.contrib.auth.models import AbstractUser
@@ -133,7 +133,7 @@ class User(AbstractUser):
     ROLE_CHOICES = (
         (ROLE_ADMIN, "Administrateur"),
         (ROLE_HEAD_SAV, "Responsable SAV"),
-        (ROLE_SUPPORT, "Agent support / Hotliner"),
+        (ROLE_SUPPORT, "Agent assistance / centre d'appels"),
         (ROLE_CFAO_MANAGER, "Responsable CFAO / Responsable de Projet Technique CFAO"),
         (ROLE_CFAO_WORKS, "Conducteur de travaux CFAO"),
         (ROLE_HVAC_MANAGER, "Responsable Froid et climatisation / Responsable technique froid"),
@@ -146,10 +146,10 @@ class User(AbstractUser):
     LEGACY_ROLE_CHOICES = (
         (ROLE_EXPERT, "Chef technicien / Expert (Niveau 3)"),
         (ROLE_SOFTWARE_OWNER, "Gestionnaire principal du logiciel"),
-        (ROLE_SUPERVISOR, "Superviseur / Team Leader"),
+        (ROLE_SUPERVISOR, "Superviseur / Chef d'equipe"),
         (ROLE_QA, "Qualite / QA SAV"),
-        (ROLE_DISPATCHER, "Planificateur / Dispatch"),
-        (ROLE_VIP_SUPPORT, "Support VIP / Grands comptes"),
+        (ROLE_DISPATCHER, "Planificateur / repartition"),
+        (ROLE_VIP_SUPPORT, "Assistance VIP / Grands comptes"),
         (ROLE_SYSTEM_BOT, "Systeme automatique (IA / Bot)"),
         (ROLE_AGENT, "Agent support (legacy)"),
         (ROLE_MANAGER, "Responsable SAV (legacy)"),
@@ -246,7 +246,7 @@ class User(AbstractUser):
         null=True,
         blank=True,
     )
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default=ROLE_CLIENT)
+    role = models.CharField("Fonction", max_length=20, choices=ROLE_CHOICES, default=ROLE_CLIENT)
     phone = models.CharField(max_length=20, blank=True)
     company_name = models.CharField(max_length=255, blank=True)
     is_verified = models.BooleanField(default=False)
@@ -772,10 +772,54 @@ class EquipmentLocationHistory(TimeStampedModel):
 
 class Ticket(TimeStampedModel):
     STATUS_NEW = "new"
+    STATUS_PENDING_ASSIGNMENT = "pending_assignment"
+    STATUS_ASSIGNED = "assigned"
+    STATUS_TEAM_PENDING = "team_pending"
+    STATUS_TEAM_READY = "team_ready"
+    STATUS_PLANNING_PROPOSED = "planning_proposed"
+    STATUS_PLANNED = "planned"
+    STATUS_START_REQUESTED = "start_requested"
+    STATUS_IN_PROGRESS = "in_progress"
+    STATUS_COLLECTIVE_IN_PROGRESS = "collective_in_progress"
+    STATUS_WAITING_PART = "waiting_part"
+    STATUS_WAITING = STATUS_WAITING_PART
+    STATUS_ESCALATED = "escalated"
+    STATUS_WAITING_SOLUTION = "waiting_solution"
+    STATUS_FINISH_REQUESTED = "finish_requested"
+    STATUS_DONE = "done"
+    STATUS_RESOLVED = "resolved"
+    STATUS_CLOSED = "closed"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_REASSIGN_REQUIRED = "reassign_required"
+    STATUS_REASSIGNED = "reassigned"
+    STATUS_BLOCKED_DIRECTION = "blocked_direction"
+
+    STATUS_CHOICES = (
+        (STATUS_NEW, "Nouveau"),
+        (STATUS_PENDING_ASSIGNMENT, "En attente d'assignation"),
+        (STATUS_ASSIGNED, "Assigne"),
+        (STATUS_TEAM_PENDING, "En attente constitution equipe"),
+        (STATUS_TEAM_READY, "Equipe constituee"),
+        (STATUS_PLANNING_PROPOSED, "Planification proposee"),
+        (STATUS_PLANNED, "Planifie"),
+        (STATUS_START_REQUESTED, "Demande de debut envoyee"),
+        (STATUS_IN_PROGRESS, "En cours"),
+        (STATUS_COLLECTIVE_IN_PROGRESS, "Intervention collective"),
+        (STATUS_WAITING_PART, "En attente de piece"),
+        (STATUS_ESCALATED, "En escalade"),
+        (STATUS_WAITING_SOLUTION, "En attente solution responsable"),
+        (STATUS_FINISH_REQUESTED, "Demande de fin envoyee"),
+        (STATUS_DONE, "Termine"),
+        (STATUS_RESOLVED, "Resolue (valide client)"),
+        (STATUS_CLOSED, "Ferme"),
+        (STATUS_CANCELLED, "Annule"),
+        (STATUS_REASSIGN_REQUIRED, "A reassigner"),
+        (STATUS_REASSIGNED, "Reassigne"),
+        (STATUS_BLOCKED_DIRECTION, "Bloque - Direction"),
+    )
+
     STATUS_QUALIFICATION = "qualification"
     STATUS_PENDING_CUSTOMER = "pending_customer"
-    STATUS_ASSIGNED = "assigned"
-    STATUS_IN_PROGRESS = "in_progress"
     STATUS_IN_PROGRESS_N1 = "in_progress_n1"
     STATUS_IN_PROGRESS_N2 = "in_progress_n2"
     STATUS_EXPERTISE = "expertise"
@@ -783,53 +827,73 @@ class Ticket(TimeStampedModel):
     STATUS_INTERVENTION_DONE = "intervention_done"
     STATUS_QA_CONTROL = "qa_control"
     STATUS_PENDING_CLIENT_CONFIRMATION = "pending_client_confirmation"
-    STATUS_WAITING = "waiting"
-    STATUS_RESOLVED = "resolved"
-    STATUS_CLOSED = "closed"
-    STATUS_CANCELLED = "cancelled"
-
-    STATUS_CHOICES = (
-        (STATUS_NEW, "Nouveau"),
-        (STATUS_ASSIGNED, "Assigne"),
-        (STATUS_IN_PROGRESS, "En cours"),
-        (STATUS_WAITING, "En attente"),
-        (STATUS_RESOLVED, "Resolue"),
-        (STATUS_CLOSED, "Ferme"),
-        (STATUS_CANCELLED, "Annule"),
-    )
-
-    LEGACY_STATUS_CHOICES = (
-        (STATUS_QUALIFICATION, "Qualification en cours"),
-        (STATUS_PENDING_CUSTOMER, "En attente client"),
-        (STATUS_IN_PROGRESS_N1, "En traitement (N1)"),
-        (STATUS_IN_PROGRESS_N2, "En traitement (N2)"),
-        (STATUS_EXPERTISE, "Expertise en cours"),
-        (STATUS_INTERVENTION_PLANNED, "Intervention planifiee"),
-        (STATUS_INTERVENTION_DONE, "Intervention realisee"),
-        (STATUS_QA_CONTROL, "En controle qualite"),
-        (STATUS_PENDING_CLIENT_CONFIRMATION, "En attente confirmation client"),
-    )
 
     LEGACY_STATUS_MAP = {
-        STATUS_QUALIFICATION: STATUS_NEW,
-        STATUS_PENDING_CUSTOMER: STATUS_WAITING,
+        STATUS_QUALIFICATION: STATUS_PENDING_ASSIGNMENT,
+        STATUS_PENDING_CUSTOMER: STATUS_WAITING_PART,
         STATUS_IN_PROGRESS_N1: STATUS_IN_PROGRESS,
         STATUS_IN_PROGRESS_N2: STATUS_IN_PROGRESS,
-        STATUS_EXPERTISE: STATUS_IN_PROGRESS,
-        STATUS_INTERVENTION_PLANNED: STATUS_ASSIGNED,
-        STATUS_INTERVENTION_DONE: STATUS_RESOLVED,
+        STATUS_EXPERTISE: STATUS_ESCALATED,
+        STATUS_INTERVENTION_PLANNED: STATUS_PLANNED,
+        STATUS_INTERVENTION_DONE: STATUS_DONE,
         STATUS_QA_CONTROL: STATUS_RESOLVED,
         STATUS_PENDING_CLIENT_CONFIRMATION: STATUS_RESOLVED,
+        "waiting": STATUS_WAITING_PART,
+        "waiting_parts": STATUS_WAITING_PART,
+        "waiting_customer": STATUS_WAITING_PART,
+        "triaged": STATUS_PENDING_ASSIGNMENT,
+        "scheduled": STATUS_PLANNED,
     }
 
+    PUBLIC_STATUS_MAP = {
+        STATUS_NEW: "Assigné",
+        STATUS_PENDING_ASSIGNMENT: "Assigné",
+        STATUS_ASSIGNED: "Assigné",
+        STATUS_REASSIGN_REQUIRED: "Assigné",
+        STATUS_REASSIGNED: "Assigné",
+        STATUS_TEAM_PENDING: "Assigné",
+        STATUS_TEAM_READY: "Assigné",
+        STATUS_PLANNING_PROPOSED: "Assigné",
+        STATUS_PLANNED: "Planifié",
+        STATUS_START_REQUESTED: "En cours",
+        STATUS_IN_PROGRESS: "En cours",
+        STATUS_COLLECTIVE_IN_PROGRESS: "En cours",
+        STATUS_WAITING_PART: "Planifié",
+        STATUS_ESCALATED: "En cours",
+        STATUS_WAITING_SOLUTION: "En cours",
+        STATUS_FINISH_REQUESTED: "En cours",
+        STATUS_DONE: "Terminé",
+        STATUS_RESOLVED: "Terminé",
+        STATUS_CLOSED: "Terminé",
+        STATUS_CANCELLED: "Terminé",
+        STATUS_BLOCKED_DIRECTION: "En cours",
+    }
+
+    PUBLIC_STATUS_MAP[STATUS_NEW] = "Nouveau"
+    PUBLIC_STATUS_MAP[STATUS_PENDING_ASSIGNMENT] = "Nouveau"
+
     PROCESS_TRANSITIONS = {
-        STATUS_NEW: {STATUS_NEW, STATUS_ASSIGNED, STATUS_IN_PROGRESS, STATUS_CLOSED, STATUS_CANCELLED},
-        STATUS_ASSIGNED: {STATUS_ASSIGNED, STATUS_IN_PROGRESS, STATUS_WAITING, STATUS_CANCELLED},
-        STATUS_IN_PROGRESS: {STATUS_IN_PROGRESS, STATUS_WAITING, STATUS_RESOLVED, STATUS_ASSIGNED, STATUS_CANCELLED},
-        STATUS_WAITING: {STATUS_WAITING, STATUS_IN_PROGRESS, STATUS_ASSIGNED, STATUS_CANCELLED},
-        STATUS_RESOLVED: {STATUS_RESOLVED, STATUS_CLOSED, STATUS_NEW},
-        STATUS_CLOSED: {STATUS_CLOSED, STATUS_NEW},
+        STATUS_NEW: {STATUS_NEW, STATUS_PENDING_ASSIGNMENT, STATUS_ASSIGNED, STATUS_TEAM_PENDING, STATUS_REASSIGN_REQUIRED, STATUS_CANCELLED},
+        STATUS_PENDING_ASSIGNMENT: {STATUS_PENDING_ASSIGNMENT, STATUS_ASSIGNED, STATUS_TEAM_PENDING, STATUS_REASSIGN_REQUIRED, STATUS_CANCELLED},
+        STATUS_ASSIGNED: {STATUS_ASSIGNED, STATUS_TEAM_PENDING, STATUS_TEAM_READY, STATUS_PLANNING_PROPOSED, STATUS_START_REQUESTED, STATUS_ESCALATED, STATUS_REASSIGN_REQUIRED, STATUS_CANCELLED},
+        STATUS_TEAM_PENDING: {STATUS_TEAM_PENDING, STATUS_TEAM_READY, STATUS_ASSIGNED, STATUS_REASSIGN_REQUIRED, STATUS_CANCELLED},
+        STATUS_TEAM_READY: {STATUS_TEAM_READY, STATUS_PLANNING_PROPOSED, STATUS_START_REQUESTED, STATUS_ESCALATED, STATUS_REASSIGN_REQUIRED, STATUS_CANCELLED},
+        STATUS_PLANNING_PROPOSED: {STATUS_PLANNING_PROPOSED, STATUS_PLANNED, STATUS_ASSIGNED, STATUS_CANCELLED},
+        STATUS_PLANNED: {STATUS_PLANNED, STATUS_START_REQUESTED, STATUS_ESCALATED, STATUS_REASSIGN_REQUIRED, STATUS_CANCELLED},
+        STATUS_START_REQUESTED: {STATUS_START_REQUESTED, STATUS_IN_PROGRESS, STATUS_COLLECTIVE_IN_PROGRESS, STATUS_PLANNED, STATUS_CANCELLED},
+        STATUS_IN_PROGRESS: {STATUS_IN_PROGRESS, STATUS_WAITING_PART, STATUS_ESCALATED, STATUS_FINISH_REQUESTED, STATUS_CANCELLED},
+        STATUS_COLLECTIVE_IN_PROGRESS: {STATUS_COLLECTIVE_IN_PROGRESS, STATUS_WAITING_PART, STATUS_ESCALATED, STATUS_FINISH_REQUESTED, STATUS_CANCELLED},
+        STATUS_WAITING_PART: {STATUS_WAITING_PART, STATUS_START_REQUESTED, STATUS_IN_PROGRESS, STATUS_COLLECTIVE_IN_PROGRESS, STATUS_ESCALATED, STATUS_CANCELLED},
+        STATUS_ESCALATED: {STATUS_ESCALATED, STATUS_WAITING_SOLUTION, STATUS_REASSIGNED, STATUS_REASSIGN_REQUIRED, STATUS_ASSIGNED, STATUS_CANCELLED},
+        STATUS_WAITING_SOLUTION: {STATUS_WAITING_SOLUTION, STATUS_IN_PROGRESS, STATUS_COLLECTIVE_IN_PROGRESS, STATUS_PLANNED, STATUS_ASSIGNED, STATUS_TEAM_READY, STATUS_CANCELLED},
+        STATUS_FINISH_REQUESTED: {STATUS_FINISH_REQUESTED, STATUS_DONE, STATUS_IN_PROGRESS, STATUS_COLLECTIVE_IN_PROGRESS, STATUS_CANCELLED},
+        STATUS_DONE: {STATUS_DONE, STATUS_CLOSED, STATUS_RESOLVED, STATUS_CANCELLED},
+        STATUS_RESOLVED: {STATUS_RESOLVED, STATUS_CLOSED, STATUS_ASSIGNED},
+        STATUS_CLOSED: {STATUS_CLOSED},
         STATUS_CANCELLED: {STATUS_CANCELLED},
+        STATUS_REASSIGN_REQUIRED: {STATUS_REASSIGN_REQUIRED, STATUS_ASSIGNED, STATUS_TEAM_PENDING, STATUS_TEAM_READY, STATUS_REASSIGNED},
+        STATUS_REASSIGNED: {STATUS_REASSIGNED, STATUS_ASSIGNED, STATUS_TEAM_READY},
+        STATUS_BLOCKED_DIRECTION: {STATUS_BLOCKED_DIRECTION, STATUS_ESCALATED, STATUS_REASSIGN_REQUIRED},
     }
 
     PRIORITY_LOW = "low"
@@ -945,6 +1009,23 @@ class Ticket(TimeStampedModel):
         null=True,
         blank=True,
     )
+    team_leader = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="led_team_tickets",
+        null=True,
+        blank=True,
+    )
+    team_members = models.ManyToManyField(
+        User,
+        related_name="member_team_tickets",
+        blank=True,
+    )
+    is_team_intervention = models.BooleanField(default=False)
+    escalation_count = models.PositiveSmallIntegerField(default=0)
+    last_escalation_at = models.DateTimeField(null=True, blank=True)
+    last_escalation_reason = models.TextField(blank=True)
+    status_before_escalation = models.CharField(max_length=32, blank=True)
     title = models.CharField(max_length=255)
     description = models.TextField()
     business_domain = models.CharField(max_length=20, choices=BUSINESS_DOMAIN_CHOICES, default=DOMAIN_OTHER)
@@ -969,7 +1050,19 @@ class Ticket(TimeStampedModel):
 
     @property
     def is_open(self):
-        return self.status not in {self.STATUS_RESOLVED, self.STATUS_CLOSED, self.STATUS_CANCELLED}
+        return self.status not in {
+            self.STATUS_DONE,
+            self.STATUS_RESOLVED,
+            self.STATUS_CLOSED,
+            self.STATUS_CANCELLED,
+            self.STATUS_BLOCKED_DIRECTION,
+        }
+
+    @property
+    def public_status(self):
+        if self.status in {self.STATUS_ESCALATED, self.STATUS_WAITING_SOLUTION} and self.status_before_escalation:
+            return self.PUBLIC_STATUS_MAP.get(self.status_before_escalation, self.PUBLIC_STATUS_MAP[self.STATUS_IN_PROGRESS])
+        return self.PUBLIC_STATUS_MAP.get(self.status, "Inconnu")
 
     @property
     def is_overdue(self):
@@ -996,7 +1089,8 @@ class Ticket(TimeStampedModel):
             self.reference = self.generate_reference()
         if self.assigned_agent_id and self.status in {
             self.STATUS_NEW,
-            self.STATUS_WAITING,
+            self.STATUS_PENDING_ASSIGNMENT,
+            self.STATUS_REASSIGNED,
         }:
             self.status = self.STATUS_ASSIGNED
         if self.status == self.STATUS_RESOLVED and not self.resolved_at:
@@ -1260,6 +1354,17 @@ class Intervention(models.Model):
     )
     intervention_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default=TYPE_REMOTE)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PLANNED)
+    client_validation_requested_at = models.DateTimeField(null=True, blank=True)
+    client_validated_start_at = models.DateTimeField(null=True, blank=True)
+    client_validation_requested_at_finish = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp quand le technicien a demandé la validation de fin d'intervention",
+    )
+    client_validated_finish_at = models.DateTimeField(null=True, blank=True)
+    client_validation_impossible = models.BooleanField(default=False)
+    validation_impossible_reason = models.CharField(max_length=255, blank=True)
+    validation_impossible_photo = models.FileField(upload_to="interventions/bypass/%Y/%m/%d/", blank=True)
     scheduled_for = models.DateTimeField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
@@ -1520,6 +1625,12 @@ class MaintenanceTicket(TimeStampedModel):
         related_name="maintenance_tickets",
         limit_choices_to={"role__in": User.TECHNICIAN_SPACE_ROLES},
     )
+    team_members = models.ManyToManyField(
+        User,
+        related_name="maintenance_team_tickets",
+        limit_choices_to={"role__in": User.TECHNICIAN_SPACE_ROLES},
+        blank=True,
+    )
     client = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
@@ -1530,16 +1641,16 @@ class MaintenanceTicket(TimeStampedModel):
     title = models.CharField(max_length=255)
     service = models.CharField(max_length=20, choices=MaintenanceProgram.SERVICE_CHOICES, default=MaintenanceProgram.SERVICE_IT)
     periodicity = models.CharField(max_length=20, choices=PERIODICITY_CHOICES, default=PERIOD_MONTHLY)
-    scheduled_date = models.DateField()
+    scheduled_date = models.DateTimeField()
     status = models.CharField(max_length=24, choices=STATUS_CHOICES, default=STATUS_PLANNED)
     checklist = models.JSONField(default=list, blank=True)
     instructions = models.TextField(blank=True)
     priority = models.CharField(max_length=20, choices=Ticket.PRIORITY_CHOICES, default=Ticket.PRIORITY_NORMAL)
     location = models.CharField(max_length=255, blank=True)
-    initial_scheduled_date = models.DateField(null=True, blank=True)
+    initial_scheduled_date = models.DateTimeField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
-    postponed_to = models.DateField(null=True, blank=True)
+    postponed_to = models.DateTimeField(null=True, blank=True)
     postponement_reason = models.TextField(blank=True)
     notified_at = models.DateTimeField(null=True, blank=True)
     acknowledged_at = models.DateTimeField(null=True, blank=True)
@@ -1565,10 +1676,25 @@ class MaintenanceTicket(TimeStampedModel):
         return "Maintenance planifiee"
 
     @property
+    def technician_team_members(self):
+        members = [self.technician] if self.technician_id else []
+        for member in self.team_members.all():
+            if not self.technician_id or member.id != self.technician_id:
+                members.append(member)
+        return members
+
+    @property
+    def technician_team_label(self):
+        members = self.technician_team_members
+        if not members:
+            return "-"
+        return ", ".join(str(member) for member in members)
+
+    @property
     def appears_in_technician_pipeline(self):
         if self.status in {self.STATUS_NOTIFIED, self.STATUS_IN_PROGRESS, self.STATUS_POSTPONED}:
             return True
-        return self.scheduled_date <= timezone.localdate() + timedelta(days=3)
+        return timezone.localtime(self.scheduled_date).date() <= timezone.localdate() + timedelta(days=3)
 
     @property
     def is_late(self):
@@ -1576,9 +1702,25 @@ class MaintenanceTicket(TimeStampedModel):
             self.STATUS_DONE,
             self.STATUS_ANOMALY,
             self.STATUS_CANCELLED,
-        } and self.scheduled_date < timezone.localdate()
+        } and self.scheduled_date < timezone.now()
+
+    @staticmethod
+    def _coerce_datetime(value):
+        if isinstance(value, datetime):
+            if timezone.is_naive(value):
+                return timezone.make_aware(value, timezone.get_current_timezone())
+            return value
+        if isinstance(value, date):
+            return timezone.make_aware(
+                datetime.combine(value, time.min),
+                timezone.get_current_timezone(),
+            )
+        return value
 
     def save(self, *args, **kwargs):
+        self.scheduled_date = self._coerce_datetime(self.scheduled_date)
+        self.initial_scheduled_date = self._coerce_datetime(self.initial_scheduled_date)
+        self.postponed_to = self._coerce_datetime(self.postponed_to)
         if self.program_id and self.program.organization_id:
             self.organization = self.program.organization
         elif self.client_id and self.client.organization_id:
@@ -2134,7 +2276,7 @@ class OfferRecommendation(models.Model):
         (TYPE_MAINTENANCE_CONTRACT, "Contrat de maintenance"),
         (TYPE_SPARE_PART, "Piece detachee"),
         (TYPE_UPGRADE, "Mise a niveau"),
-        (TYPE_PREMIUM_SUPPORT, "Support premium"),
+        (TYPE_PREMIUM_SUPPORT, "Assistance premium"),
     )
 
     STATUS_PROPOSED = "proposed"
@@ -2527,3 +2669,82 @@ class AuditLog(models.Model):
 
     def __str__(self):
         return f"{self.actor_type} - {self.action}"
+
+
+class EscalationHistory(TimeStampedModel):
+    """
+    Historique complet de chaque escalade d'un ticket.
+    Traçabilité : qui a escaladé, quand, pourquoi, et quelle action a été prise.
+    """
+
+    ACTION_ESCALATED = "escalated"
+    ACTION_REASSIGNED = "reassigned"
+    ACTION_SOLUTION_PROVIDED = "solution_provided"
+    ACTION_DECLINED = "declined"
+    ACTION_CONTINUED = "continued"
+
+    ACTION_CHOICES = (
+        (ACTION_ESCALATED, "Escaladée"),
+        (ACTION_REASSIGNED, "Réassignée à un autre technicien"),
+        (ACTION_SOLUTION_PROVIDED, "Solution fournie"),
+        (ACTION_DECLINED, "Déclinée par le responsable"),
+        (ACTION_CONTINUED, "Continuée après solution"),
+    )
+
+    ticket = models.ForeignKey(
+        Ticket,
+        on_delete=models.CASCADE,
+        related_name="escalation_history",
+    )
+    ACTION_CHOICES = (
+        (ACTION_ESCALATED, "Escaladee"),
+        (ACTION_REASSIGNED, "Reassignee a un autre technicien"),
+        (ACTION_SOLUTION_PROVIDED, "Solution fournie"),
+        (ACTION_DECLINED, "Declinee par le responsable"),
+        (ACTION_CONTINUED, "Continuee apres solution"),
+    )
+    action = models.CharField(
+        max_length=30,
+        choices=ACTION_CHOICES,
+        help_text="Action prise par le responsable",
+    )
+    reason = models.TextField(
+        blank=True,
+        help_text="Motif de l'escalade ou de l'action",
+    )
+    escalated_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="escalations_initiated",
+        help_text="Qui a escaladé le ticket (technicien ou chef d'équipe)",
+    )
+    handled_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="escalations_handled",
+        help_text="Qui a traité l'escalade (responsable SAV ou admin)",
+    )
+    reassigned_to = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="escalation_reassignments_received",
+        help_text="Nouveau technicien assigné (si action=reassigned)",
+    )
+    solution_text = models.TextField(
+        blank=True,
+        help_text="Texte de la solution proposée (si action=solution_provided)",
+    )
+
+    class Meta:
+        verbose_name = "Historique d'escalade"
+        verbose_name_plural = "Historiques d'escalade"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.ticket.reference} - {self.get_action_display()}"

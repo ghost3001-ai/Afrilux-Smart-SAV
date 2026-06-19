@@ -25,7 +25,7 @@
 
 <section class="stats-grid">
     <article class="stat-card">
-        <span>Tickets assignes</span>
+        <span>Dossiers assignes</span>
         <strong>{{ assigned_tickets|length }}</strong>
         <small>charge active</small>
     </article>
@@ -87,7 +87,7 @@
                 <span class="badge badge--warning">{{ ticket.sla_deadline|date:"d/m H:i" }}</span>
             </a>
         {% empty %}
-            <p class="muted">Aucun ticket a risque immediat.</p>
+            <p class="muted">Aucun dossier a risque immediat.</p>
         {% endfor %}
     </article>
 
@@ -102,7 +102,7 @@
                     <strong>Etape {{ stop.order }} · {{ stop.reference }}</strong>
                     <p>{{ stop.location|default:"Localisation non renseignee" }}</p>
                 </div>
-                <span>{% if stop.kind == "maintenance" %}Maintenance{% else %}{{ stop.scheduled_for|date:"H:i"|default:"-" }}{% endif %}</span>
+                <span>{{ stop.scheduled_for|date:"H:i"|default:"-" }}</span>
             </div>
         {% empty %}
             <p class="muted">Aucune intervention planifiee aujourd'hui.</p>
@@ -141,7 +141,7 @@
                 <div class="section-head">
                     <div>
                         <strong>{{ item.title }}</strong>
-                        <p>{{ item.client }} Â· {{ item.scheduled_date|date:"d/m/Y" }}</p>
+                        <p>{{ item.client }} - {{ item.technician_team_label }} - {{ item.scheduled_date|date:"d/m/Y H:i" }}</p>
                     </div>
                     <span class="badge badge--accent">Maintenance</span>
                 </div>

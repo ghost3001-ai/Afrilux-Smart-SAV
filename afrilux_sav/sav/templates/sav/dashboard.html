@@ -1,7 +1,7 @@
 {% extends "sav/base.html" %}
 {% load sav_extras %}
 
-{% block title %}Dashboard | Afrilux SAV{% endblock %}
+{% block title %}Tableau de bord | Afrilux SAV{% endblock %}
 
 {% block content %}
 <section class="hero">
@@ -9,7 +9,7 @@
         <p class="eyebrow">{% if sav_shell.is_internal %}Operations SAV{% else %}Espace client{% endif %}</p>
         <h1>Pilotez le service apres-vente avec visibilite temps reel.</h1>
         <p class="hero__lead">
-            Tickets, alertes predictives, sentiment client, offres contextuelles et knowledge base sont unifies dans une seule interface.
+            Dossiers SAV, alertes predictives, sentiment client, offres contextuelles et base de connaissances sont unifies dans une seule interface.
         </p>
         {% if sav_shell.organization_name %}
             <p class="muted">Organisation active: {{ sav_shell.organization_name }}</p>
@@ -22,7 +22,7 @@
         </div>
         <div class="hero__summary">
             <article class="hero__summary-item">
-                <span>Tickets ouverts</span>
+                <span>Dossiers ouverts</span>
                 <strong>{{ tickets_open }}</strong>
                 <small>{{ tickets_unassigned }} non affectes</small>
             </article>
@@ -42,7 +42,7 @@
 
 <section class="stats-grid">
     <article class="stat-card">
-        <span>Tickets ouverts</span>
+        <span>Dossiers ouverts</span>
         <strong>{{ tickets_open }}</strong>
         <small>{{ tickets_overdue }} hors SLA</small>
     </article>
@@ -96,7 +96,7 @@
 <section class="two-col">
     <article class="card">
         <div class="section-head">
-            <p class="eyebrow">Pipeline tickets</p>
+            <p class="eyebrow">Suivi tickets</p>
             <h2>Repartition des statuts</h2>
         </div>
         <div class="bar-list">
@@ -252,8 +252,8 @@
         </div>
         <div class="chart-surface" data-chart="trend-7"></div>
         <div class="chart-legend">
-            <span><span class="chart-dot chart-dot--created"></span> Tickets crees</span>
-            <span><span class="chart-dot chart-dot--resolved"></span> Tickets resolus</span>
+            <span><span class="chart-dot chart-dot--created"></span> Dossiers crees</span>
+            <span><span class="chart-dot chart-dot--resolved"></span> Dossiers resolus</span>
         </div>
     </article>
 
@@ -284,8 +284,8 @@
         </div>
         <div class="chart-surface" data-chart="trend-30"></div>
         <div class="chart-legend">
-            <span><span class="chart-dot chart-dot--created"></span> Tickets crees</span>
-            <span><span class="chart-dot chart-dot--resolved"></span> Tickets resolus</span>
+            <span><span class="chart-dot chart-dot--created"></span> Dossiers crees</span>
+            <span><span class="chart-dot chart-dot--resolved"></span> Dossiers resolus</span>
         </div>
     </article>
 
@@ -296,8 +296,8 @@
         </div>
         <div class="chart-surface" data-chart="trend-12"></div>
         <div class="chart-legend">
-            <span><span class="chart-dot chart-dot--created"></span> Tickets crees</span>
-            <span><span class="chart-dot chart-dot--resolved"></span> Tickets resolus</span>
+            <span><span class="chart-dot chart-dot--created"></span> Dossiers crees</span>
+            <span><span class="chart-dot chart-dot--resolved"></span> Dossiers resolus</span>
         </div>
     </article>
 </section>
@@ -306,7 +306,7 @@
 <section class="three-col">
     <article class="card">
         <div class="section-head">
-            <p class="eyebrow">Tickets recents</p>
+            <p class="eyebrow">Dossiers recents</p>
             <h2>Activite</h2>
         </div>
         {% for ticket in recent_tickets %}

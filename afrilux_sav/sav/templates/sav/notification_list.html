@@ -22,7 +22,7 @@
             <p>{{ notification.message }}</p>
             <div class="ticket-card__meta">
                 <span>{{ notification.created_at }}</span>
-                <span>{% if notification.ticket %}{{ notification.ticket.reference }}{% else %}Systeme{% endif %}</span>
+                <span>{% if notification.ticket %}{{ notification.ticket.reference }}{% else %}Système{% endif %}</span>
             </div>
             {% if notification.status != 'read' %}
                 <form method="post" action="{% url 'notification-read' notification.pk %}">

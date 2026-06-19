@@ -4,13 +4,17 @@
 {% block title %}{{ ticket.reference }} | Afrilux SAV{% endblock %}
 
 {% block content %}
+<span data-ticket-detail-id="{{ ticket.id }}" hidden></span>
 <section class="section-head section-head--page">
     <div>
         <p class="eyebrow">{{ ticket.reference }}</p>
         <h1>{{ ticket.title }}</h1>
         <div class="chip-row">
             <span class="badge badge--{{ ticket.priority|badge_tone }}">{{ ticket.get_priority_display }}</span>
-            <span class="badge badge--{{ ticket.status|badge_tone }}">{{ ticket.get_status_display }}</span>
+            <span class="badge badge--{{ ticket.status|badge_tone }}" data-ticket-status data-ticket-id="{{ ticket.id }}">
+                {% if ticket.status == "pending_assignment" and not ticket.assigned_agent %}Nouveau{% else %}{{ ticket.get_status_display }}{% endif %}
+            </span>
+            <span class="badge badge--neutral" data-ticket-public-status data-ticket-id="{{ ticket.id }}">Client: {{ public_status }}</span>
             <span class="badge badge--neutral">{{ ticket.get_channel_display }}</span>
         </div>
     </div>
@@ -56,19 +60,226 @@
                 <button class="button button--primary" type="submit">Affecter technicien</button>
             </form>
         {% endif %}
+        {% if can_assign_technician %}
+            <form method="post" action="{% url 'ticket-assign-team-web' ticket.pk %}" class="form-grid" style="min-width: 22rem;">
+                {% csrf_token %}
+                {% for field in team_assignment_form %}
+                    <label class="field {% if field.name == 'members' or field.name == 'note' %}field--full{% endif %}">
+                        <span>{{ field.label }}</span>
+                        {{ field }}
+                        {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
+                    </label>
+                {% endfor %}
+                <button class="button button--ghost" type="submit">Constituer equipe</button>
+            </form>
+        {% endif %}
         {% if sav_shell.is_internal %}
             <form method="post" action="{% url 'ticket-agentic-web' ticket.pk %}">
                 {% csrf_token %}
-                <button class="button button--primary" type="submit">Resolution agentique</button>
+                <button class="button button--primary" type="submit">Résolution assistée</button>
             </form>
         {% endif %}
         {% if sav_shell.is_internal %}
             <form method="post" action="{% url 'ticket-automation-web' ticket.pk %}">
                 {% csrf_token %}
-                <button class="button button--ghost" type="submit">Executer workflow</button>
+                <button class="button button--ghost" type="submit">Exécuter processus</button>
             </form>
         {% endif %}
     </div>
+</section>
+
+<section class="card workflow-card">
+    <div class="section-head">
+        <div>
+            <p class="eyebrow">Processus SAV</p>
+            <h2>Prise en charge, validation client et cloture</h2>
+        </div>
+        <div class="chip-row">
+            {% if ticket.is_team_intervention %}
+                <span class="badge badge--neutral">Equipe: {{ ticket.team_leader|default:ticket.assigned_agent }}</span>
+            {% endif %}
+            {% if latest_intervention and latest_intervention.time_spent_minutes %}
+                <span class="badge badge--success">Temps {{ latest_intervention.time_spent_minutes }} min</span>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if can_plan_intervention or can_validate_planning or can_request_start or can_validate_start or can_bypass_start or can_request_finish or can_validate_finish or can_bypass_finish or can_close_dossier or can_answer_escalation or can_continue_solution %}
+        <div class="workflow-grid">
+            {% if can_plan_intervention %}
+                <form method="post" action="{% url 'ticket-plan-web' ticket.pk %}" class="form-grid">
+                    {% csrf_token %}
+                    {% for field in planning_form %}
+                        <label class="field">
+                            <span>{{ field.label }}</span>
+                            {{ field }}
+                            {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
+                        </label>
+                    {% endfor %}
+                    <button class="button button--primary" type="submit">Planifier</button>
+                </form>
+            {% endif %}
+
+            {% if can_validate_planning %}
+                <div class="form-grid">
+                    <p class="muted field--full">Le technicien propose une date d'intervention. Validez ou refusez la proposition.</p>
+                    <form method="post" action="{% url 'ticket-confirm-planning-web' ticket.pk %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="accepted" value="1">
+                        <button class="button button--primary" type="submit">Accepter</button>
+                    </form>
+                    <form method="post" action="{% url 'ticket-confirm-planning-web' ticket.pk %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="accepted" value="0">
+                        <button class="button button--ghost" type="submit">Refuser</button>
+                    </form>
+                </div>
+            {% endif %}
+
+            {% if can_request_start %}
+                <form method="post" action="{% url 'ticket-request-start-web' ticket.pk %}" class="form-grid">
+                    {% csrf_token %}
+                    <p class="muted field--full">Demande la validation client avant de demarrer officiellement l'intervention.</p>
+                    <button class="button button--primary" type="submit">Commencer</button>
+                </form>
+            {% endif %}
+
+            {% if can_validate_start %}
+                <form method="post" action="{% url 'ticket-validate-start-web' ticket.pk %}" class="form-grid">
+                    {% csrf_token %}
+                    <p class="muted field--full">Confirmez le debut de l'intervention. L'heure sera enregistree automatiquement.</p>
+                    <button class="button button--primary" type="submit">Valider le debut</button>
+                </form>
+            {% endif %}
+
+            {% if can_bypass_start %}
+                <form method="post" action="{% url 'ticket-validate-start-web' ticket.pk %}" enctype="multipart/form-data" class="form-grid">
+                    {% csrf_token %}
+                    <input type="hidden" name="impossible" value="1">
+                    {% for field in validation_bypass_form %}
+                        <label class="field {% if field.name == 'reason' %}field--full{% endif %}">
+                            <span>{{ field.label }}</span>
+                            {{ field }}
+                            {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
+                        </label>
+                    {% endfor %}
+                    <button class="button button--ghost" type="submit">Validation debut impossible</button>
+                </form>
+            {% endif %}
+
+            {% if can_request_finish %}
+                <form method="post" action="{% url 'ticket-request-finish-web' ticket.pk %}" class="form-grid">
+                    {% csrf_token %}
+                    <p class="muted field--full">Envoie la demande de validation de fin au client.</p>
+                    <button class="button button--primary" type="submit">Terminer</button>
+                </form>
+                <form method="post" action="{% url 'ticket-wait-part-web' ticket.pk %}" class="form-grid">
+                    {% csrf_token %}
+                    <label class="field field--full">
+                        <span>Piece manquante</span>
+                        <textarea name="reason" rows="2" placeholder="Piece indisponible, reference attendue..."></textarea>
+                    </label>
+                    <button class="button button--ghost" type="submit">Mettre en attente piece</button>
+                </form>
+            {% endif %}
+
+            {% if can_validate_finish %}
+                <form method="post" action="{% url 'ticket-validate-finish-web' ticket.pk %}" class="form-grid">
+                    {% csrf_token %}
+                    <p class="muted field--full">Confirmez la fin de l'intervention. L'heure sera enregistree automatiquement.</p>
+                    <button class="button button--primary" type="submit">Valider la fin</button>
+                </form>
+            {% endif %}
+
+            {% if can_bypass_finish %}
+                <form method="post" action="{% url 'ticket-validate-finish-web' ticket.pk %}" enctype="multipart/form-data" class="form-grid">
+                    {% csrf_token %}
+                    <input type="hidden" name="impossible" value="1">
+                    {% for field in validation_bypass_form %}
+                        <label class="field {% if field.name == 'reason' %}field--full{% endif %}">
+                            <span>{{ field.label }}</span>
+                            {{ field }}
+                            {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
+                        </label>
+                    {% endfor %}
+                    <button class="button button--ghost" type="submit">Validation fin impossible</button>
+                </form>
+            {% endif %}
+
+            {% if can_close_dossier %}
+                <form method="post" action="{% url 'ticket-close-dossier-web' ticket.pk %}" enctype="multipart/form-data" class="form-grid workflow-grid__wide">
+                    {% csrf_token %}
+                    {% for field in closure_form %}
+                        <label class="field {% if field.name == 'diagnosis' or field.name == 'action_taken' or field.name == 'parts_used' or field.name == 'photos' %}field--full{% endif %}">
+                            <span>{{ field.label }}</span>
+                            {{ field }}
+                            {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
+                        </label>
+                    {% endfor %}
+                    <button class="button button--primary" type="submit">Fermer le dossier</button>
+                </form>
+            {% endif %}
+
+            {% if can_answer_escalation %}
+                <form method="post" action="{% url 'ticket-escalation-solution-web' ticket.pk %}" class="form-grid">
+                    {% csrf_token %}
+                    {% for field in escalation_solution_form %}
+                        <label class="field field--full">
+                            <span>{{ field.label }}</span>
+                            {{ field }}
+                            {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
+                        </label>
+                    {% endfor %}
+                    <button class="button button--primary" type="submit">Apporter solution</button>
+                </form>
+                <form method="post" action="{% url 'ticket-escalation-decline-web' ticket.pk %}" class="form-grid">
+                    {% csrf_token %}
+                    {% for field in escalation_decline_form %}
+                        <label class="field field--full">
+                            <span>{{ field.label }}</span>
+                            {{ field }}
+                            {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
+                        </label>
+                    {% endfor %}
+                    <button class="button button--ghost" type="submit">Decliner</button>
+                </form>
+            {% endif %}
+
+            {% if can_continue_solution %}
+                <form method="post" action="{% url 'ticket-escalation-continue-web' ticket.pk %}" class="form-grid">
+                    {% csrf_token %}
+                    <p class="muted field--full">Une solution responsable a ete fournie. Cliquez pour reprendre le statut precedent.</p>
+                    <button class="button button--primary" type="submit">Continuer</button>
+                </form>
+            {% endif %}
+        </div>
+    {% else %}
+        <p class="muted">Aucune action de workflow n'est disponible pour votre profil a cette etape.</p>
+    {% endif %}
+
+    {% if can_assign_technician and technician_availability %}
+        <hr class="divider">
+        <div class="responsive-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Technicien</th>
+                        <th>Disponibilite</th>
+                        <th>Prochaine disponibilite</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in technician_availability %}
+                        <tr>
+                            <td>{{ row.technician_name }}</td>
+                            <td>{{ row.status_label }}</td>
+                            <td>{{ row.next_available_at|default:"Maintenant" }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
 </section>
 
 <section class="two-col">
@@ -219,7 +430,7 @@
             <div class="list-row">
 	                <div>
 	                    <strong><a href="{{ attachment.file.url }}" target="_blank" rel="noopener">{{ attachment.original_name|default:"Fichier" }}</a></strong>
-	                    <p>{{ attachment.get_kind_display }} · par {{ attachment.uploaded_by|default:"Systeme" }}{% if attachment.note %} · {{ attachment.note }}{% endif %}</p>
+	                    <p>{{ attachment.get_kind_display }} · par {{ attachment.uploaded_by|default:"Système" }}{% if attachment.note %} · {{ attachment.note }}{% endif %}</p>
 	                </div>
                 <span class="badge badge--neutral">{{ attachment.created_at|date:"d/m H:i" }}</span>
             </div>
@@ -246,7 +457,7 @@
 	        <article class="card">
 	            <div class="section-head">
 	                <p class="eyebrow">Actions metier</p>
-	                <h2>{% if can_credit_account %}Credits compte{% else %}Feedback client{% endif %}</h2>
+	                <h2>{% if can_credit_account %}Avoirs compte{% else %}Retour client{% endif %}</h2>
 	            </div>
 	            {% if can_credit_account %}
 	                {% for credit in account_credits %}
@@ -276,7 +487,7 @@
 	            {% if ticket.feedback %}
 	                {% if can_credit_account %}<hr class="divider">{% endif %}
 	                <div class="mini-card">
-	                    <strong>Feedback client: {{ ticket.feedback.rating }}/5</strong>
+	                    <strong>Retour client: {{ ticket.feedback.rating }}/5</strong>
 	                    <p>{{ ticket.feedback.comment|default:"Aucun commentaire" }}</p>
 	                </div>
 	            {% elif can_submit_feedback %}
@@ -419,7 +630,7 @@
 
     <article class="card">
         <div class="section-head">
-            <p class="eyebrow">Knowledge</p>
+            <p class="eyebrow">Base de connaissances</p>
             <h2>Articles relies</h2>
         </div>
         {% for article in knowledge_articles %}

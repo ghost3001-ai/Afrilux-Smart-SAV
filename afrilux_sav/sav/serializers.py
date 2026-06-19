@@ -383,6 +383,7 @@ class UserSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             "username": {"required": False},
             "email": {"required": False},
+            "role": {"label": "Fonction"},
         }
 
     def get_account_balance(self, obj):
@@ -773,6 +774,13 @@ class MaintenanceTicketSerializer(serializers.ModelSerializer):
     program_title = serializers.CharField(source="program.title", read_only=True)
     responsible_name = serializers.SerializerMethodField()
     technician_name = serializers.SerializerMethodField()
+    team_members = serializers.PrimaryKeyRelatedField(
+        many=True,
+        required=False,
+        queryset=User.objects.filter(role__in=User.TECHNICIAN_SPACE_ROLES),
+    )
+    team_member_names = serializers.SerializerMethodField()
+    technician_team_label = serializers.CharField(read_only=True)
     client_name = serializers.SerializerMethodField()
     products = serializers.PrimaryKeyRelatedField(many=True, required=False, queryset=Product.objects.all())
     product_names = serializers.SerializerMethodField()
@@ -793,6 +801,9 @@ class MaintenanceTicketSerializer(serializers.ModelSerializer):
             "responsible_name",
             "technician",
             "technician_name",
+            "team_members",
+            "team_member_names",
+            "technician_team_label",
             "client",
             "client_name",
             "products",
@@ -830,6 +841,8 @@ class MaintenanceTicketSerializer(serializers.ModelSerializer):
             "program_title",
             "responsible_name",
             "technician_name",
+            "team_member_names",
+            "technician_team_label",
             "client_name",
             "product_names",
             "type_label",
@@ -853,6 +866,9 @@ class MaintenanceTicketSerializer(serializers.ModelSerializer):
     def get_technician_name(self, obj):
         return str(obj.technician)
 
+    def get_team_member_names(self, obj):
+        return [str(member) for member in obj.team_members.all()]
+
     def get_client_name(self, obj):
         return str(obj.client)
 
@@ -865,11 +881,18 @@ class MaintenanceTicketSerializer(serializers.ModelSerializer):
         technician = attrs.get("technician") or getattr(self.instance, "technician", None)
         client = attrs.get("client") or getattr(self.instance, "client", None)
         products = attrs.get("products")
+        team_members = attrs.get("team_members")
         organization = attrs.get("organization") or getattr(self.instance, "organization", None) or getattr(program, "organization", None)
         if technician and technician.role not in set(User.TECHNICIAN_SPACE_ROLES):
             raise serializers.ValidationError({"technician": "Selectionnez un technicien terrain ou responsable technique habilite."})
         if technician and organization and technician.organization_id and technician.organization_id != organization.id:
             raise serializers.ValidationError({"technician": "Le technicien appartient a une autre organisation."})
+        if team_members:
+            for member in team_members:
+                if member.role not in set(User.TECHNICIAN_SPACE_ROLES):
+                    raise serializers.ValidationError({"team_members": "Tous les membres doivent etre des techniciens habilites."})
+                if organization and member.organization_id and member.organization_id != organization.id:
+                    raise serializers.ValidationError({"team_members": "Un membre appartient a une autre organisation."})
         if client and organization and client.organization_id and client.organization_id != organization.id:
             raise serializers.ValidationError({"client": "Le client appartient a une autre organisation."})
         if products and client:
@@ -1049,6 +1072,12 @@ class InterventionInlineSerializer(serializers.ModelSerializer):
             "scheduled_for",
             "started_at",
             "finished_at",
+            "client_validation_requested_at",
+            "client_validated_start_at",
+            "client_validated_finish_at",
+            "client_validation_impossible",
+            "validation_impossible_reason",
+            "validation_impossible_photo",
             "diagnosis",
             "action_taken",
             "parts_used",
@@ -1632,8 +1661,11 @@ class AuditLogSerializer(serializers.ModelSerializer):
 class TicketSerializer(serializers.ModelSerializer):
     client_name = serializers.SerializerMethodField()
     assigned_agent_name = serializers.SerializerMethodField()
+    team_leader_name = serializers.SerializerMethodField()
+    team_member_names = serializers.SerializerMethodField()
     organization_name = serializers.CharField(source="organization.display_name", read_only=True)
     product_name = serializers.CharField(source="product_display_name", read_only=True)
+    public_status = serializers.CharField(read_only=True)
     is_overdue = serializers.BooleanField(read_only=True)
     messages = serializers.SerializerMethodField()
     attachments = TicketAttachmentSerializer(many=True, read_only=True)
@@ -1670,6 +1702,11 @@ class TicketSerializer(serializers.ModelSerializer):
             "product_name",
             "assigned_agent",
             "assigned_agent_name",
+            "team_leader",
+            "team_leader_name",
+            "team_members",
+            "team_member_names",
+            "is_team_intervention",
             "initial_escalation_target",
             "title",
             "description",
@@ -1677,9 +1714,14 @@ class TicketSerializer(serializers.ModelSerializer):
             "category",
             "channel",
             "status",
+            "public_status",
             "priority",
             "location",
             "sla_deadline",
+            "escalation_count",
+            "last_escalation_at",
+            "last_escalation_reason",
+            "status_before_escalation",
             "first_response_at",
             "resolved_at",
             "closed_at",
@@ -1696,6 +1738,13 @@ class TicketSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user and user.is_authenticated and getattr(user, "role", "") == User.ROLE_CLIENT:
+            self.fields["client"].required = False
+
     def get_client_name(self, obj):
         return str(obj.client)
 
@@ -1703,6 +1752,14 @@ class TicketSerializer(serializers.ModelSerializer):
         if not obj.assigned_agent:
             return None
         return str(obj.assigned_agent)
+
+    def get_team_leader_name(self, obj):
+        if not obj.team_leader:
+            return None
+        return str(obj.team_leader)
+
+    def get_team_member_names(self, obj):
+        return [str(member) for member in obj.team_members.all()]
 
     def get_messages(self, obj):
         request = self.context.get("request")
@@ -1810,3 +1867,17 @@ class InterventionMediaInlineSerializer(serializers.ModelSerializer):
 class InterventionMediaSerializer(InterventionMediaInlineSerializer):
     class Meta(InterventionMediaInlineSerializer.Meta):
         fields = InterventionMediaInlineSerializer.Meta.fields
+
+
+class TechnicianAvailabilitySerializer(serializers.Serializer):
+    """Sérialise la disponibilité d'un technicien"""
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    email = serializers.EmailField()
+    role = serializers.CharField()
+    status = serializers.CharField()  # "available", "busy", "absent"
+    next_available_at = serializers.DateTimeField()
+    busy_until = serializers.DateTimeField(allow_null=True)
+    can_be_leader = serializers.BooleanField()
+    can_be_member = serializers.BooleanField()
+    current_tickets_count = serializers.IntegerField()

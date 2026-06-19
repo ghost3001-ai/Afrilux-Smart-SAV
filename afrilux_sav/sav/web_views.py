@@ -1,4 +1,5 @@
 import json
+import time
 from datetime import datetime, timedelta
 
 from django.contrib import messages as django_messages
@@ -7,6 +8,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.core.exceptions import ValidationError
 from django.db.models import Avg, Count, Q
 from django.http import HttpResponse, JsonResponse
+from django.http import StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
@@ -26,8 +28,14 @@ from .forms import (
     ProductForm,
     SupportAssistantQuestionForm,
     TicketFeedbackForm,
+    TicketClosureForm,
     TicketEscalationForm,
+    TicketEscalationDeclineForm,
+    TicketEscalationSolutionForm,
+    TicketPlanningForm,
+    TicketTeamAssignmentForm,
     TicketTechnicianAssignmentForm,
+    TicketValidationBypassForm,
     TicketAttachmentForm,
     TicketCreateForm,
     TicketForm,
@@ -65,20 +73,28 @@ from .services import (
     compute_agent_performance_rows,
     compute_average_first_response_hours,
     compute_average_resolution_hours,
-    compute_technician_status_rows,
+    compute_technician_availability_dashboard,
+    compute_technician_availability_rows,
     compute_ticket_hotspots,
     compute_ticket_monthly_series,
     compute_ticket_sla_deadline,
     compute_ticket_volume_series,
     acknowledge_maintenance_ticket,
     assign_ticket_to_technician,
+    assign_ticket_to_team,
+    can_act_on_maintenance_ticket,
     can_assign_ticket_technician,
+    can_drive_ticket_workflow,
     can_manage_maintenance,
     cancel_maintenance_ticket,
     close_maintenance_ticket,
     credit_account_for_ticket,
     create_notification,
     ensure_assignment_intervention,
+    close_sav_dossier,
+    confirm_planning,
+    continue_after_escalation_solution,
+    decline_ticket_escalation,
     escalate_ticket,
     generate_intervention_pdf,
     has_backoffice_access,
@@ -111,7 +127,14 @@ from .services import (
     validate_maintenance_report,
     role_workspace_name,
     notify_ticket_status_change,
+    propose_planning,
+    provide_escalation_solution,
+    request_finish_intervention,
+    request_start_intervention,
+    request_ticket_escalation,
     record_intervention_part_usages,
+    validate_finish_intervention,
+    validate_start_intervention,
 )
 
 
@@ -127,14 +150,14 @@ def _percentage(value, total):
 
 def _ticket_status_from_intervention(intervention):
     if intervention.status == Intervention.STATUS_DONE or intervention.finished_at:
-        return Ticket.STATUS_RESOLVED
+        return Ticket.STATUS_DONE
     if intervention.status == Intervention.STATUS_IN_PROGRESS or intervention.started_at:
         return Ticket.STATUS_IN_PROGRESS
     if intervention.status == Intervention.STATUS_CANCELLED:
-        return Ticket.STATUS_WAITING
+        return Ticket.STATUS_WAITING_PART
     if intervention.scheduled_for:
-        return Ticket.STATUS_ASSIGNED
-    return Ticket.STATUS_ASSIGNED if intervention.ticket.assigned_agent_id else Ticket.STATUS_NEW
+        return Ticket.STATUS_PLANNED
+    return Ticket.STATUS_ASSIGNED if intervention.ticket.assigned_agent_id else Ticket.STATUS_PENDING_ASSIGNMENT
 
 
 def _workspace_redirect_url(user):
@@ -226,7 +249,7 @@ def _dashboard_snapshot(user):
         "trend_7_days": compute_ticket_volume_series(tickets, days=7),
         "trend_30_days": compute_ticket_volume_series(tickets, days=30),
         "trend_12_months": compute_ticket_monthly_series(tickets, months=12),
-        "technician_status_breakdown": compute_technician_status_rows(technicians),
+        "technician_status_breakdown": compute_technician_availability_dashboard(getattr(user, "organization", None)),
     }
 
 
@@ -268,6 +291,51 @@ class HomeRedirectView(View):
         if request.user.is_authenticated:
             return redirect(_workspace_redirect_url(request.user))
         return redirect("login")
+
+
+class RealtimeEventsView(LoginRequiredMixin, View):
+    def get(self, request, *args, **kwargs):
+        def serialize_notification(notification):
+            ticket = notification.ticket
+            payload = {
+                "id": notification.id,
+                "event_type": notification.event_type,
+                "subject": notification.subject,
+                "message": notification.message,
+                "created_at": notification.created_at.isoformat(),
+                "ticket_id": ticket.id if ticket else None,
+                "ticket_reference": ticket.reference if ticket else "",
+                "ticket_status": ticket.status if ticket else "",
+                "ticket_status_label": ticket.get_status_display() if ticket else "",
+                "ticket_public_status": ticket.public_status if ticket else "",
+            }
+            return payload
+
+        def stream():
+            try:
+                cursor = int(request.GET.get("last_id") or 0)
+            except (TypeError, ValueError):
+                cursor = 0
+            base_queryset = scope_notification_queryset(
+                Notification.objects.select_related("ticket").filter(recipient=request.user),
+                request.user,
+            )
+            if cursor <= 0:
+                latest = base_queryset.order_by("-id").first()
+                cursor = latest.id if latest else 0
+            yield f"event: connected\ndata: {json.dumps({'last_id': cursor})}\n\n"
+            for _ in range(90):
+                notifications = list(base_queryset.filter(id__gt=cursor).order_by("id")[:20])
+                for notification in notifications:
+                    cursor = max(cursor, notification.id)
+                    data = json.dumps(serialize_notification(notification), ensure_ascii=True)
+                    yield f"event: notification\ndata: {data}\n\n"
+                time.sleep(2)
+
+        response = StreamingHttpResponse(stream(), content_type="text/event-stream")
+        response["Cache-Control"] = "no-cache"
+        response["X-Accel-Buffering"] = "no"
+        return response
 
 
 class WebManifestView(View):
@@ -446,13 +514,13 @@ class TechnicianPlanningPageView(LoginRequiredMixin, ManagerRequiredMixin, Templ
             scheduled_for__date__lt=week_end,
         )
         maintenance_tickets = scope_maintenance_ticket_queryset(
-            MaintenanceTicket.objects.select_related("client", "technician").prefetch_related("products"),
+            MaintenanceTicket.objects.select_related("client", "technician").prefetch_related("products", "team_members"),
             self.request.user,
         ).filter(
-            technician__in=technicians,
-            scheduled_date__gte=week_start,
-            scheduled_date__lt=week_end,
-        )
+            Q(technician__in=technicians) | Q(team_members__in=technicians),
+            scheduled_date__date__gte=week_start,
+            scheduled_date__date__lt=week_end,
+        ).distinct()
         days = [week_start + timedelta(days=index) for index in range(7)]
         technician_cards = []
         for technician in technicians:
@@ -465,7 +533,17 @@ class TechnicianPlanningPageView(LoginRequiredMixin, ManagerRequiredMixin, Templ
             calendar_rows = []
             for day in days:
                 day_items = [item for item in technician_interventions if item.scheduled_for and item.scheduled_for.date() == day]
-                maintenance_items = [item for item in maintenance_tickets if item.technician_id == technician.id and item.scheduled_date == day]
+                maintenance_items = [
+                    item
+                    for item in maintenance_tickets
+                    if (
+                        (
+                            item.technician_id == technician.id
+                            or any(member.id == technician.id for member in item.team_members.all())
+                        )
+                        and timezone.localtime(item.scheduled_date).date() == day
+                    )
+                ]
                 calendar_rows.append(
                     {
                         "day": day,
@@ -580,20 +658,21 @@ class TechnicianSpaceView(LoginRequiredMixin, TechnicianWorkspaceRequiredMixin, 
         )
         maintenance_tickets = (
             scope_maintenance_ticket_queryset(
-                MaintenanceTicket.objects.select_related("client", "technician", "anomaly_ticket").prefetch_related("products"),
+                MaintenanceTicket.objects.select_related("client", "technician", "anomaly_ticket").prefetch_related("products", "team_members"),
                 self.request.user,
             )
             .filter(
-                technician=technician,
+                Q(technician=technician) | Q(team_members=technician),
             )
             .filter(
                 Q(status__in=[MaintenanceTicket.STATUS_NOTIFIED, MaintenanceTicket.STATUS_IN_PROGRESS, MaintenanceTicket.STATUS_POSTPONED])
-                | Q(scheduled_date__lte=today + timedelta(days=3))
+                | Q(scheduled_date__date__lte=today + timedelta(days=3))
             )
             .exclude(status__in=[MaintenanceTicket.STATUS_DONE, MaintenanceTicket.STATUS_ANOMALY, MaintenanceTicket.STATUS_CANCELLED])
+            .distinct()
             .order_by("scheduled_date", "priority", "id")
         )
-        maintenance_today = maintenance_tickets.filter(scheduled_date=today)
+        maintenance_today = maintenance_tickets.filter(scheduled_date__date=today)
         context.update(
             {
                 "technician": technician,
@@ -620,7 +699,7 @@ class TechnicianSpaceView(LoginRequiredMixin, TechnicianWorkspaceRequiredMixin, 
                         "order": interventions_today.count() + index + 1,
                         "reference": f"MAINT-{maintenance_ticket.id}",
                         "location": maintenance_ticket.location or maintenance_ticket.client.address,
-                        "scheduled_for": None,
+                        "scheduled_for": maintenance_ticket.scheduled_date,
                         "kind": "maintenance",
                     }
                     for index, maintenance_ticket in enumerate(maintenance_today)
@@ -646,7 +725,7 @@ class MaintenanceProgramListView(LoginRequiredMixin, MaintenanceManagerRequiredM
             self.request.user,
         )
         tickets = scope_maintenance_ticket_queryset(
-            MaintenanceTicket.objects.select_related("client", "technician", "program", "anomaly_ticket", "report").prefetch_related("products"),
+            MaintenanceTicket.objects.select_related("client", "technician", "program", "anomaly_ticket", "report").prefetch_related("products", "team_members"),
             self.request.user,
         )
         active_tickets = tickets.exclude(
@@ -785,7 +864,10 @@ class MaintenanceTicketCancelView(LoginRequiredMixin, MaintenanceManagerRequired
 class MaintenanceReportValidateView(LoginRequiredMixin, MaintenanceManagerRequiredMixin, View):
     def post(self, request, pk):
         maintenance_ticket = get_object_or_404(
-            scope_maintenance_ticket_queryset(MaintenanceTicket.objects.select_related("technician", "client"), request.user),
+            scope_maintenance_ticket_queryset(
+                MaintenanceTicket.objects.select_related("technician", "client").prefetch_related("team_members"),
+                request.user,
+            ),
             pk=pk,
         )
         try:
@@ -804,12 +886,12 @@ class MaintenanceTicketCloseView(LoginRequiredMixin, FormView):
     def dispatch(self, request, *args, **kwargs):
         self.maintenance_ticket = get_object_or_404(
             scope_maintenance_ticket_queryset(
-                MaintenanceTicket.objects.select_related("client", "technician", "responsible").prefetch_related("products"),
+                MaintenanceTicket.objects.select_related("client", "technician", "responsible").prefetch_related("products", "team_members"),
                 request.user,
             ),
             pk=kwargs["pk"],
         )
-        if not (can_manage_maintenance(request.user) or self.maintenance_ticket.technician_id == request.user.id):
+        if not can_act_on_maintenance_ticket(request.user, self.maintenance_ticket):
             django_messages.error(request, "Vous n'etes pas autorise a cloturer cette maintenance.")
             return redirect("technician-space")
         return super().dispatch(request, *args, **kwargs)
@@ -980,7 +1062,7 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
         form.instance.created_by = self.request.user
         if self.request.user.role == User.ROLE_CLIENT:
             form.instance.client = self.request.user
-            form.instance.status = Ticket.STATUS_NEW
+            form.instance.status = Ticket.STATUS_PENDING_ASSIGNMENT
             form.instance.priority = Ticket.PRIORITY_NORMAL
             form.instance.assigned_agent = None
         else:
@@ -1029,7 +1111,13 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
 
         log_audit_event(self.request.user, "ticket_created_web", self.object, {"via": "portal"})
         run_automation_rules_for_ticket(self.object, actor=self.request.user)
-        django_messages.success(self.request, f"Ticket {self.object.reference} cree avec succes.")
+        if self.request.user.role == User.ROLE_CLIENT and self.object.status == Ticket.STATUS_PENDING_ASSIGNMENT:
+            django_messages.success(
+                self.request,
+                f"Demande {self.object.reference} envoyee au Responsable SAV. Vous pouvez suivre son etat depuis cette fiche.",
+            )
+        else:
+            django_messages.success(self.request, f"Ticket {self.object.reference} cree avec succes.")
         return response
 
     def get_success_url(self):
@@ -1061,7 +1149,8 @@ class TicketUpdateView(LoginRequiredMixin, InternalRequiredMixin, UpdateView):
             and form.instance.status
             in {
                 Ticket.STATUS_NEW,
-                Ticket.STATUS_WAITING,
+                Ticket.STATUS_PENDING_ASSIGNMENT,
+                Ticket.STATUS_WAITING_PART,
             }
         ):
             form.instance.status = Ticket.STATUS_ASSIGNED
@@ -1107,8 +1196,11 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         context = super().get_context_data(**kwargs)
         ticket = self.object
         user = self.request.user
-        can_support_edit = user.role == User.ROLE_HEAD_SAV
+        can_support_edit = is_manager_user(user)
         is_assigned_technician = can_record_ticket_intervention(user, ticket)
+        workflow_driver = can_drive_ticket_workflow(user, ticket)
+        is_client_owner = user.role == User.ROLE_CLIENT and ticket.client_id == user.id
+        terminal_statuses = {Ticket.STATUS_DONE, Ticket.STATUS_RESOLVED, Ticket.STATUS_CLOSED, Ticket.STATUS_CANCELLED}
         can_participate = (
             not is_read_only_user(user)
             and (user.role == User.ROLE_CLIENT and ticket.client_id == user.id or can_support_edit or is_assigned_technician)
@@ -1135,13 +1227,23 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         context["attachments"] = scope_attachment_queryset(ticket.attachments.all(), self.request.user)
         context["account_credits"] = ticket.account_credits.order_by("-executed_at") if is_admin_user(user) else []
         context["can_participate"] = can_participate
-        context["can_edit"] = can_support_edit
-        context["can_add_intervention"] = can_support_edit or is_assigned_technician
+        context["can_edit"] = can_support_edit and ticket.status != Ticket.STATUS_CLOSED
+        context["can_add_intervention"] = False
         context["can_credit_account"] = is_admin_user(user)
-        context["can_escalate"] = can_support_edit and ticket.status in OPEN_TICKET_STATUSES
+        context["can_escalate"] = (
+            is_internal_user(user)
+            and not is_read_only_user(user)
+            and ticket.status not in terminal_statuses
+            and ticket.status != Ticket.STATUS_BLOCKED_DIRECTION
+            and can_record_ticket_intervention(user, ticket)
+        )
         context["escalation_form"] = TicketEscalationForm()
         context["can_assign_technician"] = can_assign_ticket_technician(user, ticket) and ticket.status in OPEN_TICKET_STATUSES
         context["technician_assignment_form"] = TicketTechnicianAssignmentForm(user=user, ticket=ticket)
+        context["team_assignment_form"] = TicketTeamAssignmentForm(user=user, ticket=ticket)
+        context["technician_availability"] = (
+            compute_technician_availability_rows(ticket.organization) if context["can_assign_technician"] else []
+        )
         context["can_confirm_resolution"] = (
             ticket.status == Ticket.STATUS_RESOLVED
             and (user.role == User.ROLE_CLIENT and ticket.client_id == user.id)
@@ -1156,6 +1258,44 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         context["can_reopen"] = can_participate and ticket.status in {Ticket.STATUS_RESOLVED, Ticket.STATUS_CLOSED}
         context["client_contacts"] = ticket.client.contacts.order_by("-is_primary", "first_name", "last_name")[:8]
         context["assignment_history"] = ticket.assignment_history.select_related("technician", "assigned_by").all()[:12]
+        latest_intervention = ticket.interventions.order_by("-created_at").first()
+        context["latest_intervention"] = latest_intervention
+        context["workflow_driver"] = workflow_driver
+        context["is_client_owner"] = is_client_owner
+        context["public_status"] = ticket.public_status
+        context["can_plan_intervention"] = workflow_driver and ticket.status in {
+            Ticket.STATUS_ASSIGNED,
+            Ticket.STATUS_TEAM_READY,
+            Ticket.STATUS_PLANNING_PROPOSED,
+        }
+        context["can_validate_planning"] = is_client_owner and ticket.status == Ticket.STATUS_PLANNING_PROPOSED
+        context["can_request_start"] = workflow_driver and ticket.status in {
+            Ticket.STATUS_ASSIGNED,
+            Ticket.STATUS_TEAM_READY,
+            Ticket.STATUS_PLANNED,
+            Ticket.STATUS_WAITING_PART,
+        }
+        context["can_validate_start"] = is_client_owner and ticket.status == Ticket.STATUS_START_REQUESTED
+        context["can_bypass_start"] = workflow_driver and ticket.status == Ticket.STATUS_START_REQUESTED
+        context["can_request_finish"] = workflow_driver and ticket.status in {
+            Ticket.STATUS_IN_PROGRESS,
+            Ticket.STATUS_COLLECTIVE_IN_PROGRESS,
+        }
+        context["can_validate_finish"] = is_client_owner and ticket.status == Ticket.STATUS_FINISH_REQUESTED
+        context["can_bypass_finish"] = workflow_driver and ticket.status == Ticket.STATUS_FINISH_REQUESTED
+        context["can_close_dossier"] = workflow_driver and ticket.status == Ticket.STATUS_DONE
+        context["can_answer_escalation"] = is_manager_user(user) and ticket.status == Ticket.STATUS_ESCALATED
+        context["can_continue_solution"] = workflow_driver and ticket.status == Ticket.STATUS_WAITING_SOLUTION
+        context["planning_form"] = TicketPlanningForm()
+        context["validation_bypass_form"] = TicketValidationBypassForm()
+        context["closure_form"] = TicketClosureForm(
+            initial={
+                "client_name": str(ticket.client),
+                "parts_used": getattr(latest_intervention, "parts_used", "") if latest_intervention else "",
+            }
+        )
+        context["escalation_solution_form"] = TicketEscalationSolutionForm()
+        context["escalation_decline_form"] = TicketEscalationDeclineForm()
         context["intervention_form"] = InterventionForm(
             user=user,
             ticket=ticket,
@@ -1285,17 +1425,25 @@ class TicketEscalateView(LoginRequiredMixin, View):
 
         form = TicketEscalationForm(request.POST)
         if not form.is_valid():
-            django_messages.error(request, "Choisissez une cible d'escalade valide.")
+            django_messages.error(request, "Le motif d'escalade est obligatoire.")
             return redirect("ticket-detail", pk=pk)
 
         previous_status = ticket.status
         try:
-            result = escalate_ticket(
-                ticket,
-                actor=request.user,
-                note=form.cleaned_data.get("note", ""),
-                target=form.cleaned_data["target"],
-            )
+            target = (form.cleaned_data.get("target") or "").strip()
+            if target:
+                result = escalate_ticket(
+                    ticket,
+                    actor=request.user,
+                    note=form.cleaned_data.get("note", ""),
+                    target=target,
+                )
+            else:
+                result = request_ticket_escalation(
+                    ticket,
+                    actor=request.user,
+                    reason=form.cleaned_data.get("note", ""),
+                )
         except ValueError as exc:
             django_messages.error(request, str(exc))
             return redirect("ticket-detail", pk=pk)
@@ -1303,16 +1451,12 @@ class TicketEscalateView(LoginRequiredMixin, View):
         if ticket.status != previous_status:
             notify_ticket_status_change(ticket, previous_status, actor=request.user)
 
-        if result.get("assigned_agent"):
-            django_messages.success(
-                request,
-                f"Le ticket a ete escalade vers {result['assigned_agent']} avec priorite {ticket.get_priority_display().lower()}.",
-            )
+        if result.get("notified_leader"):
+            django_messages.success(request, "Le chef d'equipe a ete notifie avant escalade responsable.")
+        elif ticket.status == Ticket.STATUS_BLOCKED_DIRECTION:
+            django_messages.warning(request, "Le maximum d'escalades est atteint. Le ticket est bloque pour arbitrage direction.")
         else:
-            django_messages.success(
-                request,
-                f"Le ticket a ete escalade avec priorite {ticket.get_priority_display().lower()}.",
-            )
+            django_messages.success(request, "La demande d'aide a ete transmise au responsable SAV.")
         return redirect("ticket-detail", pk=pk)
 
 
@@ -1339,6 +1483,247 @@ class TicketAssignTechnicianView(LoginRequiredMixin, View):
         if ticket.status != previous_status:
             notify_ticket_status_change(ticket, previous_status, actor=request.user)
         django_messages.success(request, f"Le ticket a ete affecte a {result['assigned_agent']}.")
+        return redirect("ticket-detail", pk=pk)
+
+
+class TicketAssignTeamView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
+        form = TicketTeamAssignmentForm(request.POST, user=request.user, ticket=ticket)
+        if not form.is_valid():
+            django_messages.error(request, "Choisissez exactement un chef et au moins un membre disponible.")
+            return redirect("ticket-detail", pk=pk)
+
+        previous_status = ticket.status
+        try:
+            result = assign_ticket_to_team(
+                ticket,
+                leader=form.cleaned_data["leader"],
+                members=form.cleaned_data["members"],
+                actor=request.user,
+                note=form.cleaned_data.get("note", ""),
+            )
+        except ValueError as exc:
+            django_messages.error(request, str(exc))
+            return redirect("ticket-detail", pk=pk)
+
+        notify_ticket_status_change(ticket, previous_status, actor=request.user)
+        django_messages.success(request, f"Equipe constituee avec {result['team_leader']} comme chef.")
+        return redirect("ticket-detail", pk=pk)
+
+
+class TicketPlanningProposeView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
+        form = TicketPlanningForm(request.POST)
+        if not form.is_valid():
+            django_messages.error(request, "Renseignez une date et heure de debut valides.")
+            return redirect("ticket-detail", pk=pk)
+        previous_status = ticket.status
+        try:
+            propose_planning(ticket, form.cleaned_data["scheduled_at"], actor=request.user)
+        except ValueError as exc:
+            django_messages.error(request, str(exc))
+            return redirect("ticket-detail", pk=pk)
+        notify_ticket_status_change(ticket, previous_status, actor=request.user)
+        django_messages.success(request, "Proposition de planification envoyee au client.")
+        return redirect("ticket-detail", pk=pk)
+
+
+class TicketPlanningConfirmView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
+        previous_status = ticket.status
+        accepted = request.POST.get("accepted") == "1"
+        try:
+            confirm_planning(ticket, accepted=accepted, actor=request.user)
+        except ValueError as exc:
+            django_messages.error(request, str(exc))
+            return redirect("ticket-detail", pk=pk)
+        notify_ticket_status_change(ticket, previous_status, actor=request.user)
+        django_messages.success(request, "Planification acceptee." if accepted else "Planification refusee.")
+        return redirect("ticket-detail", pk=pk)
+
+
+class TicketRequestStartView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
+        previous_status = ticket.status
+        try:
+            request_start_intervention(ticket, actor=request.user)
+        except ValueError as exc:
+            django_messages.error(request, str(exc))
+            return redirect("ticket-detail", pk=pk)
+        notify_ticket_status_change(ticket, previous_status, actor=request.user)
+        django_messages.success(request, "Demande de validation de debut envoyee au client.")
+        return redirect("ticket-detail", pk=pk)
+
+
+class TicketValidateStartView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
+        impossible = request.POST.get("impossible") == "1"
+        form = TicketValidationBypassForm(request.POST, request.FILES) if impossible else None
+        if form is not None and not form.is_valid():
+            django_messages.error(request, "Motif et photo justificative obligatoires.")
+            return redirect("ticket-detail", pk=pk)
+        previous_status = ticket.status
+        try:
+            validate_start_intervention(
+                ticket,
+                actor=request.user,
+                impossible=impossible,
+                reason=form.cleaned_data["reason"] if form else "",
+                photo=form.cleaned_data["photo"] if form else None,
+            )
+        except ValueError as exc:
+            django_messages.error(request, str(exc))
+            return redirect("ticket-detail", pk=pk)
+        notify_ticket_status_change(ticket, previous_status, actor=request.user)
+        django_messages.success(request, "Debut d'intervention valide.")
+        return redirect("ticket-detail", pk=pk)
+
+
+class TicketRequestFinishView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
+        previous_status = ticket.status
+        try:
+            request_finish_intervention(ticket, actor=request.user)
+        except ValueError as exc:
+            django_messages.error(request, str(exc))
+            return redirect("ticket-detail", pk=pk)
+        notify_ticket_status_change(ticket, previous_status, actor=request.user)
+        django_messages.success(request, "Demande de validation de fin envoyee au client.")
+        return redirect("ticket-detail", pk=pk)
+
+
+class TicketValidateFinishView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
+        impossible = request.POST.get("impossible") == "1"
+        form = TicketValidationBypassForm(request.POST, request.FILES) if impossible else None
+        if form is not None and not form.is_valid():
+            django_messages.error(request, "Motif et photo justificative obligatoires.")
+            return redirect("ticket-detail", pk=pk)
+        previous_status = ticket.status
+        try:
+            validate_finish_intervention(
+                ticket,
+                actor=request.user,
+                impossible=impossible,
+                reason=form.cleaned_data["reason"] if form else "",
+                photo=form.cleaned_data["photo"] if form else None,
+            )
+        except ValueError as exc:
+            django_messages.error(request, str(exc))
+            return redirect("ticket-detail", pk=pk)
+        notify_ticket_status_change(ticket, previous_status, actor=request.user)
+        django_messages.success(request, "Fin d'intervention validee. Le formulaire de cloture est disponible.")
+        return redirect("ticket-detail", pk=pk)
+
+
+class TicketCloseDossierView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
+        form = TicketClosureForm(request.POST, request.FILES)
+        if not form.is_valid():
+            django_messages.error(request, "Completez les champs obligatoires de cloture.")
+            return redirect("ticket-detail", pk=pk)
+        previous_status = ticket.status
+        try:
+            close_sav_dossier(
+                ticket,
+                diagnosis=form.cleaned_data["diagnosis"],
+                action_taken=form.cleaned_data["action_taken"],
+                parts=form.cleaned_data["parts_used"],
+                client_name=form.cleaned_data["client_name"],
+                signature=form.cleaned_data["signature"],
+                photos=form.cleaned_data.get("photos", []),
+                actor=request.user,
+            )
+        except ValueError as exc:
+            django_messages.error(request, str(exc))
+            return redirect("ticket-detail", pk=pk)
+        notify_ticket_status_change(ticket, previous_status, actor=request.user)
+        django_messages.success(request, "Dossier cloture et rapport PDF genere.")
+        return redirect("ticket-detail", pk=pk)
+
+
+class TicketEscalationSolutionView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
+        form = TicketEscalationSolutionForm(request.POST)
+        if not form.is_valid():
+            django_messages.error(request, "La solution responsable est obligatoire.")
+            return redirect("ticket-detail", pk=pk)
+        previous_status = ticket.status
+        try:
+            provide_escalation_solution(ticket, actor=request.user, solution=form.cleaned_data["solution"])
+        except ValueError as exc:
+            django_messages.error(request, str(exc))
+            return redirect("ticket-detail", pk=pk)
+        notify_ticket_status_change(ticket, previous_status, actor=request.user)
+        django_messages.success(request, "Solution transmise au technicien.")
+        return redirect("ticket-detail", pk=pk)
+
+
+class TicketEscalationDeclineView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
+        form = TicketEscalationDeclineForm(request.POST)
+        if not form.is_valid():
+            django_messages.error(request, "Le motif de refus est obligatoire.")
+            return redirect("ticket-detail", pk=pk)
+        previous_status = ticket.status
+        try:
+            decline_ticket_escalation(ticket, actor=request.user, reason=form.cleaned_data["reason"])
+        except ValueError as exc:
+            django_messages.error(request, str(exc))
+            return redirect("ticket-detail", pk=pk)
+        notify_ticket_status_change(ticket, previous_status, actor=request.user)
+        django_messages.success(request, "Escalade declinee et ticket renvoye au technicien.")
+        return redirect("ticket-detail", pk=pk)
+
+
+class TicketEscalationContinueView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
+        previous_status = ticket.status
+        try:
+            continue_after_escalation_solution(ticket, actor=request.user)
+        except ValueError as exc:
+            django_messages.error(request, str(exc))
+            return redirect("ticket-detail", pk=pk)
+        notify_ticket_status_change(ticket, previous_status, actor=request.user)
+        django_messages.success(request, "La solution responsable est prise en compte. Reprise du processus.")
+        return redirect("ticket-detail", pk=pk)
+
+
+class TicketWaitPartView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
+        if not can_drive_ticket_workflow(request.user, ticket):
+            django_messages.error(request, "Seul le technicien responsable peut signaler une piece manquante.")
+            return redirect("ticket-detail", pk=pk)
+        reason = (request.POST.get("reason") or "").strip()
+        if not reason:
+            django_messages.error(request, "Precisez la piece manquante ou le motif d'attente.")
+            return redirect("ticket-detail", pk=pk)
+        previous_status = ticket.status
+        ticket.status = Ticket.STATUS_WAITING_PART
+        ticket.save(update_fields=["status", "updated_at"])
+        Message.objects.create(
+            ticket=ticket,
+            sender=request.user,
+            message_type=Message.TYPE_INTERNAL,
+            channel=Message.CHANNEL_PORTAL,
+            direction=Message.DIRECTION_INTERNAL,
+            content=f"Piece manquante / attente approvisionnement: {reason}",
+            sentiment_score=calculate_sentiment(reason),
+        )
+        notify_ticket_status_change(ticket, previous_status, actor=request.user)
+        django_messages.success(request, "Ticket place en attente de piece.")
         return redirect("ticket-detail", pk=pk)
 
 
@@ -1419,6 +1804,11 @@ class TicketAttachmentCreateView(LoginRequiredMixin, View):
 class TicketInterventionCreateView(LoginRequiredMixin, InternalRequiredMixin, View):
     def post(self, request, pk):
         ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
+        django_messages.error(
+            request,
+            "Le rapport d'intervention se renseigne uniquement apres validation client de fin, via 'Fermer le dossier'.",
+        )
+        return redirect("ticket-detail", pk=pk)
         if not can_record_ticket_intervention(request.user, ticket):
             django_messages.error(request, "Vous ne pouvez intervenir que sur les tickets qui vous sont affectes ou planifies.")
             return redirect("ticket-detail", pk=pk)

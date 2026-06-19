@@ -40,7 +40,7 @@ function initializeThemeToggle() {
   const storageKey = "afrilux-theme";
   const applyTheme = (theme) => {
     document.body.dataset.theme = theme;
-    toggle.textContent = theme === "dark" ? "Theme clair" : "Theme sombre";
+    toggle.textContent = theme === "dark" ? "Thème clair" : "Thème sombre";
   };
   const stored = localStorage.getItem(storageKey);
   applyTheme(stored === "dark" ? "dark" : "light");
@@ -256,7 +256,9 @@ function initializeMaintenanceProgramBuilder() {
   const field = (name) => builder.querySelector(`[data-maintenance-field='${name}']`);
   const scheduledDate = field("scheduled_date");
   if (scheduledDate && !scheduledDate.value) {
-    scheduledDate.value = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    scheduledDate.value = now.toISOString().slice(0, 16);
   }
 
   const readLines = () => {
@@ -286,6 +288,24 @@ function initializeMaintenanceProgramBuilder() {
       .filter(Boolean);
   };
 
+  const readSelectedTechnicians = () => {
+    const leader = builder.querySelector("[data-maintenance-leader]:checked");
+    const leaderId = Number(leader?.value || 0);
+    const memberIds = Array.from(builder.querySelectorAll("[data-maintenance-member]:checked"))
+      .map((option) => Number(option.value))
+      .filter(Boolean);
+    const technicianIds = [];
+    if (leaderId) {
+      technicianIds.push(leaderId);
+    }
+    memberIds.forEach((id) => {
+      if (id && !technicianIds.includes(id)) {
+        technicianIds.push(id);
+      }
+    });
+    return technicianIds;
+  };
+
   const clearBuilder = () => {
     ["title", "instructions", "checklist"].forEach((name) => {
       const input = field(name);
@@ -299,23 +319,27 @@ function initializeMaintenanceProgramBuilder() {
         option.selected = false;
       });
     }
+    builder.querySelectorAll("[data-maintenance-leader], [data-maintenance-member]").forEach((input) => {
+      input.checked = false;
+    });
   };
 
   const addButton = builder.querySelector("[data-maintenance-add-line]");
   addButton?.addEventListener("click", () => {
     const title = (field("title")?.value || "").trim();
-    const technicianId = Number(field("technician_id")?.value || 0);
+    const technicianIds = readSelectedTechnicians();
     const clientId = Number(field("client_id")?.value || 0);
     const dateValue = (field("scheduled_date")?.value || "").trim();
-    if (!title || !technicianId || !clientId || !dateValue) {
-      alert("Renseignez l'intitule, le technicien, le client et la date prevue.");
+    if (!title || !technicianIds.length || !clientId || !dateValue) {
+      alert("Renseignez l'intitule, le chef d'equipe, le client et la date prevue.");
       return;
     }
 
     const lines = readLines();
     lines.push({
       title,
-      technician_id: technicianId,
+      technician_id: technicianIds[0],
+      technician_ids: technicianIds,
       client_id: clientId,
       product_ids: readSelectedProducts(),
       scheduled_date: dateValue,
@@ -589,6 +613,112 @@ function initializeOfflineDrafts() {
   flushOfflineQueue();
 }
 
+function setRealtimeState(state, label) {
+  const node = document.querySelector("[data-realtime-status]");
+  const text = document.querySelector("[data-realtime-label]");
+  if (!node || !text) {
+    return;
+  }
+  node.classList.remove("realtime-status--online", "realtime-status--reconnecting", "realtime-status--offline");
+  node.classList.add(`realtime-status--${state}`);
+  text.textContent = label;
+}
+
+function showRealtimeToast(payload) {
+  let stack = document.querySelector("[data-realtime-toasts]");
+  if (!stack) {
+    stack = document.createElement("div");
+    stack.className = "realtime-toast-stack";
+    stack.setAttribute("data-realtime-toasts", "");
+    document.body.appendChild(stack);
+  }
+  const toast = document.createElement("div");
+  toast.className = "realtime-toast";
+  const subject = payload.subject || "Mise a jour SAV";
+  const message = payload.message || "Un ticket a ete mis a jour.";
+  toast.innerHTML = `<strong>${subject}</strong><span>${message}</span>`;
+  stack.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    toast.style.transform = "translateY(-6px)";
+    setTimeout(() => toast.remove(), 250);
+  }, 5200);
+}
+
+function updateTicketBadges(payload) {
+  if (!payload.ticket_id) {
+    return;
+  }
+  document.querySelectorAll(`[data-ticket-status][data-ticket-id="${payload.ticket_id}"]`).forEach((node) => {
+    if (payload.ticket_status_label) {
+      node.textContent = payload.ticket_status_label;
+    }
+  });
+  document.querySelectorAll(`[data-ticket-public-status][data-ticket-id="${payload.ticket_id}"]`).forEach((node) => {
+    if (payload.ticket_public_status) {
+      node.textContent = `Client: ${payload.ticket_public_status}`;
+    }
+  });
+}
+
+function initializeRealtimeUpdates() {
+  if (!window.EventSource || !document.querySelector("[data-realtime-status]")) {
+    setRealtimeState("offline", "Hors ligne");
+    return;
+  }
+  const storageKey = "afrilux-realtime-last-id";
+  const lastId = localStorage.getItem(storageKey) || "0";
+  const source = new EventSource(`/events/?last_id=${encodeURIComponent(lastId)}`);
+  const currentTicketNode = document.querySelector("[data-ticket-detail-id]");
+  let reloadScheduled = false;
+
+  source.addEventListener("open", () => {
+    setRealtimeState("online", "Temps reel actif");
+  });
+
+  source.addEventListener("connected", (event) => {
+    setRealtimeState("online", "Temps reel actif");
+    try {
+      const payload = JSON.parse(event.data || "{}");
+      if (payload.last_id) {
+        localStorage.setItem(storageKey, String(payload.last_id));
+      }
+    } catch (_error) {
+      // Ignore malformed connection pings.
+    }
+  });
+
+  source.addEventListener("notification", (event) => {
+    setRealtimeState("online", "Temps reel actif");
+    let payload = null;
+    try {
+      payload = JSON.parse(event.data || "{}");
+    } catch (_error) {
+      return;
+    }
+    if (payload.id) {
+      localStorage.setItem(storageKey, String(payload.id));
+    }
+    updateTicketBadges(payload);
+    showRealtimeToast(payload);
+    if (
+      currentTicketNode
+      && String(currentTicketNode.dataset.ticketDetailId) === String(payload.ticket_id)
+      && !reloadScheduled
+    ) {
+      reloadScheduled = true;
+      setTimeout(() => window.location.reload(), 900);
+    }
+  });
+
+  source.addEventListener("error", () => {
+    setRealtimeState(navigator.onLine ? "reconnecting" : "offline", navigator.onLine ? "Reconnexion" : "Hors ligne");
+  });
+
+  window.addEventListener("offline", () => setRealtimeState("offline", "Hors ligne"));
+  window.addEventListener("online", () => setRealtimeState("reconnecting", "Reconnexion"));
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   registerServiceWorker();
   fadeFlashes();
@@ -600,4 +730,5 @@ document.addEventListener("DOMContentLoaded", () => {
   initializeMaintenanceProgramBuilder();
   initializeSupportChat();
   initializeOfflineDrafts();
+  initializeRealtimeUpdates();
 });

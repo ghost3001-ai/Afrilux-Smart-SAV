@@ -11,7 +11,7 @@
         <div class="chip-row">
             <span class="badge badge--accent">Maintenance</span>
             <span class="badge badge--{{ maintenance_ticket.status|badge_tone }}">{{ maintenance_ticket.get_status_display }}</span>
-            <span class="badge badge--neutral">{{ maintenance_ticket.scheduled_date|date:"d/m/Y" }}</span>
+            <span class="badge badge--neutral">{{ maintenance_ticket.scheduled_date|date:"d/m/Y H:i" }}</span>
         </div>
     </div>
 </section>
@@ -24,7 +24,7 @@
         </div>
         <dl class="detail-grid">
             <div><dt>Client</dt><dd>{{ maintenance_ticket.client }}</dd></div>
-            <div><dt>Technicien</dt><dd>{{ maintenance_ticket.technician }}</dd></div>
+            <div><dt>Equipe technique</dt><dd>{{ maintenance_ticket.technician_team_label }}</dd></div>
             <div><dt>Service</dt><dd>{{ maintenance_ticket.get_service_display }}</dd></div>
             <div><dt>Periodicite</dt><dd>{{ maintenance_ticket.get_periodicity_display }}</dd></div>
             <div class="detail-grid__full"><dt>Localisation</dt><dd>{{ maintenance_ticket.location|default:"Non renseignee" }}</dd></div>

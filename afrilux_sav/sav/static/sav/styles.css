@@ -78,6 +78,19 @@ body::before {
     z-index: 0;
 }
 
+body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image: url("images/afrilux-smart-solutions-logo.jpeg");
+    background-repeat: repeat;
+    background-size: 260px auto;
+    background-position: center;
+    opacity: 0.028;
+    pointer-events: none;
+    z-index: 0;
+}
+
 a {
     color: inherit;
     text-decoration: none;
@@ -217,6 +230,30 @@ body[data-theme="dark"] .brand__logo-wrap {
     color: var(--text);
     transform: translateY(-1px);
 }
+
+.realtime-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--stroke);
+    color: var(--muted);
+    font-size: 0.82rem;
+    font-weight: 700;
+    background: var(--surface);
+}
+
+.realtime-status__dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+    background: var(--critical);
+}
+
+.realtime-status--online .realtime-status__dot { background: var(--success); }
+.realtime-status--reconnecting .realtime-status__dot { background: var(--warning); }
+.realtime-status--offline .realtime-status__dot { background: var(--critical); }
 
 .nav__logout-form {
     margin: 0;
@@ -733,6 +770,28 @@ textarea:focus-visible,
     grid-template-columns: 1fr auto;
 }
 
+.workflow-card {
+    margin-bottom: 24px;
+}
+
+.workflow-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+}
+
+.workflow-grid > .form-grid {
+    align-content: start;
+    padding: 16px;
+    border: 1px solid var(--stroke);
+    border-radius: 18px;
+    background: var(--surface-strong);
+}
+
+.workflow-grid__wide {
+    grid-column: 1 / -1;
+}
+
 .field {
     display: grid;
     gap: 8px;
@@ -888,19 +947,23 @@ textarea {
     background: rgba(255, 255, 255, 0.66);
 }
 
-.table {
+.table,
+.responsive-table table {
     width: 100%;
     border-collapse: collapse;
 }
 
 .table th,
-.table td {
+.table td,
+.responsive-table th,
+.responsive-table td {
     padding: 14px 12px;
     border-bottom: 1px solid rgba(29, 42, 56, 0.08);
     text-align: left;
 }
 
-.table th {
+.table th,
+.responsive-table th {
     font-size: 0.78rem;
     font-weight: 700;
     text-transform: uppercase;
@@ -909,8 +972,42 @@ textarea {
     background: rgba(245, 239, 231, 0.78);
 }
 
-.table tbody tr:hover td {
+.table tbody tr:hover td,
+.responsive-table tbody tr:hover td {
     background: rgba(181, 118, 67, 0.05);
+}
+
+.responsive-table {
+    overflow-x: auto;
+    border: 1px solid var(--stroke);
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.66);
+}
+
+.realtime-toast-stack {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 50;
+    display: grid;
+    gap: 10px;
+    max-width: min(360px, calc(100vw - 32px));
+}
+
+.realtime-toast {
+    display: grid;
+    gap: 4px;
+    padding: 14px 16px;
+    border: 1px solid var(--stroke);
+    border-radius: 18px;
+    background: var(--card-strong);
+    box-shadow: var(--shadow-tight);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.realtime-toast span {
+    color: var(--muted);
+    font-size: 0.9rem;
 }
 
 .notification-card--active {
@@ -1109,6 +1206,7 @@ textarea {
     .chart-grid,
     .planning-grid,
     .planning-columns,
+    .workflow-grid,
     .admin-summary {
         grid-template-columns: 1fr;
     }

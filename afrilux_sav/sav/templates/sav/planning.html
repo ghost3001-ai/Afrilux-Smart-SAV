@@ -1,19 +1,19 @@
 {% extends "sav/base.html" %}
 {% load sav_extras %}
 
-{% block title %}Planning Equipes | Afrilux SAV{% endblock %}
+{% block title %}Planification equipes | Afrilux SAV{% endblock %}
 
 {% block content %}
 <section class="hero">
     <div>
-        <p class="eyebrow">Planning des equipes</p>
+        <p class="eyebrow">Planification des equipes</p>
         <h1>Semaine du {{ week_start|date:"d/m/Y" }} au {{ week_end|date:"d/m/Y" }}</h1>
         <p class="hero__lead">
             Affectez les tickets ouverts par glisser-deposer et suivez le calendrier hebdomadaire des interventions par agent operationnel.
         </p>
     </div>
     <div class="hero__actions">
-        <a class="button button--ghost" href="{% url 'ticket-list' %}?assignment=unassigned">Tickets non assignes</a>
+        <a class="button button--ghost" href="{% url 'ticket-list' %}?assignment=unassigned">Dossiers non assignes</a>
         <a class="button button--primary" href="{% url 'reporting-page' %}">Voir le reporting</a>
     </div>
 </section>
@@ -23,7 +23,7 @@
         <div class="section-head">
             <div>
                 <p class="eyebrow">Backlog</p>
-                <h2>Tickets a affecter</h2>
+                <h2>Dossiers a affecter</h2>
             </div>
             <span class="badge badge--warning">{{ unassigned_tickets|length }}</span>
         </div>
@@ -91,7 +91,7 @@
                                     <div class="planning-day__item">
                                         <strong>MAINT-{{ item.id }} - {{ item.title }}</strong>
                                         <p>{{ item.client }}</p>
-                                        <small>Maintenance - {{ item.get_status_display }}</small>
+                                        <small>Maintenance · {{ item.get_status_display }}</small>
                                     </div>
                                 {% endfor %}
                                 {% if not row.items and not row.maintenance_items %}

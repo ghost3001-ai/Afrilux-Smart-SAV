@@ -10,11 +10,12 @@ Suite SAV complete avec:
 
 ## Fonctionnalites livrees
 
-- tickets SAV avec SLA, priorites, affectation et historique omnicanal
+- dossiers SAV avec SLA, priorites, affectation et historique omnicanal
+- flux SAV avance: assignation, planification, validation client debut/fin, cloture PDF, escalade et intervention en equipe
 - resolution agentique via OpenAI sur l'endpoint `/api/tickets/<id>/agentic_resolution/`
 - maintenance predictive et creation de tickets preventifs
 - support visio / AR, interventions terrain, assistant support IA et base de connaissances
-- notifications in-app, push Flutter, email, SMS et WhatsApp
+- notifications in-app temps reel, push Flutter, email, SMS et WhatsApp
 - offres commerciales contextuelles et BI conversationnelle
 - filtres tickets urgents / fraude suspectee
 - suivi BI des reclamations, temps moyen de premiere reponse, temps moyen de resolution et agents performants
@@ -28,19 +29,30 @@ Suite SAV complete avec:
 - audit complet des actions humaines et IA
 - exploitation locale/serveur avec PostgreSQL, Redis, Docker et sauvegarde horodatee
 
+## Mode d'emploi complet
+
+Le guide d'exploitation complet est disponible ici:
+
+- [Mode d'emploi complet AFRILUX Smart SAV](docs/Mode_Emploi_Complet_Afrilux_SAV.md)
+
+Il couvre notamment l'integration email SMTP, SMS Twilio, WhatsApp Twilio, les webhooks entrants, les tests, le processus ticket, la maintenance planifiee, les equipes, les validations client et le depannage.
+
 ## Alignement CDC AFRILUX
 
-Le projet est maintenant aligne sur les points centraux du cahier des charges AFRILUX v2:
+Le projet est maintenant aligne sur les points centraux du cahier des charges AFRILUX v3 et le processus SAV avance:
 
 - roles AFRILUX: Administrateur, Responsable SAV, Technicien, Agent support / Hotliner, Client, Auditeur / Direction
-- cycle ticket CDC: `new` -> `assigned` -> `in_progress` -> `waiting` -> `resolved` -> `closed` / `cancelled`
+- cycle dossier SAV: creation client en `pending_assignment` visible au client comme `Nouveau`, assignation responsable, planification ou demarrage, validation client debut, intervention, validation client fin, formulaire de cloture et PDF final
+- escalade responsable: aide responsable, reassignation ou solution, retour au statut precedent, blocage direction apres 3 escalades
+- intervention en equipe: chef d'equipe, membres, permissions differenciees et rapport collectif
+- visibilite client simplifiee: `Nouveau` avant assignation, puis `Assigne`, `Planifie`, `En cours`, `Termine`
 - numerotation ticket `ASS-SAV-MM-YYYY-NNNNN`
 - priorites et SLA CDC: 30 min / 2 h, 1 h / 4 h, 2 h / 8 h, 4 h / 24 h
 - rapports journaliers, hebdomadaires et mensuels exportables
-- planning technicien web + API, validation client, auto-cloture 72 h et webhook email entrant
-- dashboard web temps reel avec heatmap, courbes 7j / 30j / 12 mois et classement techniciens
+- planification technicien web + API, validations client debut/fin, cloture PDF et webhook email entrant
+- tableau de bord web temps reel avec SSE, heatmap, courbes 7j / 30j / 12 mois et classement techniciens
 - centre d'administration web pour utilisateurs, SLA, categories, audit et rapports archives
-- bon d'intervention PDF envoye automatiquement au technicien a l'affectation
+- rapports PDF avec logo AFRILUX / motif AS, signature client, photos et temps calcule automatiquement
 
 ## Backend Django
 
@@ -50,9 +62,9 @@ Demarrage Linux/macOS ou shell Render:
 
 ```bash
 cd afrilux_sav
-python3 manage.py migrate
-python3 manage.py purge_demo_data --execute
-python3 manage.py bootstrap_platform \
+python manage.py migrate
+python manage.py purge_demo_data --execute
+python manage.py bootstrap_platform \
   --organization-name="AFRILUX SMART SOLUTIONS" \
   --organization-slug=afrilux-smart \
   --support-email=siege@afriluxsa.local \
@@ -61,8 +73,8 @@ python3 manage.py bootstrap_platform \
   --country=Cameroun \
   --admin-username=aziz \
   --admin-email=admin@afrilux.local \
-  --admin-password='ChangeMe123!'
-python3 manage.py runserver
+  --admin-password='Charlotte2.0'
+python manage.py runserver
 ```
 
 Demarrage Windows PowerShell depuis la racine du depot:
@@ -79,7 +91,7 @@ python afrilux_sav\manage.py bootstrap_platform `
   --country Cameroun `
   --admin-username aziz `
   --admin-email admin@afrilux.local `
-  --admin-password "ChangeMe123!"
+  --admin-password "Charlotte2.0"
 python afrilux_sav\manage.py runserver
 ```
 
@@ -186,6 +198,14 @@ Twilio:
 - `TWILIO_SMS_FROM`
 - `TWILIO_WHATSAPP_FROM`
 - `TWILIO_STATUS_CALLBACK_URL`
+
+Pour recevoir les notifications par email ou WhatsApp:
+
+- renseigner l'email du client/technicien/responsable dans son profil utilisateur
+- configurer `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `DEFAULT_FROM_EMAIL`
+- renseigner le telephone au format international, par exemple `+237...`
+- configurer `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` et `TWILIO_WHATSAPP_FROM`
+- le systeme envoie alors in-app + email + WhatsApp lorsque le canal est disponible
 
 Firebase push:
 

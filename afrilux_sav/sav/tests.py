@@ -13,6 +13,7 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from .comms import create_external_channel_notifications
 from .forms import TicketCreateForm
 from .models import (
     AccountCredit,
@@ -703,6 +704,45 @@ class SavPlatformTests(TestCase):
                 status=Notification.STATUS_SENT,
             ).exists()
         )
+
+    @override_settings(
+        EMAIL_HOST="smtp.test.local",
+        DEFAULT_FROM_EMAIL="noreply@afrilux.test",
+        TWILIO_ACCOUNT_SID="AC123",
+        TWILIO_AUTH_TOKEN="secret",
+        TWILIO_WHATSAPP_FROM="whatsapp:+15551230000",
+        TWILIO_SMS_FROM="",
+    )
+    def test_external_notification_creates_email_and_whatsapp_channels(self):
+        self.client_user.email = "client@example.com"
+        self.client_user.phone = "+237691674993"
+        self.client_user.save(update_fields=["email", "phone"])
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            assigned_agent=self.agent,
+            title="Notification multicanal",
+            description="Ticket cible pour notification email et WhatsApp.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            status=Ticket.STATUS_IN_PROGRESS,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+
+        with patch("sav.comms.deliver_notification") as deliver:
+            notifications = create_external_channel_notifications(
+                recipient=self.client_user,
+                ticket=ticket,
+                event_type="ticket_update",
+                subject="Mise a jour SAV",
+                message="Votre dossier SAV a ete mis a jour.",
+            )
+
+        channels = {notification.channel for notification in notifications}
+        self.assertIn(Notification.CHANNEL_IN_APP, channels)
+        self.assertIn(Notification.CHANNEL_EMAIL, channels)
+        self.assertIn(Notification.CHANNEL_WHATSAPP, channels)
+        self.assertNotIn(Notification.CHANNEL_SMS, channels)
+        self.assertEqual(deliver.call_count, len(notifications))
 
     def test_admin_can_credit_account_via_api(self):
         admin_user = User.objects.create_user(
@@ -1434,6 +1474,87 @@ class SavPlatformTests(TestCase):
         self.assertEqual(ticket.status, Ticket.STATUS_CLOSED)
         self.assertIsNotNone(ticket.closed_at)
 
+    def test_client_validates_intervention_start_and_finish(self):
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            assigned_agent=self.agent,
+            title="Validation debut fin",
+            description="Le client valide le debut puis la fin de l'intervention.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            status=Ticket.STATUS_ASSIGNED,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+        TicketAssignment.objects.create(
+            ticket=ticket,
+            technician=self.agent,
+            assigned_by=self.manager,
+            status=TicketAssignment.STATUS_ACTIVE,
+        )
+        Intervention.objects.create(
+            organization=self.organization,
+            ticket=ticket,
+            agent=self.agent,
+            intervention_type=Intervention.TYPE_ON_SITE,
+            status=Intervention.STATUS_PLANNED,
+            action_taken="Intervention a valider par le client.",
+        )
+
+        self.api.force_authenticate(user=self.agent)
+        start_request = self.api.post(reverse("sav_api:ticket-request-start", args=[ticket.pk]), {})
+        ticket.refresh_from_db()
+        self.assertEqual(start_request.status_code, 200)
+        self.assertEqual(ticket.status, Ticket.STATUS_START_REQUESTED)
+
+        self.api.force_authenticate(user=self.client_user)
+        start_validation = self.api.post(reverse("sav_api:ticket-validate-start", args=[ticket.pk]), {})
+        ticket.refresh_from_db()
+        intervention = ticket.interventions.order_by("-created_at").first()
+        self.assertEqual(start_validation.status_code, 200)
+        self.assertEqual(ticket.status, Ticket.STATUS_IN_PROGRESS)
+        self.assertIsNotNone(intervention.client_validated_start_at)
+        self.assertEqual(intervention.started_at, intervention.client_validated_start_at)
+
+        self.api.force_authenticate(user=self.agent)
+        finish_request = self.api.post(reverse("sav_api:ticket-request-finish", args=[ticket.pk]), {})
+        ticket.refresh_from_db()
+        self.assertEqual(finish_request.status_code, 200)
+        self.assertEqual(ticket.status, Ticket.STATUS_FINISH_REQUESTED)
+
+        self.api.force_authenticate(user=self.client_user)
+        finish_validation = self.api.post(reverse("sav_api:ticket-validate-finish", args=[ticket.pk]), {})
+        ticket.refresh_from_db()
+        intervention.refresh_from_db()
+        self.assertEqual(finish_validation.status_code, 200)
+        self.assertEqual(ticket.status, Ticket.STATUS_DONE)
+        self.assertIsNotNone(intervention.client_validated_finish_at)
+        self.assertEqual(intervention.finished_at, intervention.client_validated_finish_at)
+        self.assertIsNotNone(intervention.time_spent_minutes)
+
+        signature = SimpleUploadedFile("signature.png", b"fake-signature", content_type="image/png")
+        photo = SimpleUploadedFile("intervention.png", b"fake-photo", content_type="image/png")
+        self.api.force_authenticate(user=self.agent)
+        close_response = self.api.post(
+            reverse("sav_api:ticket-close-dossier", args=[ticket.pk]),
+            {
+                "diagnosis": "Alimentation defectueuse.",
+                "action_taken": "Remplacement et tests de fonctionnement.",
+                "parts": json.dumps([{"designation": "Bloc alimentation", "quantity": 1}]),
+                "client_name": "Client Test",
+                "signature": signature,
+                "photos": photo,
+            },
+            format="multipart",
+        )
+        ticket.refresh_from_db()
+        intervention.refresh_from_db()
+
+        self.assertEqual(close_response.status_code, 200)
+        self.assertEqual(ticket.status, Ticket.STATUS_CLOSED)
+        self.assertTrue(intervention.report_pdf)
+        self.assertTrue(intervention.client_signature_file)
+        self.assertTrue(intervention.media.exists())
+
     def test_auditor_cannot_create_ticket_via_api(self):
         self.api.force_authenticate(user=self.auditor)
 
@@ -1794,13 +1915,103 @@ class SavPlatformTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(
-            Ticket.objects.filter(
-                title="Demande portail web",
-                client=self.client_user,
-                product_label="Split mural 12000 BTU",
-            ).exists()
+        created_ticket = Ticket.objects.get(
+            title="Demande portail web",
+            client=self.client_user,
+            product_label="Split mural 12000 BTU",
         )
+        self.assertRedirects(response, reverse("ticket-detail", args=[created_ticket.pk]))
+        self.assertEqual(
+            created_ticket.status,
+            Ticket.STATUS_PENDING_ASSIGNMENT,
+        )
+
+    def test_client_can_follow_pending_assignment_ticket_detail(self):
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            created_by=self.client_user,
+            title="Demande en attente",
+            description="Ticket cree par le client en attente d'assignation.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            channel=Ticket.CHANNEL_WEB,
+            status=Ticket.STATUS_PENDING_ASSIGNMENT,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+        self.client.force_login(self.client_user)
+
+        response = self.client.get(reverse("ticket-detail", args=[ticket.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Nouveau")
+        self.assertContains(response, ticket.reference)
+
+    def test_client_sees_pending_assignment_ticket_in_api_followup(self):
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            created_by=self.client_user,
+            title="Demande API en attente",
+            description="Ticket visible au client avant assignation.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            channel=Ticket.CHANNEL_WEB,
+            status=Ticket.STATUS_PENDING_ASSIGNMENT,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+        self.api.force_authenticate(user=self.client_user)
+
+        detail_response = self.api.get(reverse("sav_api:ticket-detail", args=[ticket.pk]))
+        list_response = self.api.get(reverse("sav_api:ticket-list"))
+
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_response.data["public_status"], "Nouveau")
+        payload = list_response.data["results"] if isinstance(list_response.data, dict) and "results" in list_response.data else list_response.data
+        self.assertIn(ticket.reference, {item["reference"] for item in payload})
+
+    def test_client_can_create_and_follow_ticket_via_api(self):
+        self.api.force_authenticate(user=self.client_user)
+
+        response = self.api.post(
+            reverse("sav_api:ticket-list"),
+            {
+                "product_label": "Onduleur bureau accueil",
+                "title": "Demande API client",
+                "description": "Le client cree une demande depuis une application connectee.",
+                "category": Ticket.CATEGORY_BREAKDOWN,
+                "channel": Ticket.CHANNEL_API,
+                "priority": Ticket.PRIORITY_HIGH,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        ticket = Ticket.objects.get(title="Demande API client")
+        self.assertEqual(ticket.client, self.client_user)
+        self.assertEqual(ticket.status, Ticket.STATUS_PENDING_ASSIGNMENT)
+        self.assertEqual(ticket.priority, Ticket.PRIORITY_NORMAL)
+        self.assertEqual(response.data["public_status"], "Nouveau")
+
+        detail_response = self.api.get(reverse("sav_api:ticket-detail", args=[ticket.pk]))
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_response.data["reference"], ticket.reference)
+
+    def test_technician_does_not_see_client_pending_assignment_ticket(self):
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            created_by=self.client_user,
+            title="Demande cachee technicien",
+            description="Ticket client non encore assigne.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            channel=Ticket.CHANNEL_WEB,
+            status=Ticket.STATUS_PENDING_ASSIGNMENT,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+        self.api.force_authenticate(user=self.agent)
+
+        detail_response = self.api.get(reverse("sav_api:ticket-detail", args=[ticket.pk]))
+        list_response = self.api.get(reverse("sav_api:ticket-list"))
+
+        self.assertEqual(detail_response.status_code, 404)
+        payload = list_response.data["results"] if isinstance(list_response.data, dict) and "results" in list_response.data else list_response.data
+        self.assertNotIn(ticket.reference, {item["reference"] for item in payload})
 
     def test_ticket_create_form_shows_client_field_for_client_user(self):
         form = TicketCreateForm(user=self.client_user)
@@ -2503,6 +2714,37 @@ class SavPlatformTests(TestCase):
         intervention = ticket.interventions.get(agent=self.agent)
         self.assertTrue(bool(intervention.report_pdf))
 
+    def test_assign_team_creates_collective_intervention_context(self):
+        member = User.objects.create_user(
+            username="team_member",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_TECHNICIAN,
+        )
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            title="Intervention collective",
+            description="Le dossier doit etre traite par une equipe.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            status=Ticket.STATUS_PENDING_ASSIGNMENT,
+            priority=Ticket.PRIORITY_HIGH,
+        )
+
+        response = self.api.post(
+            reverse("sav_api:ticket-assign-team", args=[ticket.pk]),
+            {"team_leader": self.technician.pk, "team_members": [member.pk]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        ticket.refresh_from_db()
+        self.assertTrue(ticket.is_team_intervention)
+        self.assertEqual(ticket.team_leader, self.technician)
+        self.assertEqual(ticket.assigned_agent, self.technician)
+        self.assertEqual(ticket.status, Ticket.STATUS_TEAM_READY)
+        self.assertEqual(list(ticket.team_members.all()), [member])
+
     def test_ticket_reference_uses_cdc_format(self):
         ticket = Ticket.objects.create(
             client=self.client_user,
@@ -2755,6 +2997,61 @@ class SavPlatformTests(TestCase):
         self.assertEqual(maintenance_ticket.status, MaintenanceTicket.STATUS_PLANNED)
         self.assertEqual(maintenance_ticket.technician, self.technician)
         self.assertEqual(list(maintenance_ticket.products.all()), [self.product])
+
+    def test_maintenance_program_publish_creates_team_ticket_with_datetime(self):
+        teammate = User.objects.create_user(
+            username="maintenance_member",
+            password="MemberPass123!",
+            role=User.ROLE_TECHNICIAN,
+            organization=self.organization,
+            is_active=True,
+        )
+        scheduled_at = (timezone.localtime(timezone.now()) + timedelta(days=2)).replace(
+            hour=15,
+            minute=45,
+            second=0,
+            microsecond=0,
+        )
+        program = MaintenanceProgram.objects.create(
+            organization=self.organization,
+            responsible=self.manager,
+            service=MaintenanceProgram.SERVICE_IT,
+            period_type=MaintenanceProgram.PERIOD_MONTHLY,
+            month=timezone.localdate().month,
+            year=timezone.localdate().year,
+            task_lines=[
+                {
+                    "title": "Maintenance collective salle reseau",
+                    "technician_ids": [self.technician.pk, teammate.pk],
+                    "client_id": self.client_user.pk,
+                    "product_ids": [self.product.pk],
+                    "scheduled_date": scheduled_at.isoformat(timespec="minutes"),
+                    "periodicity": MaintenanceTicket.PERIOD_MONTHLY,
+                    "checklist": ["Controle visuel", "Test alimentation"],
+                    "instructions": "Intervention avec chef et membre.",
+                    "priority": Ticket.PRIORITY_NORMAL,
+                }
+            ],
+        )
+
+        response = self.api.post(reverse("sav_api:maintenance-program-publier", args=[program.pk]), {}, format="json")
+
+        self.assertEqual(response.status_code, 201)
+        maintenance_ticket = MaintenanceTicket.objects.get(program=program)
+        self.assertEqual(maintenance_ticket.technician, self.technician)
+        self.assertEqual(list(maintenance_ticket.team_members.all()), [teammate])
+        self.assertEqual(timezone.localtime(maintenance_ticket.scheduled_date).hour, 15)
+        self.assertEqual(timezone.localtime(maintenance_ticket.scheduled_date).minute, 45)
+        self.assertIn(str(teammate), maintenance_ticket.technician_team_label)
+
+        self.api.force_authenticate(user=teammate)
+        detail_response = self.api.get(reverse("sav_api:maintenance-ticket-detail", args=[maintenance_ticket.pk]))
+        self.assertEqual(detail_response.status_code, 200)
+
+        start_response = self.api.post(reverse("sav_api:maintenance-ticket-demarrer", args=[maintenance_ticket.pk]), {})
+        self.assertEqual(start_response.status_code, 200)
+        maintenance_ticket.refresh_from_db()
+        self.assertEqual(maintenance_ticket.status, MaintenanceTicket.STATUS_IN_PROGRESS)
 
     def test_maintenance_closure_with_anomaly_generates_incident_ticket(self):
         maintenance_ticket = MaintenanceTicket.objects.create(

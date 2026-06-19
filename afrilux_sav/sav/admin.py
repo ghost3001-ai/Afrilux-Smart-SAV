@@ -349,10 +349,21 @@ class MaintenanceProgramAdmin(admin.ModelAdmin):
 
 @admin.register(MaintenanceTicket)
 class MaintenanceTicketAdmin(admin.ModelAdmin):
-    list_display = ("title", "organization", "client", "technician", "service", "scheduled_date", "status", "priority")
+    list_display = ("title", "organization", "client", "technician_team_display", "service", "scheduled_date", "status", "priority")
     list_filter = ("organization", "service", "status", "priority", "scheduled_date")
-    search_fields = ("title", "client__username", "client__company_name", "technician__username", "location")
-    filter_horizontal = ("products",)
+    search_fields = (
+        "title",
+        "client__username",
+        "client__company_name",
+        "technician__username",
+        "team_members__username",
+        "location",
+    )
+    filter_horizontal = ("products", "team_members")
+
+    @admin.display(description="Equipe technique")
+    def technician_team_display(self, obj):
+        return obj.technician_team_label
 
 
 @admin.register(MaintenanceReport)

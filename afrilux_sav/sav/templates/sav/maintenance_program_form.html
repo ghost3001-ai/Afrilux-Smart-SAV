@@ -22,15 +22,36 @@
             <span>Intitule de la tache</span>
             <input type="text" data-maintenance-field="title" placeholder="Entretien climatiseur salle serveurs">
         </label>
-        <label class="field">
-            <span>Technicien assigne</span>
-            <select data-maintenance-field="technician_id">
-                <option value="">Choisir un technicien</option>
-                {% for technician in maintenance_technicians %}
-                    <option value="{{ technician.id }}">#{{ technician.id }} - {{ technician }}</option>
-                {% endfor %}
-            </select>
-        </label>
+        <div class="field field--full">
+            <span>Equipe technique</span>
+            <div class="table-wrap">
+                <table class="table table--compact">
+                    <thead>
+                        <tr>
+                            <th>Technicien</th>
+                            <th>Fonction</th>
+                            <th>Chef</th>
+                            <th>Membre</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for technician in maintenance_technicians %}
+                            <tr>
+                                <td>#{{ technician.id }} - {{ technician }}</td>
+                                <td>{{ technician.get_role_display }}</td>
+                                <td><input type="radio" name="maintenance_team_leader" value="{{ technician.id }}" data-maintenance-leader></td>
+                                <td><input type="checkbox" value="{{ technician.id }}" data-maintenance-member></td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="4">Aucun technicien disponible.</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <small class="field__help">Choisissez un chef et, si besoin, un ou plusieurs membres. Le chef sera le technicien principal de la maintenance.</small>
+        </div>
         <label class="field">
             <span>Client / site concerne</span>
             <select data-maintenance-field="client_id">
@@ -41,8 +62,8 @@
             </select>
         </label>
         <label class="field">
-            <span>Date d'echeance prevue</span>
-            <input type="date" data-maintenance-field="scheduled_date">
+            <span>Date et heure prevues</span>
+            <input type="datetime-local" data-maintenance-field="scheduled_date">
         </label>
         <label class="field">
             <span>Periodicite</span>
@@ -87,7 +108,7 @@
     <article class="card">
         <div class="section-head">
             <p class="eyebrow">Techniciens</p>
-            <h2>IDs assignables</h2>
+            <h2>Identifiants assignables</h2>
         </div>
         {% for technician in maintenance_technicians %}
             <div class="list-row">
@@ -101,7 +122,7 @@
     <article class="card">
         <div class="section-head">
             <p class="eyebrow">Clients</p>
-            <h2>IDs clients</h2>
+            <h2>Identifiants clients</h2>
         </div>
         {% for client in maintenance_clients %}
             <div class="list-row">
@@ -115,7 +136,7 @@
     <article class="card">
         <div class="section-head">
             <p class="eyebrow">Equipements</p>
-            <h2>IDs produits</h2>
+            <h2>Identifiants produits</h2>
         </div>
         {% for product in maintenance_products %}
             <div class="list-row">

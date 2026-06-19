@@ -1,12 +1,12 @@
 {% extends "sav/base.html" %}
 {% load sav_extras %}
 
-{% block title %}Support | Afrilux SAV{% endblock %}
+{% block title %}Assistance | Afrilux SAV{% endblock %}
 
 {% block content %}
 <section class="hero">
     <div>
-        <p class="eyebrow">Support client</p>
+        <p class="eyebrow">Assistance client</p>
         <h1>Discutez avec le support avant meme d'ouvrir un dossier.</h1>
         <p class="hero__lead">
             Utilisez le chat SAV pour decrire l'incident, obtenir une premiere analyse et basculer en ticket avec vos preuves si besoin.
@@ -68,7 +68,7 @@
             </label>
             <div class="form-actions">
                 <button class="button button--primary" type="submit">Envoyer</button>
-                <small class="muted">Le chat utilise l'assistant support de l'API et peut proposer un brouillon de ticket.</small>
+                <small class="muted">Le chat utilise l'assistant SAV et peut proposer un brouillon de ticket.</small>
             </div>
         </form>
     </article>
@@ -77,7 +77,7 @@
         <div class="section-head">
             <div>
                 <p class="eyebrow">Dossiers</p>
-                <h2>Tickets recents</h2>
+                <h2>Dossiers recents</h2>
             </div>
         </div>
         {% for ticket in recent_tickets %}

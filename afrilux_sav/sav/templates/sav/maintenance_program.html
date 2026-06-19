@@ -10,7 +10,7 @@
         <h1>Programme de maintenance</h1>
     </div>
     <div class="hero__actions">
-        <a class="button button--ghost" href="{% url 'planning-page' %}">Planning</a>
+        <a class="button button--ghost" href="{% url 'planning-page' %}">Planification</a>
         <a class="button button--ghost" href="{{ maintenance_report_export_url }}">Exporter bilan PDF</a>
         <a class="button button--primary" href="{% url 'maintenance-program-create' %}">Nouveau programme</a>
     </div>
@@ -71,14 +71,14 @@
 
     <article class="card">
         <div class="section-head">
-            <p class="eyebrow">Pipeline</p>
-            <h2>Tickets planifies</h2>
+            <p class="eyebrow">Suivi</p>
+            <h2>Maintenances planifiees</h2>
         </div>
         {% for item in planned_tickets %}
             <div class="list-row">
                 <div>
                     <strong>{{ item.title }}</strong>
-                    <p>{{ item.client }} · {{ item.technician }} · {{ item.scheduled_date|date:"d/m/Y" }}</p>
+                    <p>{{ item.client }} - {{ item.technician_team_label }} - {{ item.scheduled_date|date:"d/m/Y H:i" }}</p>
                 </div>
                 <div class="list-row__stats">
                     <span class="badge badge--accent">Maintenance</span>
@@ -107,7 +107,7 @@
                 <tr>
                     <th>Tache</th>
                     <th>Client</th>
-                    <th>Technicien</th>
+                    <th>Equipe technique</th>
                     <th>Statut</th>
                     <th>Incident</th>
                 </tr>
@@ -117,7 +117,7 @@
                     <tr>
                         <td>{{ item.title }}</td>
                         <td>{{ item.client }}</td>
-                        <td>{{ item.technician }}</td>
+                        <td>{{ item.technician_team_label }}</td>
                         <td><span class="badge badge--{{ item.status|badge_tone }}">{{ item.get_status_display }}</span></td>
                         <td>
                             {% if item.anomaly_ticket %}<a href="{% url 'ticket-detail' item.anomaly_ticket.pk %}">{{ item.anomaly_ticket.reference }}</a>{% else %}-{% endif %}

@@ -6,12 +6,14 @@ from io import BytesIO
 
 from django.core.files.base import ContentFile
 from django.core.mail import EmailMessage
+from django.contrib.staticfiles import finders
 from django.db import transaction
 from django.db.models import Count, Q
 from django.utils import timezone
 from django.utils.text import slugify
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import Image as ReportLabImage
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from reportlab.lib import colors
 
@@ -63,9 +65,21 @@ LLM_CLIENT = OpenAIResponsesClient()
 
 OPEN_TICKET_STATUSES = [
     Ticket.STATUS_NEW,
+    Ticket.STATUS_PENDING_ASSIGNMENT,
     Ticket.STATUS_ASSIGNED,
+    Ticket.STATUS_TEAM_PENDING,
+    Ticket.STATUS_TEAM_READY,
+    Ticket.STATUS_PLANNING_PROPOSED,
+    Ticket.STATUS_PLANNED,
+    Ticket.STATUS_START_REQUESTED,
     Ticket.STATUS_IN_PROGRESS,
-    Ticket.STATUS_WAITING,
+    Ticket.STATUS_COLLECTIVE_IN_PROGRESS,
+    Ticket.STATUS_WAITING_PART,
+    Ticket.STATUS_ESCALATED,
+    Ticket.STATUS_WAITING_SOLUTION,
+    Ticket.STATUS_FINISH_REQUESTED,
+    Ticket.STATUS_REASSIGN_REQUIRED,
+    Ticket.STATUS_REASSIGNED,
 ]
 
 ESCALATION_PRIORITY_SEQUENCE = [
@@ -209,14 +223,26 @@ def can_create_ticket(user):
 def can_record_ticket_intervention(user, ticket):
     if not user or not user.is_authenticated or is_read_only_user(user):
         return False
-    if user.is_superuser or getattr(user, "role", "") == User.ROLE_HEAD_SAV:
+    if is_manager_user(user):
         return True
     if getattr(user, "role", "") not in set(User.ASSIGNABLE_ROLES):
         return False
     return bool(
         ticket.assigned_agent_id == user.id
+        or ticket.team_leader_id == user.id
+        or ticket.team_members.filter(pk=user.pk).exists()
         or ticket.interventions.filter(agent=user).exists()
     )
+
+
+def can_drive_ticket_workflow(user, ticket):
+    if not can_record_ticket_intervention(user, ticket):
+        return False
+    if is_manager_user(user):
+        return True
+    if ticket.is_team_intervention:
+        return bool(ticket.team_leader_id == user.id)
+    return bool(ticket.assigned_agent_id == user.id)
 
 
 def is_internal_user(user):
@@ -225,6 +251,282 @@ def is_internal_user(user):
         and user.is_authenticated
         and (user.is_superuser or getattr(user, "role", "") in set(User.INTERNAL_ROLES))
     )
+
+
+def push_realtime_update(target_user, payload, *, ticket=None):
+    if not target_user:
+        return None
+    notifications = create_external_channel_notifications(
+        recipient=target_user,
+        event_type=payload.get("event") or payload.get("action_required") or "realtime_update",
+        subject=payload.get("subject", "Mise a jour SAV"),
+        message=payload.get("message", "Une action SAV est disponible."),
+        ticket=ticket,
+    )
+    return notifications[0] if notifications else None
+
+
+def propose_planning(ticket, scheduled_at, actor=None):
+    if not can_drive_ticket_workflow(actor, ticket):
+        raise ValueError("Permissions insuffisantes pour planifier cette intervention.")
+    if ticket.status not in {Ticket.STATUS_ASSIGNED, Ticket.STATUS_TEAM_READY, Ticket.STATUS_PLANNING_PROPOSED}:
+        raise ValueError("La planification est disponible uniquement apres assignation.")
+
+    intervention = (
+        ticket.interventions.filter(status=Intervention.STATUS_PLANNED)
+        .order_by("-created_at")
+        .first()
+    )
+    if not intervention:
+        intervention = Intervention.objects.create(
+            organization=ticket.organization,
+            ticket=ticket,
+            agent=actor,
+            scheduled_for=scheduled_at,
+            status=Intervention.STATUS_PLANNED,
+            action_taken="Planification proposee",
+        )
+    else:
+        intervention.scheduled_for = scheduled_at
+        intervention.save(update_fields=["scheduled_for"])
+
+    ticket.status = Ticket.STATUS_PLANNING_PROPOSED
+    ticket.save(update_fields=["status", "updated_at"])
+
+    push_realtime_update(ticket.client, {
+        "event": "planning_proposed",
+        "ticket_id": ticket.id,
+        "action_required": "validate_planning",
+        "scheduled_at": scheduled_at.isoformat(),
+        "message": f"Le technicien propose une intervention pour le {scheduled_at.strftime('%d/%m/%Y %H:%M')}. Veuillez valider."
+    }, ticket=ticket)
+
+    log_audit_event(actor, "planning_proposed", ticket, {"scheduled_at": str(scheduled_at)})
+    return intervention
+
+
+def confirm_planning(ticket, accepted=True, actor=None):
+    if actor != ticket.client and not is_manager_user(actor):
+        raise ValueError("Seul le client peut valider la planification.")
+    if ticket.status != Ticket.STATUS_PLANNING_PROPOSED:
+        raise ValueError("Aucune proposition de planification n'est en attente.")
+
+    if accepted:
+        ticket.status = Ticket.STATUS_PLANNED
+        msg = "Planification acceptee par le client."
+    else:
+        ticket.status = Ticket.STATUS_ASSIGNED
+        msg = "Planification refusee par le client."
+
+    ticket.save(update_fields=["status", "updated_at"])
+
+    if ticket.assigned_agent:
+        push_realtime_update(ticket.assigned_agent, {
+            "ticket_id": ticket.id,
+            "event": "planning_confirmed",
+            "accepted": accepted,
+            "message": msg
+        }, ticket=ticket)
+
+    log_audit_event(actor, "planning_confirmed", ticket, {"accepted": accepted})
+
+
+def request_start_intervention(ticket, actor=None):
+    if not can_drive_ticket_workflow(actor, ticket):
+        raise ValueError("Seul le technicien assigne peut demarrer l'intervention.")
+    if ticket.status not in {Ticket.STATUS_ASSIGNED, Ticket.STATUS_TEAM_READY, Ticket.STATUS_PLANNED, Ticket.STATUS_WAITING_PART}:
+        raise ValueError("Le debut d'intervention doit etre demande depuis un ticket assigne ou planifie.")
+
+    ticket.status = Ticket.STATUS_START_REQUESTED
+    ticket.save(update_fields=["status", "updated_at"])
+
+    intervention = (
+        ticket.interventions.filter(status=Intervention.STATUS_PLANNED)
+        .order_by("-created_at")
+        .first()
+    )
+    if intervention is None:
+        intervention = Intervention.objects.create(
+            organization=ticket.organization,
+            ticket=ticket,
+            agent=ticket.team_leader or ticket.assigned_agent or actor,
+            intervention_type=Intervention.TYPE_ON_SITE,
+            status=Intervention.STATUS_PLANNED,
+            action_taken="Demande de debut d'intervention",
+            location_snapshot=ticket.location,
+        )
+    intervention.client_validation_requested_at = timezone.now()
+    intervention.save(update_fields=["client_validation_requested_at"])
+
+    push_realtime_update(ticket.client, {
+        "event": "start_requested",
+        "ticket_id": ticket.id,
+        "action_required": "validate_start",
+        "message": "Le technicien est arrive. Veuillez valider le debut de l'intervention."
+    }, ticket=ticket)
+
+    log_audit_event(actor, "start_requested", ticket)
+
+
+def validate_start_intervention(ticket, actor=None, impossible=False, reason="", photo=None):
+    if actor != ticket.client and not (impossible and can_drive_ticket_workflow(actor, ticket)):
+        raise ValueError("Seul le client peut valider le debut.")
+    if ticket.status != Ticket.STATUS_START_REQUESTED:
+        raise ValueError("Aucune validation de debut n'est en attente.")
+
+    intervention = ticket.interventions.filter(
+        status__in=[Intervention.STATUS_PLANNED, Intervention.STATUS_IN_PROGRESS]
+    ).order_by("-client_validation_requested_at", "-created_at").first()
+    if intervention is None:
+        raise ValueError("Aucune intervention planifiee trouvee.")
+
+    now = timezone.now()
+    if impossible:
+        if not reason or not photo:
+            raise ValueError("Motif et photo obligatoires pour contourner la validation client.")
+        intervention.client_validation_impossible = True
+        intervention.validation_impossible_reason = reason
+        intervention.validation_impossible_photo = photo
+        msg = f"Debut valide sans client (Motif: {reason})"
+    else:
+        intervention.client_validated_start_at = now
+        msg = "Debut valide par le client."
+
+    intervention.status = Intervention.STATUS_IN_PROGRESS
+    intervention.started_at = now
+    intervention.save()
+
+    ticket.status = Ticket.STATUS_COLLECTIVE_IN_PROGRESS if ticket.is_team_intervention else Ticket.STATUS_IN_PROGRESS
+    ticket.save(update_fields=["status", "updated_at"])
+
+    if ticket.assigned_agent:
+        push_realtime_update(ticket.assigned_agent, {
+            "ticket_id": ticket.id,
+            "event": "start_validated",
+            "message": msg,
+            "started_at": now.isoformat()
+        }, ticket=ticket)
+    if ticket.team_leader and ticket.team_leader_id != ticket.assigned_agent_id:
+        push_realtime_update(ticket.team_leader, {
+            "ticket_id": ticket.id,
+            "event": "start_validated",
+            "message": msg,
+            "started_at": now.isoformat()
+        }, ticket=ticket)
+
+    log_audit_event(actor, "start_validated", ticket, {"impossible": impossible})
+
+
+def request_finish_intervention(ticket, actor=None):
+    if not can_drive_ticket_workflow(actor, ticket):
+        raise ValueError("Permissions insuffisantes.")
+    if ticket.status not in {Ticket.STATUS_IN_PROGRESS, Ticket.STATUS_COLLECTIVE_IN_PROGRESS}:
+        raise ValueError("Seule une intervention en cours peut etre terminee.")
+
+    ticket.status = Ticket.STATUS_FINISH_REQUESTED
+    ticket.save(update_fields=["status", "updated_at"])
+
+    push_realtime_update(ticket.client, {
+        "event": "finish_requested",
+        "ticket_id": ticket.id,
+        "action_required": "validate_finish",
+        "message": "Le technicien a termine les travaux. Veuillez valider la fin de l'intervention."
+    }, ticket=ticket)
+
+    log_audit_event(actor, "finish_requested", ticket)
+
+
+def validate_finish_intervention(ticket, actor=None, impossible=False, reason="", photo=None):
+    if actor != ticket.client and not (impossible and can_drive_ticket_workflow(actor, ticket)):
+        raise ValueError("Seul le client peut valider la fin.")
+    if ticket.status != Ticket.STATUS_FINISH_REQUESTED:
+        raise ValueError("Aucune validation de fin n'est en attente.")
+
+    intervention = ticket.interventions.filter(status=Intervention.STATUS_IN_PROGRESS).first()
+    if not intervention:
+        raise ValueError("Aucune intervention en cours trouvee.")
+
+    now = timezone.now()
+    if impossible:
+        if not reason or not photo:
+            raise ValueError("Motif et photo obligatoires pour contourner la validation client.")
+        intervention.client_validation_impossible = True
+        intervention.validation_impossible_reason = reason
+        intervention.validation_impossible_photo = photo
+    else:
+        intervention.client_validated_finish_at = now
+
+    intervention.finished_at = now
+    intervention.status = Intervention.STATUS_DONE
+
+    if intervention.started_at:
+        delta = now - intervention.started_at
+        intervention.time_spent_minutes = int(delta.total_seconds() / 60)
+
+    intervention.save()
+
+    ticket.status = Ticket.STATUS_DONE
+    ticket.save(update_fields=["status", "updated_at"])
+
+    if ticket.assigned_agent:
+        push_realtime_update(ticket.assigned_agent, {
+            "ticket_id": ticket.id,
+            "event": "finish_validated",
+            "message": "Fin d'intervention validee.",
+            "finished_at": now.isoformat()
+        }, ticket=ticket)
+    if ticket.team_leader and ticket.team_leader_id != ticket.assigned_agent_id:
+        push_realtime_update(ticket.team_leader, {
+            "ticket_id": ticket.id,
+            "event": "finish_validated",
+            "message": "Fin d'intervention validee.",
+            "finished_at": now.isoformat()
+        }, ticket=ticket)
+
+    log_audit_event(actor, "finish_validated", ticket, {"impossible": impossible})
+
+
+def close_sav_dossier(ticket, diagnosis, action_taken, parts=None, client_name="", signature=None, photos=None, actor=None):
+    if not can_drive_ticket_workflow(actor, ticket):
+        raise ValueError("Seul le technicien responsable ou le chef d'equipe peut fermer le dossier.")
+    if ticket.status != Ticket.STATUS_DONE:
+        raise ValueError("Le dossier doit etre en statut Termine pour etre clos.")
+    if not diagnosis or not action_taken or not client_name or not signature:
+        raise ValueError("Diagnostic, action effectuee, nom client et signature sont obligatoires.")
+
+    intervention = ticket.interventions.filter(status=Intervention.STATUS_DONE).order_by("-finished_at").first()
+    if not intervention:
+        raise ValueError("Aucune intervention terminee trouvee.")
+
+    intervention.diagnosis = diagnosis
+    intervention.action_taken = action_taken
+    if parts:
+        intervention.structured_parts_used = parts
+    intervention.client_signed_by = client_name
+    intervention.client_signed_at = intervention.client_validated_finish_at or intervention.finished_at or timezone.now()
+    if signature:
+        intervention.client_signature_file = signature
+    intervention.save()
+
+    if photos:
+        for photo in photos:
+            InterventionMedia.objects.create(
+                intervention=intervention,
+                file=photo,
+                kind=InterventionMedia.KIND_AFTER,
+                note="Photo de cloture",
+                uploaded_by=actor if getattr(actor, "is_authenticated", False) else None,
+                organization=ticket.organization,
+            )
+
+    ticket.status = Ticket.STATUS_CLOSED
+    ticket.closed_at = timezone.now()
+    ticket.save(update_fields=["status", "closed_at", "updated_at"])
+
+    generate_intervention_pdf(intervention, force=True)
+
+    log_audit_event(actor, "dossier_closed", ticket)
+    return intervention
 
 
 def is_platform_internal_user(user):
@@ -322,6 +624,7 @@ def _apply_maintenance_agency_scope(queryset, user):
         | Q(products__client__agency=user.agency)
         | Q(products__site__agency=user.agency)
         | Q(technician__agency=user.agency)
+        | Q(team_members__agency=user.agency)
         | Q(responsible__agency=user.agency)
     ).distinct()
 
@@ -336,6 +639,24 @@ def can_manage_maintenance(user):
             or getattr(user, "role", "") in set(User.ESCALATION_TARGET_ROLES)
         )
     )
+
+
+def maintenance_team_recipients(maintenance_ticket):
+    recipients = []
+    if getattr(maintenance_ticket, "technician_id", None):
+        recipients.append(maintenance_ticket.technician)
+    recipients.extend(list(maintenance_ticket.team_members.all()))
+    return list({recipient.id: recipient for recipient in recipients if getattr(recipient, "id", None)}.values())
+
+
+def can_act_on_maintenance_ticket(user, maintenance_ticket):
+    if not user or not user.is_authenticated:
+        return False
+    if can_manage_maintenance(user):
+        return True
+    if maintenance_ticket.technician_id == user.id:
+        return True
+    return maintenance_ticket.team_members.filter(pk=user.pk).exists()
 
 
 def role_workspace_name(user):
@@ -423,6 +744,7 @@ def scope_ticket_queryset(queryset, user):
         queryset = _apply_ticket_agency_scope(queryset, user)
         if is_admin_user(user) or getattr(user, "role", "") == User.ROLE_HEAD_SAV:
             return queryset
+        queryset = queryset.exclude(status=Ticket.STATUS_PENDING_ASSIGNMENT)
         if is_support_user(user):
             return queryset.filter(
                 Q(created_by=user)
@@ -621,10 +943,11 @@ def scope_maintenance_program_queryset(queryset, user):
                 | Q(tickets__client__agency=user.agency)
                 | Q(tickets__products__site__agency=user.agency)
                 | Q(tickets__technician__agency=user.agency)
+                | Q(tickets__team_members__agency=user.agency)
             ).distinct()
         return queryset
     if getattr(user, "role", "") in set(User.ASSIGNABLE_ROLES):
-        return queryset.filter(tickets__technician=user).distinct()
+        return queryset.filter(Q(tickets__technician=user) | Q(tickets__team_members=user)).distinct()
     return queryset.none()
 
 
@@ -639,10 +962,11 @@ def scope_maintenance_ticket_queryset(queryset, user):
                 Q(organization=user.organization)
                 | Q(client__organization=user.organization)
                 | Q(technician__organization=user.organization)
+                | Q(team_members__organization=user.organization)
             ).distinct()
         return _apply_maintenance_agency_scope(queryset, user)
     if getattr(user, "role", "") in set(User.ASSIGNABLE_ROLES):
-        return queryset.filter(technician=user)
+        return queryset.filter(Q(technician=user) | Q(team_members=user)).distinct()
     if getattr(user, "role", "") == User.ROLE_CLIENT:
         return queryset.filter(client=user)
     return queryset.none()
@@ -1420,18 +1744,76 @@ def compute_ticket_monthly_series(tickets, months=12):
     return series
 
 
-def compute_technician_status_rows(users):
-    rows = []
-    status_labels = dict(User._meta.get_field("technician_status").choices)
-    for status_code, label in status_labels.items():
-        rows.append(
-            {
-                "status": status_code,
-                "label": label,
-                "total": users.filter(technician_status=status_code).count(),
-            }
-        )
-    return rows
+def compute_technician_availability_rows(organization):
+    technicians = User.objects.filter(
+        organization=organization,
+        role__in=[User.ROLE_TECHNICIAN, User.ROLE_CHIEF_TECHNICIAN, User.ROLE_FIELD_TECHNICIAN],
+        is_active=True
+    )
+
+    dashboard = []
+    now = timezone.now()
+
+    for tech in technicians:
+        active_ticket = Ticket.objects.filter(
+            Q(assigned_agent=tech) | Q(team_leader=tech) | Q(team_members=tech),
+            status__in=[
+                Ticket.STATUS_START_REQUESTED,
+                Ticket.STATUS_IN_PROGRESS,
+                Ticket.STATUS_COLLECTIVE_IN_PROGRESS,
+                Ticket.STATUS_WAITING_PART,
+                Ticket.STATUS_FINISH_REQUESTED,
+            ],
+        ).first()
+
+        status = "available"
+        next_available = None
+        current_ticket_ref = None
+
+        if active_ticket:
+            status = "busy"
+            current_ticket_ref = active_ticket.reference
+            active_intervention = active_ticket.interventions.filter(
+                Q(agent=tech) | Q(agent=active_ticket.team_leader) | Q(agent=active_ticket.assigned_agent)
+            ).order_by("-scheduled_for", "-created_at").first()
+            if active_intervention and active_intervention.finished_at:
+                next_available = active_intervention.finished_at
+            else:
+                next_available = active_ticket.sla_deadline or (now + timedelta(hours=2))
+        elif tech.technician_status in {"on_leave", "unavailable"}:
+            status = "absent"
+        elif tech.technician_status == "on_site":
+            status = "busy"
+            next_available = now + timedelta(hours=2)
+
+        dashboard.append({
+            "id": tech.id,
+            "full_name": str(tech),
+            "technician_name": str(tech),
+            "status": status,
+            "status_label": {"available": "Disponible", "busy": "Occupe", "absent": "Absent"}.get(status, status),
+            "current_ticket": current_ticket_ref,
+            "next_available": next_available.isoformat() if next_available else None,
+            "next_available_at": next_available,
+            "specialties": tech.specialties if hasattr(tech, 'specialties') else []
+        })
+
+    return dashboard
+
+
+def compute_technician_availability_dashboard(organization):
+    rows = compute_technician_availability_rows(organization)
+    labels = {"available": "Disponible", "busy": "Occupe", "absent": "Absent"}
+    return [
+        {
+            "status": status,
+            "label": labels[status],
+            "status_label": labels[status],
+            "total": sum(1 for row in rows if row["status"] == status),
+        }
+        for status in ["available", "busy", "absent"]
+        if any(row["status"] == status for row in rows)
+    ]
 
 
 def parse_reporting_recipients(organization):
@@ -1467,29 +1849,67 @@ def generate_intervention_pdf(intervention, persist=True, force=False):
     buffer = BytesIO()
     document = SimpleDocTemplate(buffer, pagesize=A4)
     styles = getSampleStyleSheet()
-    parts_text = intervention.parts_used or _part_usage_records_summary(intervention.part_usages.select_related("spare_part").all()) or "-"
+
+    parts_text = intervention.parts_used or "-"
+    if intervention.structured_parts_used:
+        formatted_parts = []
+        for part in intervention.structured_parts_used:
+            if not isinstance(part, dict):
+                formatted_parts.append(str(part))
+                continue
+            name = part.get("name") or part.get("designation") or part.get("label") or part.get("reference") or "Piece"
+            quantity = part.get("quantity") or part.get("quantite") or part.get("qty")
+            formatted_parts.append(f"{name} (x{quantity})" if quantity else str(name))
+        parts_text = ", ".join(formatted_parts) or "-"
+
+    team_text = str(intervention.agent)
+    if intervention.ticket.is_team_intervention:
+        members = ", ".join([str(u) for u in intervention.ticket.team_members.all()])
+        team_text = f"Chef: {intervention.ticket.team_leader} | Membres: {members}"
+
+    validation_text = "Valide par client"
+    if intervention.client_validation_impossible:
+        validation_text = f"Bypass: {intervention.validation_impossible_reason}"
+
     data = [
         ["Numero ticket", intervention.ticket.reference],
         ["Client", str(intervention.ticket.client)],
-        ["Technicien", str(intervention.agent)],
+        ["Equipe Intervenante", team_text],
         ["Type", intervention.get_intervention_type_display()],
         ["Statut", intervention.get_status_display()],
-        ["Date prevue", intervention.scheduled_for.strftime("%d/%m/%Y %H:%M") if intervention.scheduled_for else "-"],
+        ["Debut (Valide)", intervention.started_at.strftime("%d/%m/%Y %H:%M") if intervention.started_at else "-"],
+        ["Fin (Valide)", intervention.finished_at.strftime("%d/%m/%Y %H:%M") if intervention.finished_at else "-"],
+        ["Validation", validation_text],
         ["Lieu", intervention.location_snapshot or intervention.ticket.location or "-"],
         ["Diagnostic", intervention.diagnosis or "-"],
         ["Action effectuee", intervention.action_taken or "-"],
         ["Pieces utilisees", parts_text],
-        ["Temps passe", f"{intervention.time_spent_minutes} min"],
-        ["Signature client", intervention.client_signed_by or "-"],
+        ["Temps total calcule", f"{intervention.time_spent_minutes} minutes"],
+        ["Signataire client", intervention.client_signed_by or "-"],
     ]
-    story = [
-        Paragraph("Bon d'intervention AFRILUX SMART SOLUTIONS", styles["Title"]),
-        Spacer(1, 12),
-        Table(data, colWidths=[150, 340]),
-        Spacer(1, 12),
-        Paragraph("Rapport technique", styles["Heading2"]),
-        Paragraph(intervention.technical_report or "Aucun rapport technique saisi.", styles["BodyText"]),
-    ]
+    story = []
+    logo_path = finders.find("sav/images/afrilux-smart-solutions-logo.jpeg")
+    if logo_path:
+        logo = _safe_reportlab_image(logo_path, width=150, height=64)
+        if logo:
+            story.extend([logo, Spacer(1, 8)])
+    story.extend(
+        [
+            Paragraph("Bon d'intervention AFRILUX SMART SOLUTIONS", styles["Title"]),
+            Spacer(1, 12),
+            Table(data, colWidths=[150, 340]),
+            Spacer(1, 12),
+            Paragraph("Rapport technique", styles["Heading2"]),
+            Paragraph(intervention.technical_report or "Aucun rapport technique saisi.", styles["BodyText"]),
+        ]
+    )
+    if intervention.client_signature_file:
+        story.extend([Spacer(1, 12), Paragraph("Signature client", styles["Heading3"])])
+        signature = _safe_reportlab_image(intervention.client_signature_file.path, width=220, height=90)
+        if signature:
+            story.append(signature)
+        else:
+            story.append(Paragraph(intervention.client_signature_file.name.split("/")[-1], styles["BodyText"]))
     media_items = list(intervention.media.all()[:5])
     if media_items:
         story.extend([Spacer(1, 12), Paragraph("Pieces jointes terrain", styles["Heading3"])])
@@ -1507,6 +1927,21 @@ def generate_intervention_pdf(intervention, persist=True, force=False):
             )
         )
         story.append(media_table)
+        for item in media_items:
+            try:
+                lower_name = item.file.name.lower()
+                if lower_name.endswith((".jpg", ".jpeg", ".png")):
+                    image = _safe_reportlab_image(item.file.path, width=220, height=150)
+                    if image:
+                        story.extend(
+                            [
+                                Spacer(1, 8),
+                                Paragraph(item.note or item.get_kind_display(), styles["BodyText"]),
+                                image,
+                            ]
+                        )
+            except Exception:
+                continue
     document.build(story)
     content = buffer.getvalue()
     if persist:
@@ -1515,6 +1950,17 @@ def generate_intervention_pdf(intervention, persist=True, force=False):
         intervention.report_generated_at = timezone.now()
         intervention.save(update_fields=["report_pdf", "report_generated_at"])
     return content
+
+
+def _safe_reportlab_image(path, *, width, height):
+    try:
+        from PIL import Image as PILImage
+
+        with PILImage.open(path) as image:
+            image.verify()
+        return ReportLabImage(path, width=width, height=height)
+    except Exception:
+        return None
 
 
 def generate_maintenance_report_pdf(report, persist=True, force=False):
@@ -1534,10 +1980,11 @@ def generate_maintenance_report_pdf(report, persist=True, force=False):
     data = [
         ["Reference maintenance", f"MAINT-{maintenance_ticket.id}"],
         ["Client", str(maintenance_ticket.client)],
-        ["Technicien", str(report.technician)],
+        ["Technicien principal", str(report.technician)],
+        ["Equipe technique", maintenance_ticket.technician_team_label],
         ["Service", maintenance_ticket.get_service_display()],
         ["Periodicite", maintenance_ticket.get_periodicity_display()],
-        ["Date prevue", (maintenance_ticket.initial_scheduled_date or maintenance_ticket.scheduled_date).strftime("%d/%m/%Y")],
+        ["Date prevue", timezone.localtime(maintenance_ticket.initial_scheduled_date or maintenance_ticket.scheduled_date).strftime("%d/%m/%Y %H:%M")],
         ["Execution reelle", f"{report.actual_started_at:%d/%m/%Y %H:%M} - {report.actual_finished_at:%d/%m/%Y %H:%M}"],
         ["Equipement(s)", product_label],
         ["Lieu", maintenance_ticket.location or maintenance_ticket.client.address or "-"],
@@ -1549,13 +1996,21 @@ def generate_maintenance_report_pdf(report, persist=True, force=False):
     buffer = BytesIO()
     document = SimpleDocTemplate(buffer, pagesize=A4)
     styles = getSampleStyleSheet()
-    story = [
-        Paragraph("Bon de maintenance planifiee AFRILUX SMART SOLUTIONS", styles["Title"]),
-        Spacer(1, 12),
-        Table(data, colWidths=[150, 340]),
-        Spacer(1, 12),
-        Paragraph("Check-list realisee", styles["Heading2"]),
-    ]
+    story = []
+    logo_path = finders.find("sav/images/afrilux-smart-solutions-logo.jpeg")
+    if logo_path:
+        logo = _safe_reportlab_image(logo_path, width=150, height=64)
+        if logo:
+            story.extend([logo, Spacer(1, 8)])
+    story.extend(
+        [
+            Paragraph("Bon de maintenance planifiee AFRILUX SMART SOLUTIONS", styles["Title"]),
+            Spacer(1, 12),
+            Table(data, colWidths=[150, 340]),
+            Spacer(1, 12),
+            Paragraph("Check-list realisee", styles["Heading2"]),
+        ]
+    )
     checklist_table = Table(checklist_rows, colWidths=[490])
     checklist_table.setStyle(
         TableStyle(
@@ -1577,6 +2032,13 @@ def generate_maintenance_report_pdf(report, persist=True, force=False):
             Paragraph(parts_text, styles["BodyText"]),
         ]
     )
+    if report.client_signature_file:
+        story.extend([Spacer(1, 12), Paragraph("Signature client", styles["Heading3"])])
+        signature = _safe_reportlab_image(report.client_signature_file.path, width=220, height=90)
+        if signature:
+            story.append(signature)
+        else:
+            story.append(Paragraph(report.client_signature_file.name.split("/")[-1], styles["BodyText"]))
     photo_items = list(report.photo_files.all()[:5])
     if photo_items:
         story.extend([Spacer(1, 12), Paragraph("Photos jointes", styles["Heading3"])])
@@ -1594,6 +2056,21 @@ def generate_maintenance_report_pdf(report, persist=True, force=False):
             )
         )
         story.append(photo_table)
+        for photo in photo_items:
+            try:
+                lower_name = photo.file.name.lower()
+                if lower_name.endswith((".jpg", ".jpeg", ".png")):
+                    image = _safe_reportlab_image(photo.file.path, width=220, height=150)
+                    if image:
+                        story.extend(
+                            [
+                                Spacer(1, 8),
+                                Paragraph(photo.note or "Photo maintenance", styles["BodyText"]),
+                                image,
+                            ]
+                        )
+            except Exception:
+                continue
 
     document.build(story)
     content = buffer.getvalue()
@@ -1830,6 +2307,21 @@ def can_assign_ticket_technician(user, ticket):
     return bool(user.role in set(User.ESCALATION_TARGET_ROLES) and ticket.assigned_agent_id == user.id)
 
 
+def _technician_has_active_conflict(technician, *, exclude_ticket=None):
+    conflicting_statuses = {
+        Ticket.STATUS_START_REQUESTED,
+        Ticket.STATUS_IN_PROGRESS,
+        Ticket.STATUS_COLLECTIVE_IN_PROGRESS,
+        Ticket.STATUS_FINISH_REQUESTED,
+    }
+    queryset = Ticket.objects.filter(status__in=conflicting_statuses).filter(
+        Q(assigned_agent=technician) | Q(team_leader=technician) | Q(team_members=technician)
+    )
+    if exclude_ticket is not None and exclude_ticket.pk:
+        queryset = queryset.exclude(pk=exclude_ticket.pk)
+    return queryset.exists()
+
+
 def assign_ticket_to_technician(ticket, technician, *, actor=None, note=""):
     if ticket.status not in OPEN_TICKET_STATUSES:
         raise ValueError("Seuls les tickets ouverts peuvent etre affectes.")
@@ -1861,9 +2353,20 @@ def assign_ticket_to_technician(ticket, technician, *, actor=None, note=""):
     assignment_note = (note or "Affectation du ticket a un technicien ou agent SAV.").strip()[:500]
 
     ticket.assigned_agent = technician
-    if ticket.status in {Ticket.STATUS_NEW, Ticket.STATUS_WAITING, Ticket.STATUS_ASSIGNED}:
+    ticket.team_leader = None
+    ticket.is_team_intervention = False
+    if ticket.status in {
+        Ticket.STATUS_NEW,
+        Ticket.STATUS_PENDING_ASSIGNMENT,
+        Ticket.STATUS_REASSIGN_REQUIRED,
+        Ticket.STATUS_REASSIGNED,
+        Ticket.STATUS_ASSIGNED,
+        Ticket.STATUS_TEAM_PENDING,
+        Ticket.STATUS_TEAM_READY,
+    }:
         ticket.status = Ticket.STATUS_ASSIGNED
-    ticket.save(update_fields=["assigned_agent", "status", "updated_at"])
+    ticket.save(update_fields=["assigned_agent", "team_leader", "is_team_intervention", "status", "updated_at"])
+    ticket.team_members.clear()
     intervention_result = ensure_assignment_intervention(ticket, actor=actor, note=assignment_note)
 
     Message.objects.create(
@@ -1915,6 +2418,283 @@ def assign_ticket_to_technician(ticket, technician, *, actor=None, note=""):
         "assignment_id": getattr(intervention_result.get("assignment"), "id", None),
         "created_assignment": intervention_result.get("created_assignment", False),
     }
+
+
+def assign_ticket_to_team(ticket, *, leader, members, actor=None, note=""):
+    if ticket.status not in OPEN_TICKET_STATUSES:
+        raise ValueError("Seuls les tickets ouverts peuvent etre affectes.")
+    if not can_assign_ticket_technician(actor, ticket):
+        raise ValueError("Seul le Responsable SAV peut constituer une equipe.")
+    members = list(members or [])
+    if not leader:
+        raise ValueError("Un chef d'equipe est obligatoire.")
+    if leader.role not in set(User.ASSIGNABLE_ROLES):
+        raise ValueError("Le chef d'equipe doit etre un technicien habilite.")
+    if not leader.is_ticket_assignment_eligible:
+        raise ValueError("Le chef d'equipe doit etre disponible.")
+    member_ids = {member.id for member in members if member and member.id != leader.id}
+    members = list(User.objects.filter(id__in=member_ids, role__in=User.ASSIGNABLE_ROLES, is_active=True))
+    if not members:
+        raise ValueError("Une equipe doit contenir au moins un membre en plus du chef.")
+    if ticket.organization_id:
+        selected = [leader, *members]
+        if any(member.organization_id and member.organization_id != ticket.organization_id for member in selected):
+            raise ValueError("Tous les techniciens doivent appartenir a la meme organisation que le ticket.")
+    selected_technicians = [leader, *members]
+    for technician in selected_technicians:
+        if not technician.is_ticket_assignment_eligible:
+            raise ValueError(f"{technician} n'est pas disponible.")
+        if _technician_has_active_conflict(technician, exclude_ticket=ticket):
+            raise ValueError(f"{technician} est deja mobilise sur une intervention en cours.")
+
+    previous_status = ticket.status
+    previous_assigned_agent = ticket.assigned_agent
+    ticket.assigned_agent = leader
+    ticket.team_leader = leader
+    ticket.is_team_intervention = True
+    ticket.status = Ticket.STATUS_TEAM_READY
+    ticket.save(update_fields=["assigned_agent", "team_leader", "is_team_intervention", "status", "updated_at"])
+    ticket.team_members.set(members)
+    intervention_result = ensure_assignment_intervention(ticket, actor=actor, note=note or "Equipe constituee pour intervention SAV.")
+
+    Message.objects.create(
+        ticket=ticket,
+        sender=actor if getattr(actor, "is_authenticated", False) else leader,
+        message_type=Message.TYPE_INTERNAL,
+        channel=Message.CHANNEL_PORTAL,
+        direction=Message.DIRECTION_INTERNAL,
+        content=f"Equipe constituee. Chef: {leader}. Membres: {', '.join(str(member) for member in members)}.",
+        sentiment_score=calculate_sentiment("Equipe constituee pour intervention SAV."),
+    )
+
+    recipients = {leader.id: leader, **{member.id: member for member in members}}
+    if previous_assigned_agent is not None and previous_assigned_agent.id not in recipients:
+        recipients[previous_assigned_agent.id] = previous_assigned_agent
+    for recipient in recipients.values():
+        create_external_channel_notifications(
+            recipient=recipient,
+            ticket=ticket,
+            event_type="ticket_team_assigned",
+            subject=f"Equipe affectee {ticket.reference}",
+            message=f"Vous faites partie de l'equipe affectee au ticket '{ticket.title}'.",
+        )
+
+    log_audit_event(
+        actor,
+        "ticket_team_assigned",
+        ticket,
+        {
+            "previous_status": previous_status,
+            "new_status": ticket.status,
+            "leader": leader.id,
+            "members": [member.id for member in members],
+            "assignment_id": getattr(intervention_result.get("assignment"), "id", None),
+        },
+    )
+    return {
+        "ticket_id": ticket.id,
+        "reference": ticket.reference,
+        "previous_status": previous_status,
+        "status": ticket.status,
+        "leader": str(leader),
+        "members": [str(member) for member in members],
+        "assignment_id": getattr(intervention_result.get("assignment"), "id", None),
+    }
+
+
+def request_ticket_escalation(ticket, *, actor=None, reason=""):
+    if ticket.status not in OPEN_TICKET_STATUSES or ticket.status in {Ticket.STATUS_DONE, Ticket.STATUS_CLOSED}:
+        raise ValueError("Ce ticket ne peut plus etre escalade.")
+    if not can_record_ticket_intervention(actor, ticket):
+        raise ValueError("Seul un intervenant du ticket peut demander l'aide du responsable.")
+    normalized_reason = (reason or "").strip()
+    if not normalized_reason:
+        raise ValueError("Le motif d'escalade est obligatoire.")
+    if (
+        ticket.is_team_intervention
+        and ticket.team_members.filter(pk=getattr(actor, "pk", None)).exists()
+        and ticket.team_leader_id != getattr(actor, "id", None)
+        and not is_manager_user(actor)
+    ):
+        Message.objects.create(
+            ticket=ticket,
+            sender=actor,
+            message_type=Message.TYPE_INTERNAL,
+            channel=Message.CHANNEL_PORTAL,
+            direction=Message.DIRECTION_INTERNAL,
+            content=f"Demande d'aide au chef d'equipe: {normalized_reason}",
+            sentiment_score=calculate_sentiment(normalized_reason),
+        )
+        if ticket.team_leader_id:
+            create_external_channel_notifications(
+                recipient=ticket.team_leader,
+                ticket=ticket,
+                event_type="ticket_team_member_help_requested",
+                subject=f"Aide membre equipe {ticket.reference}",
+                message=f"{actor} demande de l'aide: {normalized_reason}",
+            )
+        log_audit_event(actor, "ticket_team_member_help_requested", ticket, {"reason": normalized_reason})
+        return {"status": ticket.status, "team_leader_notified": bool(ticket.team_leader_id)}
+    previous_status = ticket.status
+    ticket.escalation_count = (ticket.escalation_count or 0) + 1
+    ticket.last_escalation_at = timezone.now()
+    ticket.last_escalation_reason = normalized_reason
+    ticket.status_before_escalation = previous_status if previous_status != Ticket.STATUS_ESCALATED else ticket.status_before_escalation
+    if ticket.escalation_count > 3:
+        ticket.status = Ticket.STATUS_BLOCKED_DIRECTION
+    else:
+        ticket.status = Ticket.STATUS_ESCALATED
+    ticket.save(
+        update_fields=[
+            "status",
+            "escalation_count",
+            "last_escalation_at",
+            "last_escalation_reason",
+            "status_before_escalation",
+            "updated_at",
+        ]
+    )
+    Message.objects.create(
+        ticket=ticket,
+        sender=actor,
+        message_type=Message.TYPE_INTERNAL,
+        channel=Message.CHANNEL_PORTAL,
+        direction=Message.DIRECTION_INTERNAL,
+        content=f"Demande d'aide responsable: {normalized_reason}",
+        sentiment_score=calculate_sentiment(normalized_reason),
+    )
+    for manager in manager_queryset_for_organization(ticket.organization):
+        create_external_channel_notifications(
+            recipient=manager,
+            ticket=ticket,
+            event_type="ticket_escalation_requested",
+            subject=f"Escalade {ticket.reference}",
+            message=f"{actor} demande une aide responsable sur '{ticket.title}'. Motif: {normalized_reason}",
+        )
+    log_audit_event(
+        actor,
+        "ticket_escalation_requested",
+        ticket,
+        {
+            "previous_status": previous_status,
+            "new_status": ticket.status,
+            "reason": normalized_reason,
+            "escalation_count": ticket.escalation_count,
+        },
+    )
+    return {"status": ticket.status, "previous_status": previous_status, "escalation_count": ticket.escalation_count}
+
+
+def provide_escalation_solution(ticket, *, actor=None, solution=""):
+    if not is_manager_user(actor):
+        raise ValueError("Seul le Responsable SAV peut traiter une escalade.")
+    if ticket.status != Ticket.STATUS_ESCALATED:
+        raise ValueError("Le ticket doit etre en escalade.")
+    normalized_solution = (solution or "").strip()
+    if not normalized_solution:
+        raise ValueError("La solution du responsable est obligatoire.")
+    previous_status = ticket.status
+    ticket.status = Ticket.STATUS_WAITING_SOLUTION
+    ticket.save(update_fields=["status", "updated_at"])
+    Message.objects.create(
+        ticket=ticket,
+        sender=actor,
+        message_type=Message.TYPE_INTERNAL,
+        channel=Message.CHANNEL_PORTAL,
+        direction=Message.DIRECTION_INTERNAL,
+        content=f"Solution responsable: {normalized_solution}",
+        sentiment_score=calculate_sentiment(normalized_solution),
+    )
+    recipients = []
+    if ticket.assigned_agent_id:
+        recipients.append(ticket.assigned_agent)
+    if ticket.team_leader_id:
+        recipients.append(ticket.team_leader)
+    for recipient in {item.id: item for item in recipients if getattr(item, "id", None)}.values():
+        create_external_channel_notifications(
+            recipient=recipient,
+            ticket=ticket,
+            event_type="ticket_escalation_solution",
+            subject=f"Solution responsable {ticket.reference}",
+            message=normalized_solution,
+        )
+    log_audit_event(actor, "ticket_escalation_solution_provided", ticket, {"previous_status": previous_status})
+    return {"status": ticket.status, "solution": normalized_solution}
+
+
+def continue_after_escalation_solution(ticket, *, actor=None):
+    if not can_drive_ticket_workflow(actor, ticket):
+        raise ValueError("Seul le technicien responsable peut continuer.")
+    if ticket.status != Ticket.STATUS_WAITING_SOLUTION:
+        raise ValueError("Aucune solution responsable n'est en attente d'application.")
+    previous_status = ticket.status
+    next_status = ticket.status_before_escalation or (
+        Ticket.STATUS_COLLECTIVE_IN_PROGRESS if ticket.is_team_intervention else Ticket.STATUS_IN_PROGRESS
+    )
+    if next_status in {Ticket.STATUS_ESCALATED, Ticket.STATUS_WAITING_SOLUTION, Ticket.STATUS_FINISH_REQUESTED}:
+        next_status = Ticket.STATUS_COLLECTIVE_IN_PROGRESS if ticket.is_team_intervention else Ticket.STATUS_IN_PROGRESS
+    ticket.status = next_status
+    ticket.save(update_fields=["status", "updated_at"])
+    Message.objects.create(
+        ticket=ticket,
+        sender=actor,
+        message_type=Message.TYPE_INTERNAL,
+        channel=Message.CHANNEL_PORTAL,
+        direction=Message.DIRECTION_INTERNAL,
+        content="Le technicien reprend le traitement apres solution responsable.",
+        sentiment_score=0,
+    )
+    log_audit_event(actor, "ticket_escalation_solution_continued", ticket, {"previous_status": previous_status, "new_status": next_status})
+    return {"status": ticket.status, "previous_status": previous_status}
+
+
+def decline_ticket_escalation(ticket, *, actor=None, reason=""):
+    if not is_manager_user(actor):
+        raise ValueError("Seul le Responsable SAV peut decliner une escalade.")
+    if ticket.status != Ticket.STATUS_ESCALATED:
+        raise ValueError("Le ticket doit etre en escalade.")
+    normalized_reason = (reason or "").strip()
+    if not normalized_reason:
+        raise ValueError("Le motif de refus est obligatoire.")
+    previous_status = ticket.status
+    next_status = ticket.status_before_escalation or Ticket.STATUS_ASSIGNED
+    if next_status in {Ticket.STATUS_ESCALATED, Ticket.STATUS_WAITING_SOLUTION}:
+        next_status = Ticket.STATUS_ASSIGNED
+    ticket.status = next_status
+    ticket.save(update_fields=["status", "updated_at"])
+    Message.objects.create(
+        ticket=ticket,
+        sender=actor,
+        message_type=Message.TYPE_INTERNAL,
+        channel=Message.CHANNEL_PORTAL,
+        direction=Message.DIRECTION_INTERNAL,
+        content=f"Escalade declinee: {normalized_reason}",
+        sentiment_score=calculate_sentiment(normalized_reason),
+    )
+    if ticket.assigned_agent_id:
+        create_external_channel_notifications(
+            recipient=ticket.assigned_agent,
+            ticket=ticket,
+            event_type="ticket_escalation_declined",
+            subject=f"Escalade declinee {ticket.reference}",
+            message=normalized_reason,
+        )
+    log_audit_event(actor, "ticket_escalation_declined", ticket, {"previous_status": previous_status, "new_status": next_status})
+    return {"status": ticket.status, "reason": normalized_reason}
+
+
+def reassign_escalated_ticket(ticket, technician, *, actor=None, note=""):
+    if not is_manager_user(actor):
+        raise ValueError("Seul le Responsable SAV peut reassigner une escalade.")
+    if ticket.status not in {Ticket.STATUS_ESCALATED, Ticket.STATUS_REASSIGN_REQUIRED, Ticket.STATUS_REASSIGNED}:
+        raise ValueError("Le ticket doit etre en escalade ou a reassigner.")
+    previous_status = ticket.status
+    ticket.status = Ticket.STATUS_REASSIGNED
+    ticket.save(update_fields=["status", "updated_at"])
+    result = assign_ticket_to_technician(ticket, technician, actor=actor, note=note or "Reassignation apres escalade.")
+    result["previous_status"] = previous_status
+    result["status"] = ticket.status
+    return result
 
 
 def ensure_assignment_intervention(ticket, *, actor=None, note=""):
@@ -2043,7 +2823,7 @@ def _coerce_bool(value):
     return str(value).strip().lower() in {"1", "true", "yes", "oui", "on"}
 
 
-def _coerce_id_list(value):
+def _coerce_id_list(value, error_message="Les identifiants d'equipements doivent etre numeriques."):
     if value in (None, ""):
         return []
     if isinstance(value, (list, tuple, set)):
@@ -2058,7 +2838,7 @@ def _coerce_id_list(value):
         try:
             ids.append(int(normalized))
         except ValueError as exc:
-            raise ValueError("Les identifiants d'equipements doivent etre numeriques.") from exc
+            raise ValueError(error_message) from exc
     return ids
 
 
@@ -2237,7 +3017,7 @@ def _business_domain_for_maintenance_service(service):
 
 def publish_maintenance_program(program, *, actor=None):
     if program.status == MaintenanceProgram.STATUS_PUBLISHED and program.tickets.exists():
-        return list(program.tickets.select_related("client", "technician").prefetch_related("products"))
+        return list(program.tickets.select_related("client", "technician").prefetch_related("products", "team_members"))
     if program.status == MaintenanceProgram.STATUS_ARCHIVED:
         raise ValueError("Un programme archive ne peut pas etre publie.")
     if not isinstance(program.task_lines, list) or not program.task_lines:
@@ -2251,20 +3031,46 @@ def publish_maintenance_program(program, *, actor=None):
             title = str(line.get("title") or line.get("intitule") or line.get("task") or "").strip()
             if not title:
                 raise ValueError(f"Ligne {index}: l'intitule de la tache est obligatoire.")
+            technician_ids = _coerce_id_list(
+                line.get("technician_ids")
+                or line.get("technicien_ids")
+                or line.get("technicians")
+                or line.get("techniciens")
+                or line.get("team_member_ids")
+                or line.get("membres_equipe")
+                or [],
+                "Les identifiants de techniciens doivent etre numeriques.",
+            )
             technician_id = line.get("technician_id") or line.get("technicien_id") or line.get("technician")
+            if technician_id:
+                try:
+                    primary_technician_id = int(str(technician_id).strip())
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"Ligne {index}: l'identifiant du technicien principal doit etre numerique.") from exc
+                if primary_technician_id not in technician_ids:
+                    technician_ids.insert(0, primary_technician_id)
+            technician_ids = list(dict.fromkeys(technician_ids))
             client_id = line.get("client_id") or line.get("client")
-            if not technician_id or not client_id:
+            if not technician_ids or not client_id:
                 raise ValueError(f"Ligne {index}: technicien et client sont obligatoires.")
 
-            technician = User.objects.filter(pk=technician_id, role__in=User.TECHNICIAN_SPACE_ROLES, is_active=True).first()
-            if technician is None:
-                raise ValueError(f"Ligne {index}: technicien introuvable ou non habilite pour la maintenance terrain.")
+            technician_queryset = User.objects.filter(pk__in=technician_ids, role__in=User.TECHNICIAN_SPACE_ROLES, is_active=True)
+            technician_by_id = {technician.pk: technician for technician in technician_queryset}
+            missing_technicians = [technician_id for technician_id in technician_ids if technician_id not in technician_by_id]
+            if missing_technicians:
+                raise ValueError(
+                    f"Ligne {index}: technicien introuvable ou non habilite pour la maintenance terrain."
+                )
+            technicians = [technician_by_id[technician_id] for technician_id in technician_ids]
+            technician = technicians[0]
+            team_members = [member for member in technicians[1:] if member.pk != technician.pk]
             client = User.objects.filter(pk=client_id, role=User.ROLE_CLIENT, is_active=True).first()
             if client is None:
                 raise ValueError(f"Ligne {index}: client introuvable.")
             if program.organization_id:
-                if technician.organization_id and technician.organization_id != program.organization_id:
-                    raise ValueError(f"Ligne {index}: le technicien appartient a une autre organisation.")
+                for technician_item in technicians:
+                    if technician_item.organization_id and technician_item.organization_id != program.organization_id:
+                        raise ValueError(f"Ligne {index}: un technicien appartient a une autre organisation.")
                 if client.organization_id and client.organization_id != program.organization_id:
                     raise ValueError(f"Ligne {index}: le client appartient a une autre organisation.")
 
@@ -2280,7 +3086,7 @@ def publish_maintenance_program(program, *, actor=None):
                 if product.client_id != client.id:
                     raise ValueError(f"Ligne {index}: l'equipement {product.serial_number} n'appartient pas au client.")
 
-            scheduled_date = _parse_date_value(
+            scheduled_date = _parse_datetime_value(
                 line.get("scheduled_date") or line.get("due_date") or line.get("date_prevue") or line.get("date"),
                 "date_prevue",
             )
@@ -2303,6 +3109,8 @@ def publish_maintenance_program(program, *, actor=None):
             )
             if products:
                 ticket.products.set(products)
+            if team_members:
+                ticket.team_members.set(team_members)
             created_tickets.append(ticket)
 
         program.status = MaintenanceProgram.STATUS_PUBLISHED
@@ -2325,9 +3133,7 @@ def start_maintenance_ticket(maintenance_ticket, *, actor=None):
         MaintenanceTicket.STATUS_POSTPONED,
     }:
         raise ValueError("Cette maintenance ne peut pas etre demarree depuis son statut actuel.")
-    if actor and actor.is_authenticated and not (
-        can_manage_maintenance(actor) or maintenance_ticket.technician_id == actor.id
-    ):
+    if actor and actor.is_authenticated and not can_act_on_maintenance_ticket(actor, maintenance_ticket):
         raise ValueError("Seul le technicien assigne ou un responsable peut demarrer cette maintenance.")
     maintenance_ticket.status = MaintenanceTicket.STATUS_IN_PROGRESS
     maintenance_ticket.started_at = maintenance_ticket.started_at or timezone.now()
@@ -2337,9 +3143,7 @@ def start_maintenance_ticket(maintenance_ticket, *, actor=None):
 
 
 def acknowledge_maintenance_ticket(maintenance_ticket, *, actor=None):
-    if actor and actor.is_authenticated and not (
-        can_manage_maintenance(actor) or maintenance_ticket.technician_id == actor.id
-    ):
+    if actor and actor.is_authenticated and not can_act_on_maintenance_ticket(actor, maintenance_ticket):
         raise ValueError("Seul le technicien assigne ou un responsable peut accuser reception de cette maintenance.")
     if maintenance_ticket.status not in {MaintenanceTicket.STATUS_PLANNED, MaintenanceTicket.STATUS_NOTIFIED}:
         raise ValueError("Seules les maintenances planifiees ou notifiees peuvent etre accusees reception.")
@@ -2359,7 +3163,7 @@ def acknowledge_maintenance_ticket(maintenance_ticket, *, actor=None):
             ticket=None,
             event_type="maintenance_acknowledged",
             subject=f"Maintenance accusee - {maintenance_ticket.title}",
-            message=f"{maintenance_ticket.technician} a accuse reception de la maintenance du {maintenance_ticket.scheduled_date:%d/%m/%Y}.",
+            message=f"{actor or maintenance_ticket.technician} a accuse reception de la maintenance du {timezone.localtime(maintenance_ticket.scheduled_date):%d/%m/%Y %H:%M}.",
         )
     log_audit_event(actor, "maintenance_ticket_acknowledged", maintenance_ticket)
     return maintenance_ticket
@@ -2368,10 +3172,8 @@ def acknowledge_maintenance_ticket(maintenance_ticket, *, actor=None):
 def postpone_maintenance_ticket(maintenance_ticket, *, new_date, justification, actor=None):
     if not str(justification or "").strip():
         raise ValueError("La justification du report est obligatoire.")
-    parsed_date = _parse_date_value(new_date, "nouvelle_date")
-    if actor and actor.is_authenticated and not (
-        can_manage_maintenance(actor) or maintenance_ticket.technician_id == actor.id
-    ):
+    parsed_date = _parse_datetime_value(new_date, "nouvelle_date")
+    if actor and actor.is_authenticated and not can_act_on_maintenance_ticket(actor, maintenance_ticket):
         raise ValueError("Seul le technicien assigne ou un responsable peut reporter cette maintenance.")
 
     maintenance_ticket.status = MaintenanceTicket.STATUS_POSTPONED
@@ -2393,7 +3195,7 @@ def postpone_maintenance_ticket(maintenance_ticket, *, new_date, justification, 
             ticket=None,
             event_type="maintenance_postponed",
             subject=f"Maintenance reportee - {maintenance_ticket.title}",
-            message=f"La maintenance du {maintenance_ticket.scheduled_date:%d/%m/%Y} a ete reportee: {maintenance_ticket.postponement_reason}",
+            message=f"La maintenance du {timezone.localtime(maintenance_ticket.scheduled_date):%d/%m/%Y %H:%M} a ete reportee: {maintenance_ticket.postponement_reason}",
         )
     log_audit_event(actor, "maintenance_ticket_postponed", maintenance_ticket, {"new_date": parsed_date.isoformat()})
     return maintenance_ticket
@@ -2417,7 +3219,7 @@ def cancel_maintenance_ticket(maintenance_ticket, *, reason, actor=None):
     maintenance_ticket.cancelled_at = timezone.now()
     maintenance_ticket.save(update_fields=["status", "cancellation_reason", "cancelled_at", "updated_at"])
 
-    recipients = [maintenance_ticket.technician]
+    recipients = maintenance_team_recipients(maintenance_ticket)
     if maintenance_ticket.responsible_id:
         recipients.append(maintenance_ticket.responsible)
     for recipient in {item.id: item for item in recipients if getattr(item, "id", None)}.values():
@@ -2426,7 +3228,7 @@ def cancel_maintenance_ticket(maintenance_ticket, *, reason, actor=None):
             ticket=None,
             event_type="maintenance_cancelled",
             subject=f"Maintenance annulee - {maintenance_ticket.title}",
-            message=f"La maintenance planifiee le {maintenance_ticket.scheduled_date:%d/%m/%Y} est annulee. Motif: {normalized_reason}",
+            message=f"La maintenance planifiee le {timezone.localtime(maintenance_ticket.scheduled_date):%d/%m/%Y %H:%M} est annulee. Motif: {normalized_reason}",
         )
     log_audit_event(actor, "maintenance_ticket_cancelled", maintenance_ticket, {"reason": normalized_reason})
     return maintenance_ticket
@@ -2511,9 +3313,7 @@ def close_maintenance_ticket(
 ):
     if final_status not in {choice[0] for choice in MaintenanceTicket.FINAL_STATUS_CHOICES}:
         raise ValueError("Statut final de maintenance invalide.")
-    if actor and actor.is_authenticated and not (
-        can_manage_maintenance(actor) or maintenance_ticket.technician_id == actor.id
-    ):
+    if actor and actor.is_authenticated and not can_act_on_maintenance_ticket(actor, maintenance_ticket):
         raise ValueError("Seul le technicien assigne ou un responsable peut cloturer cette maintenance.")
     normalized_observations = str(observations or "").strip()
     if not normalized_observations:
@@ -2575,7 +3375,7 @@ def close_maintenance_ticket(
     maintenance_ticket.finished_at = actual_finished_at
     update_fields = ["status", "started_at", "finished_at", "updated_at"]
     if final_status == MaintenanceTicket.STATUS_POSTPONED:
-        parsed_date = _parse_date_value(new_date, "nouvelle_date")
+        parsed_date = _parse_datetime_value(new_date, "nouvelle_date")
         maintenance_ticket.postponed_to = parsed_date
         maintenance_ticket.scheduled_date = parsed_date
         maintenance_ticket.postponement_reason = str(postponement_reason).strip()
@@ -2598,7 +3398,7 @@ def close_maintenance_ticket(
             ticket=incident,
             event_type="maintenance_closed",
             subject=f"Maintenance {maintenance_ticket.get_status_display()} - {maintenance_ticket.title}",
-            message=f"Le technicien {maintenance_ticket.technician} a cloture la maintenance: {normalized_observations[:180]}",
+            message=f"L'equipe {maintenance_ticket.technician_team_label} a cloture la maintenance: {normalized_observations[:180]}",
         )
 
     generate_maintenance_report_pdf(report)
@@ -2614,7 +3414,7 @@ def close_maintenance_ticket(
 def dispatch_maintenance_operational_notifications(*, organization=None, now=None):
     now = timezone.localtime(now or timezone.now())
     today = now.date()
-    queryset = MaintenanceTicket.objects.select_related("technician", "responsible", "client", "organization").filter(
+    queryset = MaintenanceTicket.objects.select_related("technician", "responsible", "client", "organization").prefetch_related("team_members").filter(
         status__in=[
             MaintenanceTicket.STATUS_PLANNED,
             MaintenanceTicket.STATUS_NOTIFIED,
@@ -2627,18 +3427,20 @@ def dispatch_maintenance_operational_notifications(*, organization=None, now=Non
 
     sent = {"j_minus_3": 0, "not_realized_j_plus_1": 0}
     for maintenance_ticket in queryset:
+        scheduled_day = timezone.localtime(maintenance_ticket.scheduled_date).date()
         if (
             maintenance_ticket.status == MaintenanceTicket.STATUS_PLANNED
-            and maintenance_ticket.scheduled_date >= today
-            and maintenance_ticket.scheduled_date <= today + timedelta(days=3)
+            and scheduled_day >= today
+            and scheduled_day <= today + timedelta(days=3)
         ):
-            create_external_channel_notifications(
-                recipient=maintenance_ticket.technician,
-                ticket=None,
-                event_type="maintenance_j_minus_3",
-                subject=f"Maintenance a venir - {maintenance_ticket.title}",
-                message=f"La maintenance planifiee chez {maintenance_ticket.client} est prevue le {maintenance_ticket.scheduled_date:%d/%m/%Y}.",
-            )
+            for recipient in maintenance_team_recipients(maintenance_ticket):
+                create_external_channel_notifications(
+                    recipient=recipient,
+                    ticket=None,
+                    event_type="maintenance_j_minus_3",
+                    subject=f"Maintenance a venir - {maintenance_ticket.title}",
+                    message=f"La maintenance planifiee chez {maintenance_ticket.client} est prevue le {timezone.localtime(maintenance_ticket.scheduled_date):%d/%m/%Y %H:%M}.",
+                )
             maintenance_ticket.status = MaintenanceTicket.STATUS_NOTIFIED
             maintenance_ticket.notified_at = now
             maintenance_ticket.save(update_fields=["status", "notified_at", "updated_at"])
@@ -2651,7 +3453,7 @@ def dispatch_maintenance_operational_notifications(*, organization=None, now=Non
                 MaintenanceTicket.STATUS_ANOMALY,
                 MaintenanceTicket.STATUS_CANCELLED,
             }
-            and maintenance_ticket.scheduled_date <= today - timedelta(days=1)
+            and scheduled_day <= today - timedelta(days=1)
             and not maintenance_ticket.overdue_alerted_at
         ):
             recipients = []
@@ -2664,7 +3466,7 @@ def dispatch_maintenance_operational_notifications(*, organization=None, now=Non
                     ticket=None,
                     event_type="maintenance_not_realized_j_plus_1",
                     subject=f"Maintenance non realisee - {maintenance_ticket.title}",
-                    message=f"La maintenance planifiee le {maintenance_ticket.scheduled_date:%d/%m/%Y} n'est pas cloturee.",
+                    message=f"La maintenance planifiee le {timezone.localtime(maintenance_ticket.scheduled_date):%d/%m/%Y %H:%M} n'est pas cloturee.",
                 )
                 sent["not_realized_j_plus_1"] += 1
             maintenance_ticket.overdue_alerted_at = now
@@ -2693,9 +3495,14 @@ def _maintenance_period_bounds(period, anchor_date=None):
 
 def build_maintenance_period_report(period, user, *, anchor_date=None):
     start, end, label = _maintenance_period_bounds(period, anchor_date=anchor_date)
-    tickets = scope_maintenance_ticket_queryset(MaintenanceTicket.objects.select_related("client", "technician"), user).filter(
-        scheduled_date__gte=start,
-        scheduled_date__lt=end,
+    start_dt = timezone.make_aware(datetime.combine(start, datetime.min.time()))
+    end_dt = timezone.make_aware(datetime.combine(end, datetime.min.time()))
+    tickets = scope_maintenance_ticket_queryset(
+        MaintenanceTicket.objects.select_related("client", "technician").prefetch_related("team_members"),
+        user,
+    ).filter(
+        scheduled_date__gte=start_dt,
+        scheduled_date__lt=end_dt,
     )
     total = tickets.count()
     done = tickets.filter(status=MaintenanceTicket.STATUS_DONE).count()
@@ -2705,8 +3512,8 @@ def build_maintenance_period_report(period, user, *, anchor_date=None):
     generated_incidents = tickets.filter(anomaly_ticket__isnull=False).count()
     postponed_delays = []
     for item in tickets.filter(postponed_to__isnull=False):
-        original_date = item.initial_scheduled_date or item.created_at.date()
-        postponed_delays.append((item.postponed_to - original_date).days)
+        original_date = item.initial_scheduled_date or item.created_at
+        postponed_delays.append((item.postponed_to - original_date).total_seconds() / 86400)
 
     return {
         "title": "Bilan de maintenance planifiee",
@@ -2729,7 +3536,7 @@ def build_maintenance_period_report(period, user, *, anchor_date=None):
                 "id": item.id,
                 "title": item.title,
                 "client": str(item.client),
-                "technician": str(item.technician),
+                "technician": item.technician_team_label,
                 "scheduled_date": item.scheduled_date.isoformat(),
                 "status": item.status,
                 "incident_reference": item.anomaly_ticket.reference if item.anomaly_ticket_id else "",
@@ -3813,15 +4620,26 @@ def notify_ticket_status_change(ticket, previous_status, *, actor=None):
         return []
 
     notifications = []
-    notifications.extend(
-        create_external_channel_notifications(
-            recipient=ticket.client,
-            ticket=ticket,
-            event_type="ticket_status_update",
-            subject=f"Mise a jour ticket {ticket.reference}",
-            message=f"Le statut de votre ticket est passe de '{previous_status}' a '{ticket.status}'.",
-        )
+    previous_public_status = Ticket.PUBLIC_STATUS_MAP.get(
+        Ticket.normalize_process_status(previous_status),
+        previous_status,
     )
+    current_public_status = ticket.public_status
+    client_action_statuses = {
+        Ticket.STATUS_PLANNING_PROPOSED,
+        Ticket.STATUS_START_REQUESTED,
+        Ticket.STATUS_FINISH_REQUESTED,
+    }
+    if previous_public_status != current_public_status or ticket.status in client_action_statuses:
+        notifications.extend(
+            create_external_channel_notifications(
+                recipient=ticket.client,
+                ticket=ticket,
+                event_type="ticket_status_update",
+                subject=f"Mise a jour ticket {ticket.reference}",
+                message=f"Le statut de votre ticket est maintenant '{current_public_status}'.",
+            )
+        )
 
     if ticket.status == Ticket.STATUS_RESOLVED:
         for manager in manager_queryset_for_organization(ticket.organization):
