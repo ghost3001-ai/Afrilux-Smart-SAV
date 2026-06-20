@@ -173,6 +173,57 @@ https://afrilux-smart-sav-o9me.onrender.com/api/health/
 
 Si `/api/health/` ne repond pas, le probleme est cote service/deploy Render. Si `/api/health/` repond mais pas `/`, regarder les logs Django de la page d'accueil.
 
+## Si Render affiche `Live` mais le navigateur affiche `ERR_CONNECTION_TIMED_OUT`
+
+Commencer par lire la ligne Gunicorn dans les logs:
+
+```text
+Using worker: gthread
+```
+
+Si Render affiche encore `Using worker: sync`, le service tourne sur une ancienne image ou les variables Gunicorn ne sont pas appliquees. Redeployer le dernier commit et verifier dans `Environment`:
+
+```text
+GUNICORN_WORKER_CLASS=gthread
+GUNICORN_THREADS=8
+GUNICORN_TIMEOUT=120
+SAV_REALTIME_STREAM_SECONDS=25
+SAV_REALTIME_POLL_SECONDS=2
+```
+
+Si Render affiche `Using worker: gthread` mais que l'URL publique timeout, tester depuis votre poste:
+
+```powershell
+Resolve-DnsName afrilux-smart-sav-o9me.onrender.com
+Test-NetConnection afrilux-smart-sav-o9me.onrender.com -Port 443
+curl.exe -v --connect-timeout 10 --max-time 25 https://afrilux-smart-sav-o9me.onrender.com/api/health/
+```
+
+Resultat attendu: connexion TCP et reponse HTTP `200` sur `/api/health/`.
+
+Si `Resolve-DnsName` fonctionne mais `Test-NetConnection` timeout vers `216.24.57.8` ou `216.24.57.9`, la requete n'arrive pas jusqu'a Django. Dans ce cas, tester avec:
+
+- partage de connexion mobile;
+- VPN;
+- autre navigateur ou autre ordinateur;
+- autre reseau internet.
+
+Dans le shell Render, verifier que l'application repond bien dans le conteneur:
+
+```bash
+curl -i http://127.0.0.1:${PORT}/api/health/
+```
+
+Si cette commande repond `200` dans Render mais pas depuis votre poste, le blocage est reseau/DNS/proxy entre votre poste et Render.
+
+Si les logs continuent d'afficher `Bootstrap termine...` a chaque deploy, ouvrir Render > `afrilux-sav-web` > `Environment` et mettre explicitement:
+
+```text
+DJANGO_BOOTSTRAP_ON_STARTUP=false
+```
+
+Puis sauvegarder et relancer un redeploy manuel. Le bootstrap ne doit etre reactive que ponctuellement, pour creer ou reinitialiser le compte administrateur.
+
 ## Si l'application devient lente apres redeploiement
 
 Verifier en premier:
