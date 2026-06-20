@@ -411,9 +411,27 @@ class KnowledgeArticleAdmin(admin.ModelAdmin):
 
 @admin.register(Notification)
 class NotificationAdmin(admin.ModelAdmin):
-    list_display = ("recipient", "organization", "event_type", "channel", "status", "ticket", "created_at")
-    list_filter = ("organization", "channel", "status", "event_type")
-    search_fields = ("recipient__username", "subject", "message", "ticket__reference", "organization__name")
+    list_display = (
+        "recipient",
+        "organization",
+        "event_type",
+        "channel",
+        "status",
+        "provider",
+        "ticket",
+        "created_at",
+    )
+    list_filter = ("organization", "channel", "status", "provider", "event_type")
+    search_fields = (
+        "recipient__username",
+        "recipient_contact",
+        "subject",
+        "message",
+        "provider_reference",
+        "ticket__reference",
+        "organization__name",
+    )
+    readonly_fields = ("provider", "provider_reference", "error_message", "delivery_payload", "sent_at", "read_at", "clicked_at")
 
 
 @admin.register(SlaRule)

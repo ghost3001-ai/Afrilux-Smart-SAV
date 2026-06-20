@@ -18,13 +18,16 @@ class Command(BaseCommand):
         parser.add_argument("--backup-minute", type=int, default=0)
         parser.add_argument("--once", action="store_true")
         parser.add_argument("--skip-backup", action="store_true")
+        parser.add_argument("--skip-reports", action="store_true")
         parser.add_argument("--organization-slug", default="")
 
-    def _run_cycle(self, *, organization_slug, backup_hour, backup_minute, last_backup_date, skip_backup):
+    def _run_cycle(self, *, organization_slug, backup_hour, backup_minute, last_backup_date, skip_backup, skip_reports):
         now = timezone.localtime()
         run_kwargs = {}
         if organization_slug:
             run_kwargs["organization_slug"] = organization_slug
+        if skip_reports:
+            run_kwargs["skip_reports"] = True
         call_command("run_sav_automation", **run_kwargs)
 
         if skip_backup:
@@ -41,6 +44,7 @@ class Command(BaseCommand):
         backup_hour = int(options["backup_hour"])
         backup_minute = int(options["backup_minute"])
         skip_backup = bool(options["skip_backup"])
+        skip_reports = bool(options["skip_reports"])
         organization_slug = options["organization_slug"].strip()
         last_backup_date = None
 
@@ -51,15 +55,17 @@ class Command(BaseCommand):
                 backup_minute=backup_minute,
                 last_backup_date=last_backup_date,
                 skip_backup=skip_backup,
+                skip_reports=skip_reports,
             )
             self.stdout.write(self.style.SUCCESS("Cycle unique execute."))
             return
 
         backup_status = "desactive" if skip_backup else f"{backup_hour:02d}:{backup_minute:02d}"
+        report_status = "desactives" if skip_reports else "actifs"
         self.stdout.write(
             self.style.SUCCESS(
                 "Scheduler AFRILUX actif "
-                f"(intervalle {interval_seconds}s, backup {backup_status})."
+                f"(intervalle {interval_seconds}s, backup {backup_status}, rapports {report_status})."
             )
         )
         while True:
@@ -70,6 +76,7 @@ class Command(BaseCommand):
                 backup_minute=backup_minute,
                 last_backup_date=last_backup_date,
                 skip_backup=skip_backup,
+                skip_reports=skip_reports,
             )
             next_run = cycle_started_at + timedelta(seconds=interval_seconds)
             self.stdout.write(

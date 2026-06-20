@@ -31,6 +31,13 @@ cd /app
 python manage.py run_sav_automation --skip-reports
 ```
 
+Si SMTP n'est pas encore configure ou si vous faites seulement un test local, ajoutez `--skip-reports`:
+
+```bash
+cd /app
+python manage.py run_platform_scheduler --once --skip-backup --skip-reports
+```
+
 Evitez `DJANGO_RUN_SCHEDULER_IN_WEB=true` sur les petits plans, sauf depannage temporaire.
 
 ## Deploiement
@@ -195,6 +202,15 @@ Si vous voulez utiliser la venv sans activer les scripts PowerShell:
 .\.venv\Scripts\python.exe -m pip install -r afrilux_sav\requirements.txt
 .\.venv\Scripts\python.exe afrilux_sav\manage.py migrate
 ```
+
+Pour tester le scheduler en local Windows sans envoyer les rapports par email:
+
+```powershell
+cd C:\Users\HP\Documents\GitHub\Afrilux-Smart-SAV\afrilux_sav
+python manage.py run_platform_scheduler --once --skip-backup --skip-reports
+```
+
+La commande `cd /app` est reservee au shell Render/Linux. En local Windows, utilisez le dossier du depot puis `cd afrilux_sav`.
 
 Si vous preferez activer la venv dans la session courante:
 

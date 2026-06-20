@@ -18,7 +18,12 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from reportlab.lib import colors
 
 from .ai import OpenAIResponsesClient
-from .comms import create_external_channel_notifications, deliver_notification
+from .comms import (
+    build_ticket_deep_link,
+    create_external_channel_notifications,
+    create_sav_event_notifications,
+    deliver_notification,
+)
 from .models import (
     AccountCredit,
     Agency,
@@ -256,9 +261,10 @@ def is_internal_user(user):
 def push_realtime_update(target_user, payload, *, ticket=None):
     if not target_user:
         return None
-    notifications = create_external_channel_notifications(
-        recipient=target_user,
-        event_type=payload.get("event") or payload.get("action_required") or "realtime_update",
+    event_type = payload.get("event") or payload.get("action_required") or "realtime_update"
+    notifications = create_sav_event_notifications(
+        [target_user],
+        event_type=event_type,
         subject=payload.get("subject", "Mise a jour SAV"),
         message=payload.get("message", "Une action SAV est disponible."),
         ticket=ticket,
@@ -523,7 +529,8 @@ def close_sav_dossier(ticket, diagnosis, action_taken, parts=None, client_name="
     ticket.closed_at = timezone.now()
     ticket.save(update_fields=["status", "closed_at", "updated_at"])
 
-    generate_intervention_pdf(intervention, force=True)
+    pdf_content = generate_intervention_pdf(intervention, force=True)
+    send_ticket_closure_report_notifications(ticket, intervention, pdf_content=pdf_content, actor=actor)
 
     log_audit_event(actor, "dossier_closed", ticket)
     return intervention
@@ -1187,6 +1194,31 @@ def create_notification(recipient, subject, message, channel=Notification.CHANNE
     )
     deliver_notification(notification)
     return notification
+
+
+def notify_client_created_ticket(ticket, *, actor=None):
+    managers = list(manager_queryset_for_organization(ticket.organization))
+    if not managers:
+        return []
+    notifications = create_sav_event_notifications(
+        managers,
+        ticket=ticket,
+        event_type="ticket_created_by_client",
+        subject=f"Nouveau ticket client {ticket.reference}",
+        message=(
+            f"Nouveau ticket cree par {ticket.client}. "
+            f"Client: {ticket.client}. "
+            f"Panne: {ticket.title}. "
+            "Affectation responsable requise."
+        ),
+    )
+    log_audit_event(
+        actor=actor,
+        action="ticket_client_created_notifications",
+        instance=ticket,
+        details={"notifications": [item.id for item in notifications]},
+    )
+    return notifications
 
 
 def ensure_default_sla_rules(organization):
@@ -2101,6 +2133,65 @@ def send_intervention_assignment_email(intervention, pdf_content=None):
     message.attach(filename, pdf_content, "application/pdf")
     message.send(fail_silently=False)
     return True
+
+
+def send_ticket_closure_report_notifications(ticket, intervention, *, pdf_content=None, actor=None):
+    managers = list(manager_queryset_for_organization(ticket.organization))
+    if not managers:
+        return []
+
+    pdf_content = pdf_content or generate_intervention_pdf(intervention, persist=False)
+    filename = f"rapport-intervention-{slugify(ticket.reference)}-{intervention.pk}.pdf"
+    notifications = []
+    for manager in managers:
+        recipient_email = (manager.email or manager.professional_email or "").strip()
+        notification = Notification.objects.create(
+            recipient=manager,
+            ticket=ticket,
+            channel=Notification.CHANNEL_EMAIL,
+            event_type="ticket_closure_report",
+            subject=f"Ticket cloture {ticket.reference}",
+            message=(
+                f"Le ticket '{ticket.title}' est cloture. "
+                "Le rapport PDF d'intervention est joint a cet email."
+            ),
+            status=Notification.STATUS_PENDING,
+            recipient_contact=recipient_email,
+            provider="smtp",
+            deep_link=build_ticket_deep_link(ticket),
+        )
+        notifications.append(notification)
+        if not recipient_email:
+            notification.status = Notification.STATUS_FAILED
+            notification.error_message = "Aucune adresse email responsable disponible."
+            notification.save(update_fields=["status", "error_message"])
+            continue
+        try:
+            message = EmailMessage(
+                subject=notification.subject,
+                body=f"{notification.message}\nOuvrir: {notification.deep_link}",
+                to=[recipient_email],
+            )
+            message.attach(filename, pdf_content, "application/pdf")
+            message.send(fail_silently=False)
+        except Exception as exc:  # noqa: BLE001
+            notification.status = Notification.STATUS_FAILED
+            notification.error_message = str(exc)[:1000]
+            notification.save(update_fields=["status", "error_message"])
+            continue
+        notification.status = Notification.STATUS_SENT
+        notification.sent_at = timezone.now()
+        notification.provider_reference = filename
+        notification.error_message = ""
+        notification.save(update_fields=["status", "sent_at", "provider_reference", "error_message"])
+
+    log_audit_event(
+        actor=actor,
+        action="ticket_closure_report_notifications",
+        instance=ticket,
+        details={"notifications": [item.id for item in notifications]},
+    )
+    return notifications
 
 
 def archive_generated_report(
@@ -4885,13 +4976,24 @@ def dispatch_due_reports(*, organization=None, now=None, dry_run=False, report_t
             if dry_run:
                 results.append({"organization": org.slug, "report_type": report_type, "status": "dry_run"})
                 continue
-            send_report_to_recipients(
-                report=report,
-                report_type=report_type,
-                recipients=recipients,
-                filename=filename,
-                pdf_content=pdf_content,
-            )
+            try:
+                send_report_to_recipients(
+                    report=report,
+                    report_type=report_type,
+                    recipients=recipients,
+                    filename=filename,
+                    pdf_content=pdf_content,
+                )
+            except Exception as exc:
+                results.append(
+                    {
+                        "organization": org.slug,
+                        "report_type": report_type,
+                        "status": "send_failed",
+                        "error": str(exc)[:300],
+                    }
+                )
+                continue
             archive_generated_report(
                 organization=org,
                 report=report,

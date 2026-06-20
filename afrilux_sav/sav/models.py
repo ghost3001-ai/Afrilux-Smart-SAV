@@ -109,6 +109,14 @@ class Agency(TimeStampedModel):
 
 
 class User(AbstractUser):
+    LANGUAGE_FRENCH = "fr"
+    LANGUAGE_ENGLISH = "en"
+
+    LANGUAGE_CHOICES = (
+        (LANGUAGE_FRENCH, "Francais"),
+        (LANGUAGE_ENGLISH, "Anglais"),
+    )
+
     ROLE_CLIENT = "client"
     ROLE_SUPPORT = "support"
     ROLE_TECHNICIAN = "technician"
@@ -248,6 +256,17 @@ class User(AbstractUser):
     )
     role = models.CharField("Fonction", max_length=20, choices=ROLE_CHOICES, default=ROLE_CLIENT)
     phone = models.CharField(max_length=20, blank=True)
+    sms_phone = models.CharField(max_length=30, blank=True)
+    whatsapp_phone = models.CharField(max_length=30, blank=True)
+    preferred_language = models.CharField(max_length=8, choices=LANGUAGE_CHOICES, default=LANGUAGE_FRENCH)
+    notification_whatsapp_enabled = models.BooleanField(default=True)
+    notification_sms_enabled = models.BooleanField(default=True)
+    notification_email_enabled = models.BooleanField(default=True)
+    notification_push_enabled = models.BooleanField(default=True)
+    notification_do_not_disturb_start = models.TimeField(null=True, blank=True)
+    notification_do_not_disturb_end = models.TimeField(null=True, blank=True)
+    notification_daily_limit = models.PositiveIntegerField(default=0, help_text="0 = illimite.")
+    notification_min_interval_minutes = models.PositiveIntegerField(default=0, help_text="0 = pas de limite.")
     company_name = models.CharField(max_length=255, blank=True)
     is_verified = models.BooleanField(default=False)
     professional_email = models.EmailField(blank=True)
@@ -2160,12 +2179,14 @@ class Notification(models.Model):
     STATUS_PENDING = "pending"
     STATUS_SENT = "sent"
     STATUS_READ = "read"
+    STATUS_CLICKED = "clicked"
     STATUS_FAILED = "failed"
 
     STATUS_CHOICES = (
         (STATUS_PENDING, "En attente"),
         (STATUS_SENT, "Envoyee"),
         (STATUS_READ, "Lue"),
+        (STATUS_CLICKED, "Cliquee"),
         (STATUS_FAILED, "Echouee"),
     )
 
@@ -2183,9 +2204,17 @@ class Notification(models.Model):
     subject = models.CharField(max_length=255)
     message = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    recipient_contact = models.CharField(max_length=255, blank=True)
+    provider = models.CharField(max_length=80, blank=True)
+    provider_reference = models.CharField(max_length=255, blank=True)
+    error_message = models.TextField(blank=True)
+    delivery_payload = models.JSONField(default=dict, blank=True)
+    deep_link = models.URLField(max_length=500, blank=True)
+    action_payload = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     sent_at = models.DateTimeField(null=True, blank=True)
     read_at = models.DateTimeField(null=True, blank=True)
+    clicked_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -2193,6 +2222,7 @@ class Notification(models.Model):
             models.Index(fields=["recipient", "status"], name="sav_notif_recipient_status_idx"),
             models.Index(fields=["organization", "status"], name="sav_notif_org_status_idx"),
             models.Index(fields=["channel", "status"], name="sav_notif_channel_status_idx"),
+            models.Index(fields=["event_type", "created_at"], name="sav_notif_event_created_idx"),
         ]
 
     def __str__(self):

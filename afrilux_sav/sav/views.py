@@ -209,6 +209,7 @@ from .services import (
     scope_ticket_queryset,
     scope_user_queryset,
     scope_workflow_execution_queryset,
+    notify_client_created_ticket,
     notify_ticket_status_change,
     archive_generated_report,
 )
@@ -1080,6 +1081,8 @@ class TicketViewSet(AuditedModelViewSet):
                 notify_ticket_status_change(instance, previous_status, actor=self.request.user)
 
         self.audit("ticket_created", instance)
+        if self.request.user.role == User.ROLE_CLIENT and instance.status == Ticket.STATUS_PENDING_ASSIGNMENT:
+            notify_client_created_ticket(instance, actor=self.request.user)
         run_automation_rules_for_ticket(instance, actor=self.request.user, trigger_event=AutomationRule.TRIGGER_TICKET_CREATED)
 
     def perform_update(self, serializer):
@@ -2113,7 +2116,7 @@ class NotificationViewSet(AuditedModelViewSet):
     ordering_fields = ["created_at", "sent_at", "read_at"]
 
     def get_permissions(self):
-        if self.action == "mark_read":
+        if self.action in {"mark_read", "mark_clicked"}:
             return [ReadOnlyForAuditors()]
         if self.action == "dispatch_pending":
             return [IsInternalUser()]
@@ -2163,6 +2166,23 @@ class NotificationViewSet(AuditedModelViewSet):
         notification.save(update_fields=["status", "read_at"])
         self.audit("notification_read", notification)
         return Response({"status": notification.status, "read_at": notification.read_at})
+
+    @action(detail=True, methods=["post"], url_path="mark-clicked")
+    def mark_clicked(self, request, pk=None):
+        notification = self.get_object()
+        notification.status = Notification.STATUS_CLICKED
+        notification.clicked_at = timezone.now()
+        if notification.read_at is None:
+            notification.read_at = notification.clicked_at
+        notification.save(update_fields=["status", "clicked_at", "read_at"])
+        self.audit("notification_clicked", notification)
+        return Response(
+            {
+                "status": notification.status,
+                "clicked_at": notification.clicked_at,
+                "deep_link": notification.deep_link,
+            }
+        )
 
     @action(detail=False, methods=["post"])
     def dispatch_pending(self, request):

@@ -128,6 +128,7 @@ from .services import (
     start_maintenance_ticket,
     validate_maintenance_report,
     role_workspace_name,
+    notify_client_created_ticket,
     notify_ticket_status_change,
     propose_planning,
     provide_escalation_solution,
@@ -1123,6 +1124,8 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
             log_audit_event(self.request.user, "ticket_attachment_created_web", attachment, {"ticket": self.object.reference})
 
         log_audit_event(self.request.user, "ticket_created_web", self.object, {"via": "portal"})
+        if self.request.user.role == User.ROLE_CLIENT and self.object.status == Ticket.STATUS_PENDING_ASSIGNMENT:
+            notify_client_created_ticket(self.object, actor=self.request.user)
         run_automation_rules_for_ticket(self.object, actor=self.request.user)
         if self.request.user.role == User.ROLE_CLIENT and self.object.status == Ticket.STATUS_PENDING_ASSIGNMENT:
             django_messages.success(

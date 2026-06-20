@@ -21,6 +21,31 @@ from .file_validation import validate_ticket_attachment_file
 from .models import AuditLog, DeviceRegistration, Message, Notification, Organization, Ticket, TicketAttachment, User
 
 
+EXTERNAL_CHANNEL_FALLBACKS = {
+    Notification.CHANNEL_WHATSAPP: Notification.CHANNEL_SMS,
+    Notification.CHANNEL_SMS: Notification.CHANNEL_EMAIL,
+}
+DEFAULT_EXTERNAL_CHANNELS = [
+    Notification.CHANNEL_WHATSAPP,
+    Notification.CHANNEL_SMS,
+    Notification.CHANNEL_EMAIL,
+]
+SAV_EVENT_CHANNELS = {
+    "ticket_created_by_client": DEFAULT_EXTERNAL_CHANNELS,
+    "ticket_assignment": DEFAULT_EXTERNAL_CHANNELS,
+    "ticket_technician_assigned": DEFAULT_EXTERNAL_CHANNELS,
+    "ticket_team_assigned": DEFAULT_EXTERNAL_CHANNELS,
+    "planning_proposed": DEFAULT_EXTERNAL_CHANNELS,
+    "planning_confirmed": [Notification.CHANNEL_WHATSAPP, Notification.CHANNEL_SMS],
+    "start_validated": [Notification.CHANNEL_WHATSAPP, Notification.CHANNEL_SMS],
+    "finish_validated": [Notification.CHANNEL_WHATSAPP, Notification.CHANNEL_SMS],
+    "ticket_escalation_requested": DEFAULT_EXTERNAL_CHANNELS,
+    "ticket_escalation_solution": DEFAULT_EXTERNAL_CHANNELS,
+    "ticket_reassigned": DEFAULT_EXTERNAL_CHANNELS,
+    "ticket_closure_report": [Notification.CHANNEL_EMAIL],
+}
+
+
 @dataclass
 class DeliveryResult:
     success: bool
@@ -57,6 +82,122 @@ def firebase_push_enabled() -> bool:
     return bool(settings.FIREBASE_PROJECT_ID)
 
 
+def build_ticket_deep_link(ticket: Ticket | None) -> str:
+    if not ticket:
+        return ""
+    public_base_url = getattr(settings, "SAV_PUBLIC_BASE_URL", "").strip().rstrip("/")
+    if not public_base_url:
+        public_base_url = "http://127.0.0.1:8000"
+    return f"{public_base_url}/tickets/{ticket.pk}/"
+
+
+def notification_action_payload(event_type: str, ticket: Ticket | None) -> dict:
+    actions_by_event = {
+        "planning_proposed": [
+            {"key": "accept", "label": "Accepter"},
+            {"key": "reject", "label": "Refuser"},
+        ],
+        "start_requested": [
+            {"key": "yes", "label": "Oui, commencer"},
+            {"key": "no", "label": "Non, reporter"},
+        ],
+        "finish_requested": [
+            {"key": "yes", "label": "Oui, terminer"},
+            {"key": "no", "label": "Non, continuer"},
+        ],
+    }
+    actions = actions_by_event.get(event_type, [])
+    if not actions:
+        return {}
+    return {
+        "event_type": event_type,
+        "ticket_id": ticket.id if ticket else None,
+        "actions": actions,
+    }
+
+
+def recipient_contact_for_channel(recipient: User, channel: str) -> str:
+    if channel == Notification.CHANNEL_EMAIL:
+        return (recipient.email or recipient.professional_email or "").strip()
+    if channel == Notification.CHANNEL_WHATSAPP:
+        return normalize_phone(getattr(recipient, "whatsapp_phone", "") or recipient.phone)
+    if channel == Notification.CHANNEL_SMS:
+        return normalize_phone(getattr(recipient, "sms_phone", "") or recipient.phone)
+    if channel == Notification.CHANNEL_PUSH:
+        return "device"
+    return recipient.username
+
+
+def recipient_channel_enabled(recipient: User, channel: str) -> bool:
+    if channel == Notification.CHANNEL_IN_APP:
+        return True
+    if channel == Notification.CHANNEL_EMAIL:
+        return bool(getattr(recipient, "notification_email_enabled", True))
+    if channel == Notification.CHANNEL_SMS:
+        return bool(getattr(recipient, "notification_sms_enabled", True))
+    if channel == Notification.CHANNEL_WHATSAPP:
+        return bool(getattr(recipient, "notification_whatsapp_enabled", True))
+    if channel == Notification.CHANNEL_PUSH:
+        return bool(getattr(recipient, "notification_push_enabled", True))
+    return False
+
+
+def channel_provider_available(recipient: User, channel: str) -> bool:
+    contact = recipient_contact_for_channel(recipient, channel)
+    if channel == Notification.CHANNEL_IN_APP:
+        return True
+    if channel == Notification.CHANNEL_EMAIL:
+        return bool(contact and email_enabled())
+    if channel == Notification.CHANNEL_SMS:
+        return bool(contact and twilio_sms_enabled())
+    if channel == Notification.CHANNEL_WHATSAPP:
+        return bool(contact and twilio_whatsapp_enabled())
+    if channel == Notification.CHANNEL_PUSH:
+        return bool(firebase_push_enabled() and recipient.device_registrations.filter(is_active=True).exists())
+    return False
+
+
+def external_delivery_paused(recipient: User, now=None) -> str:
+    now = timezone.localtime(now or timezone.now())
+    start = getattr(recipient, "notification_do_not_disturb_start", None)
+    end = getattr(recipient, "notification_do_not_disturb_end", None)
+    if start and end:
+        current = now.time()
+        in_window = start <= current < end if start < end else current >= start or current < end
+        if in_window:
+            return "Plage ne pas deranger active."
+
+    daily_limit = int(getattr(recipient, "notification_daily_limit", 0) or 0)
+    if daily_limit > 0:
+        sent_today = Notification.objects.filter(
+            recipient=recipient,
+            channel__in=DEFAULT_EXTERNAL_CHANNELS,
+            created_at__date=now.date(),
+        ).count()
+        if sent_today >= daily_limit:
+            return "Limite quotidienne de notifications atteinte."
+
+    min_interval = int(getattr(recipient, "notification_min_interval_minutes", 0) or 0)
+    if min_interval > 0:
+        recent_since = now - timedelta(minutes=min_interval)
+        if Notification.objects.filter(
+            recipient=recipient,
+            channel__in=DEFAULT_EXTERNAL_CHANNELS,
+            created_at__gte=recent_since,
+        ).exists():
+            return "Intervalle minimum entre notifications non atteint."
+    return ""
+
+
+def _message_with_deep_link(notification: Notification, *, max_length=None) -> str:
+    message = notification.message or ""
+    if notification.deep_link and notification.deep_link not in message:
+        message = f"{message}\nOuvrir: {notification.deep_link}".strip()
+    if max_length and len(message) > max_length:
+        return f"{message[: max_length - 3]}..."
+    return message
+
+
 def _default_sla_deadline(priority: str):
     from .services import compute_ticket_sla_deadline
 
@@ -64,11 +205,34 @@ def _default_sla_deadline(priority: str):
 
 
 def deliver_notification(notification: Notification) -> DeliveryResult:
+    notification.recipient_contact = notification.recipient_contact or recipient_contact_for_channel(
+        notification.recipient,
+        notification.channel,
+    )
     if notification.channel == Notification.CHANNEL_IN_APP:
         notification.status = Notification.STATUS_SENT
         notification.sent_at = timezone.now()
-        notification.save(update_fields=["status", "sent_at"])
+        notification.provider = "in_app"
+        notification.provider_reference = str(notification.id or "")
+        notification.error_message = ""
+        notification.save(
+            update_fields=[
+                "status",
+                "sent_at",
+                "provider",
+                "provider_reference",
+                "error_message",
+                "recipient_contact",
+            ]
+        )
         return DeliveryResult(success=True, provider="in_app")
+
+    pause_reason = external_delivery_paused(notification.recipient)
+    if pause_reason:
+        notification.status = Notification.STATUS_PENDING
+        notification.error_message = pause_reason
+        notification.save(update_fields=["status", "error_message", "recipient_contact"])
+        return DeliveryResult(success=False, provider="paused", error_message=pause_reason)
 
     if notification.channel == Notification.CHANNEL_EMAIL:
         result = _deliver_email(notification)
@@ -84,10 +248,24 @@ def deliver_notification(notification: Notification) -> DeliveryResult:
     if result.success:
         notification.status = Notification.STATUS_SENT
         notification.sent_at = timezone.now()
-        notification.save(update_fields=["status", "sent_at"])
+        notification.error_message = ""
     else:
         notification.status = Notification.STATUS_FAILED
-        notification.save(update_fields=["status"])
+        notification.error_message = result.error_message[:1000]
+    notification.provider = result.provider
+    notification.provider_reference = result.external_id[:255]
+    notification.delivery_payload = result.payload or {}
+    notification.save(
+        update_fields=[
+            "status",
+            "sent_at",
+            "provider",
+            "provider_reference",
+            "error_message",
+            "delivery_payload",
+            "recipient_contact",
+        ]
+    )
 
     return result
 
@@ -134,9 +312,21 @@ def _create_and_deliver_notifications(
     event_type: str,
     ticket: Ticket | None,
     channels: list[str],
+    deep_link: str = "",
+    action_payload: dict | None = None,
 ) -> list[Notification]:
     notifications = []
-    for channel in channels:
+    created_channels = set()
+    action_payload = action_payload or notification_action_payload(event_type, ticket)
+    deep_link = deep_link or build_ticket_deep_link(ticket)
+
+    def create_for_channel(channel):
+        if channel in created_channels:
+            return None
+        if not recipient_channel_enabled(recipient, channel):
+            return None
+        if not channel_provider_available(recipient, channel):
+            return None
         notification = Notification.objects.create(
             recipient=recipient,
             ticket=ticket,
@@ -145,31 +335,74 @@ def _create_and_deliver_notifications(
             subject=subject,
             message=message,
             status=Notification.STATUS_PENDING,
+            recipient_contact=recipient_contact_for_channel(recipient, channel),
+            deep_link=deep_link,
+            action_payload=action_payload,
         )
-        deliver_notification(notification)
+        created_channels.add(channel)
+        result = deliver_notification(notification)
         notifications.append(notification)
+        return notification, result
+
+    for channel in channels:
+        created = create_for_channel(channel)
+        if not created:
+            continue
+        notification, result = created
+        fallback_channel = EXTERNAL_CHANNEL_FALLBACKS.get(notification.channel)
+        if result and not result.success and result.provider != "paused" and fallback_channel:
+            create_for_channel(fallback_channel)
     return notifications
 
 
-def create_external_channel_notifications(recipient, subject, message, event_type, ticket=None) -> list[Notification]:
-    channels = [Notification.CHANNEL_IN_APP]
-    if firebase_push_enabled() and recipient.device_registrations.filter(is_active=True).exists():
-        channels.append(Notification.CHANNEL_PUSH)
-    if recipient.email and email_enabled():
-        channels.append(Notification.CHANNEL_EMAIL)
-    phone = normalize_phone(recipient.phone)
-    if phone and twilio_sms_enabled():
-        channels.append(Notification.CHANNEL_SMS)
-    if phone and twilio_whatsapp_enabled():
-        channels.append(Notification.CHANNEL_WHATSAPP)
+def create_external_channel_notifications(
+    recipient,
+    subject,
+    message,
+    event_type,
+    ticket=None,
+    channels=None,
+    deep_link="",
+    action_payload=None,
+) -> list[Notification]:
+    selected_channels = [Notification.CHANNEL_IN_APP]
+    if recipient_channel_enabled(recipient, Notification.CHANNEL_PUSH) and channel_provider_available(recipient, Notification.CHANNEL_PUSH):
+        selected_channels.append(Notification.CHANNEL_PUSH)
+
+    requested_external_channels = list(channels) if channels is not None else list(DEFAULT_EXTERNAL_CHANNELS)
+    for channel in requested_external_channels:
+        if channel != Notification.CHANNEL_IN_APP and channel not in selected_channels:
+            selected_channels.append(channel)
     return _create_and_deliver_notifications(
         recipient=recipient,
         subject=subject,
         message=message,
         event_type=event_type,
         ticket=ticket,
-        channels=channels,
+        channels=selected_channels,
+        deep_link=deep_link,
+        action_payload=action_payload,
     )
+
+
+def create_sav_event_notifications(recipients, *, event_type, subject, message, ticket=None, channels=None) -> list[Notification]:
+    if isinstance(recipients, User):
+        recipients = [recipients]
+    selected_channels = list(channels) if channels is not None else list(SAV_EVENT_CHANNELS.get(event_type, DEFAULT_EXTERNAL_CHANNELS))
+    notifications = []
+    deduped_recipients = {recipient.id: recipient for recipient in recipients if getattr(recipient, "id", None)}
+    for recipient in deduped_recipients.values():
+        notifications.extend(
+            create_external_channel_notifications(
+                recipient=recipient,
+                ticket=ticket,
+                event_type=event_type,
+                subject=subject,
+                message=message,
+                channels=selected_channels,
+            )
+        )
+    return notifications
 
 
 def create_message_delivery_notifications(message: Message) -> list[Notification]:
@@ -177,16 +410,15 @@ def create_message_delivery_notifications(message: Message) -> list[Notification
         return []
 
     recipient = message.recipient or message.ticket.client
-    phone = normalize_phone(recipient.phone)
     channels = [Notification.CHANNEL_IN_APP]
-    if firebase_push_enabled() and recipient.device_registrations.filter(is_active=True).exists():
+    if recipient_channel_enabled(recipient, Notification.CHANNEL_PUSH) and channel_provider_available(recipient, Notification.CHANNEL_PUSH):
         channels.append(Notification.CHANNEL_PUSH)
 
-    if message.channel == Message.CHANNEL_EMAIL and recipient.email and email_enabled():
+    if message.channel == Message.CHANNEL_EMAIL and channel_provider_available(recipient, Notification.CHANNEL_EMAIL):
         channels.append(Notification.CHANNEL_EMAIL)
-    elif message.channel == Message.CHANNEL_SMS and phone and twilio_sms_enabled():
+    elif message.channel == Message.CHANNEL_SMS and channel_provider_available(recipient, Notification.CHANNEL_SMS):
         channels.append(Notification.CHANNEL_SMS)
-    elif message.channel == Message.CHANNEL_WHATSAPP and phone and twilio_whatsapp_enabled():
+    elif message.channel == Message.CHANNEL_WHATSAPP and channel_provider_available(recipient, Notification.CHANNEL_WHATSAPP):
         channels.append(Notification.CHANNEL_WHATSAPP)
 
     return _create_and_deliver_notifications(
@@ -566,15 +798,16 @@ def handle_email_inbound(payload: dict[str, str], uploaded_files=None) -> dict:
 def _deliver_email(notification: Notification) -> DeliveryResult:
     if not email_enabled():
         return DeliveryResult(success=False, provider="smtp", error_message="SMTP is not configured.")
-    if not notification.recipient.email:
+    recipient_email = recipient_contact_for_channel(notification.recipient, Notification.CHANNEL_EMAIL)
+    if not recipient_email:
         return DeliveryResult(success=False, provider="smtp", error_message="Recipient has no email address.")
 
     try:
         sent_count = send_mail(
             notification.subject,
-            notification.message,
+            _message_with_deep_link(notification),
             settings.DEFAULT_FROM_EMAIL,
-            [notification.recipient.email],
+            [recipient_email],
             fail_silently=False,
         )
     except Exception as exc:  # noqa: BLE001
@@ -636,6 +869,8 @@ def _deliver_push(notification: Notification) -> DeliveryResult:
                     "channel": notification.channel,
                     "subject": notification.subject,
                     "message": notification.message[:500],
+                    "deep_link": notification.deep_link,
+                    "action_payload": json.dumps(notification.action_payload or {}),
                 },
                 "android": {"priority": "high"},
                 "apns": {
@@ -692,7 +927,10 @@ def _deliver_twilio_message(notification: Notification, use_whatsapp: bool) -> D
     if not use_whatsapp and not twilio_sms_enabled():
         return DeliveryResult(success=False, provider="twilio_sms", error_message="Twilio SMS is not configured.")
 
-    to_phone = normalize_phone(notification.recipient.phone)
+    to_phone = recipient_contact_for_channel(
+        notification.recipient,
+        Notification.CHANNEL_WHATSAPP if use_whatsapp else Notification.CHANNEL_SMS,
+    )
     if not to_phone:
         return DeliveryResult(success=False, provider="twilio", error_message="Recipient has no phone number.")
 
@@ -704,7 +942,7 @@ def _deliver_twilio_message(notification: Notification, use_whatsapp: bool) -> D
     form = {
         "To": to_value,
         "From": from_value,
-        "Body": notification.message,
+        "Body": _message_with_deep_link(notification, max_length=1500 if use_whatsapp else 320),
     }
     if settings.TWILIO_STATUS_CALLBACK_URL:
         form["StatusCallback"] = settings.TWILIO_STATUS_CALLBACK_URL
