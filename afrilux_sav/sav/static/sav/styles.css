@@ -180,7 +180,7 @@ body[data-theme="dark"] .brand__logo-wrap {
 .brand strong {
     display: block;
     font-size: 1.02rem;
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
 }
 
 .brand small {
@@ -353,12 +353,12 @@ body[data-theme="dark"] .brand__logo-wrap {
 .article-card h1 {
     margin: 0;
     font-family: var(--font-display);
-    letter-spacing: -0.03em;
+    letter-spacing: 0;
 }
 
 .hero h1,
 .section-head--page h1 {
-    font-size: clamp(2.2rem, 3vw, 3.8rem);
+    font-size: 3rem;
 }
 
 .hero__lead {
@@ -423,7 +423,7 @@ body[data-theme="dark"] .brand__logo-wrap {
     display: block;
     margin-top: 10px;
     font-size: 1.7rem;
-    letter-spacing: -0.04em;
+    letter-spacing: 0;
 }
 
 .hero__summary-item small,
@@ -437,7 +437,7 @@ body[data-theme="dark"] .brand__logo-wrap {
 .hero__summary--feature .hero__summary-item strong {
     font-family: var(--font-body);
     font-size: 1rem;
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
 }
 
 .hero__summary--feature .hero__summary-item p {
@@ -660,7 +660,7 @@ body[data-theme="dark"] .brand__logo-wrap {
     font-size: 2.15rem;
     font-family: var(--font-body);
     font-weight: 700;
-    letter-spacing: -0.06em;
+    letter-spacing: 0;
 }
 
 .stat-card {
@@ -1254,5 +1254,403 @@ textarea {
     .brand__logo-wrap {
         width: 116px;
         height: 50px;
+    }
+}
+
+/* Charte AFRILUX 2026 - lisibilite terrain et experience mobile */
+:root {
+    --bg: #f6f8f7;
+    --bg-panel: rgba(255, 255, 255, 0.94);
+    --card: rgba(255, 255, 255, 0.96);
+    --card-strong: #ffffff;
+    --surface: #eef4f1;
+    --surface-strong: #f8faf9;
+    --stroke: rgba(24, 36, 45, 0.12);
+    --accent: #d5671d;
+    --accent-strong: #a94d13;
+    --accent-soft: rgba(213, 103, 29, 0.12);
+    --success: #157864;
+    --warning: #b87512;
+    --critical: #a33728;
+    --info: #256f9c;
+    --shadow: 0 18px 44px rgba(17, 30, 42, 0.09);
+    --shadow-tight: 0 10px 24px rgba(17, 30, 42, 0.08);
+    --radius: 12px;
+    --radius-sm: 8px;
+    --font-display: "Aptos Display", "Segoe UI", "Trebuchet MS", sans-serif;
+}
+
+body {
+    background: linear-gradient(180deg, #f7f9f8 0%, #eef4f1 100%);
+}
+
+body[data-theme="dark"] {
+    background: linear-gradient(180deg, #121b22 0%, #0d141a 100%);
+}
+
+body::before {
+    background-image:
+        linear-gradient(rgba(21, 120, 100, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(21, 120, 100, 0.035) 1px, transparent 1px);
+    background-size: 96px 96px;
+    opacity: 0.42;
+}
+
+body::after {
+    background-size: 220px auto;
+    opacity: 0.018;
+}
+
+.ambient {
+    display: none;
+}
+
+*,
+*::before,
+*::after {
+    letter-spacing: 0;
+}
+
+.topbar {
+    position: sticky;
+    top: 12px;
+    z-index: 30;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.94);
+}
+
+body[data-theme="dark"] .topbar {
+    background: rgba(20, 28, 36, 0.94);
+}
+
+.brand__logo-wrap,
+.nav a,
+.nav__link-button,
+.realtime-status,
+.hero__summary-item,
+.card,
+.stat-card,
+.flash,
+.timeline__item,
+.mini-card,
+.planning-sidebar,
+.planning-column,
+.planning-ticket,
+.planning-day,
+.table-wrap,
+.responsive-table,
+input,
+select,
+textarea {
+    border-radius: var(--radius-sm);
+}
+
+.hero {
+    padding: 28px;
+    background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(246, 250, 248, 0.94)),
+        linear-gradient(90deg, rgba(213, 103, 29, 0.08), rgba(21, 120, 100, 0.08));
+}
+
+.hero::before {
+    display: none;
+}
+
+.hero h1,
+.section-head h2,
+.section-head--page h1,
+.article-card h1 {
+    font-family: var(--font-display);
+    letter-spacing: 0;
+}
+
+.hero h1,
+.section-head--page h1 {
+    font-size: 2.75rem;
+    line-height: 1.08;
+}
+
+.hero__summary-item,
+.timeline__item,
+.mini-card,
+.planning-sidebar,
+.planning-column,
+.planning-ticket,
+.planning-day,
+.heatmap-tile {
+    background: var(--surface-strong);
+}
+
+.stat-card::before,
+.auth-card::before {
+    background: linear-gradient(90deg, var(--accent), var(--success), var(--info));
+}
+
+.button,
+.button--compact {
+    border-radius: 8px;
+}
+
+.button--primary {
+    background: linear-gradient(135deg, var(--accent), var(--success));
+    box-shadow: 0 12px 24px rgba(21, 120, 100, 0.18);
+}
+
+.button--ghost {
+    background: rgba(255, 255, 255, 0.82);
+}
+
+.badge--neutral,
+.badge--calm {
+    background: rgba(37, 111, 156, 0.1);
+    color: var(--info);
+}
+
+.nav-toggle {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 1px solid var(--stroke);
+    border-radius: 8px;
+    background: var(--surface-strong);
+    color: var(--text);
+    cursor: pointer;
+}
+
+.nav-toggle__bar {
+    position: absolute;
+    width: 20px;
+    height: 2px;
+    border-radius: 999px;
+    background: currentColor;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.nav-toggle__bar:nth-child(1) { transform: translateY(-7px); }
+.nav-toggle__bar:nth-child(3) { transform: translateY(7px); }
+
+.topbar.is-nav-open .nav-toggle__bar:nth-child(1) { transform: rotate(45deg); }
+.topbar.is-nav-open .nav-toggle__bar:nth-child(2) { opacity: 0; }
+.topbar.is-nav-open .nav-toggle__bar:nth-child(3) { transform: rotate(-45deg); }
+
+@media (max-width: 720px) {
+    body {
+        background: #f6f8f7;
+    }
+
+    body::before,
+    body::after {
+        opacity: 0;
+    }
+
+    .layout {
+        padding: 10px;
+    }
+
+    .topbar {
+        top: 8px;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 10px;
+        padding: 10px;
+        margin-bottom: 14px;
+        border-radius: 12px;
+    }
+
+    .brand {
+        min-width: 0;
+        gap: 10px;
+    }
+
+    .brand__logo-wrap {
+        width: 82px;
+        height: 38px;
+        padding: 3px 5px;
+        flex: 0 0 auto;
+    }
+
+    .brand strong {
+        font-size: 0.92rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 52vw;
+    }
+
+    .brand small {
+        display: none;
+    }
+
+    .nav-toggle {
+        display: inline-flex;
+        position: relative;
+    }
+
+    .nav {
+        grid-column: 1 / -1;
+        display: none;
+        width: 100%;
+        max-height: calc(100vh - 96px);
+        padding-top: 10px;
+        overflow-y: auto;
+        border-top: 1px solid var(--stroke);
+    }
+
+    .topbar.is-nav-open .nav {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+
+    .nav a,
+    .nav__link-button,
+    .nav select,
+    .realtime-status {
+        width: 100%;
+        min-height: 44px;
+        justify-content: space-between;
+        padding: 10px 12px;
+        background: var(--surface-strong);
+        border: 1px solid var(--stroke);
+    }
+
+    .nav__logout-form {
+        width: 100%;
+    }
+
+    .page {
+        gap: 14px;
+    }
+
+    .hero,
+    .card,
+    .stat-card,
+    .article-card {
+        padding: 16px;
+        border-radius: 10px;
+    }
+
+    .hero {
+        gap: 16px;
+    }
+
+    .hero h1,
+    .section-head--page h1 {
+        font-size: 1.75rem;
+    }
+
+    .hero__lead {
+        font-size: 0.98rem;
+        line-height: 1.55;
+    }
+
+    .hero__actions,
+    .chip-row,
+    .form-actions,
+    .wizard__nav {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .button {
+        width: 100%;
+        min-height: 46px;
+    }
+
+    .stats-grid,
+    .card-grid,
+    .two-col,
+    .three-col,
+    .chart-grid,
+    .planning-grid,
+    .planning-columns,
+    .workflow-grid,
+    .admin-summary,
+    .detail-grid,
+    .hero__summary--feature,
+    .filter-grid,
+    .form-grid--two,
+    .form-inline {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+
+    .stats-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .stat-card {
+        min-height: 116px;
+    }
+
+    .stat-card span {
+        font-size: 0.8rem;
+    }
+
+    .stat-card strong {
+        font-size: 1.65rem;
+        margin: 8px 0 2px;
+    }
+
+    .stat-card small {
+        font-size: 0.78rem;
+    }
+
+    .section-head,
+    .section-head--page,
+    .ticket-card__top,
+    .ticket-card__meta,
+    .bar-item__meta,
+    .list-row,
+    .timeline__head {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .ticket-card h2,
+    .product-card h2,
+    .notification-card h2 {
+        font-size: 1.08rem;
+        line-height: 1.25;
+    }
+
+    .ticket-card p,
+    .product-card p,
+    .notification-card p {
+        line-height: 1.5;
+    }
+
+    input,
+    select,
+    textarea {
+        min-height: 46px;
+        padding: 12px 14px;
+        font-size: 16px;
+    }
+
+    .table-wrap,
+    .responsive-table {
+        margin-inline: -2px;
+        border-radius: 8px;
+    }
+
+    .table th,
+    .table td,
+    .responsive-table th,
+    .responsive-table td {
+        padding: 12px 10px;
+        white-space: nowrap;
+    }
+
+    .realtime-toast-stack {
+        left: 10px;
+        right: 10px;
+        bottom: 10px;
+        max-width: none;
     }
 }

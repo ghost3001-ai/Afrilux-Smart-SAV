@@ -1,6 +1,6 @@
 # Deploiement Render
 
-Le depot est maintenant prepare pour un deploiement Render via la blueprint [render.yaml](/home/ghost/Afrilux_Smart/projet/Service%20Apres%20Vente/render.yaml).
+Le depot est maintenant prepare pour un deploiement Render via la blueprint [render.yaml](../render.yaml).
 
 ## Architecture retenue
 
@@ -56,11 +56,20 @@ Evitez `DJANGO_RUN_SCHEDULER_IN_WEB=true` sur les petits plans, sauf depannage t
 - `DJANGO_RUN_MIGRATIONS_ON_STARTUP=true`
 - `DJANGO_COLLECTSTATIC_ON_STARTUP=true`
 - `DJANGO_SERVE_STATIC_LOCAL=true`
+- `SAV_PUBLIC_BASE_URL=https://afrilux-smart-sav-o9me.onrender.com`
+- `DJANGO_ALLOWED_HOSTS=afrilux-smart-sav-o9me.onrender.com,localhost,127.0.0.1`
+- `CSRF_TRUSTED_ORIGINS=https://afrilux-smart-sav-o9me.onrender.com`
 - `DJANGO_RUN_SCHEDULER_IN_WEB=false`
 - `SCHEDULER_INTERVAL_SECONDS=300`
 - `GUNICORN_WORKERS=2`
+- `GUNICORN_WORKER_CLASS=gthread`
+- `GUNICORN_THREADS=8`
+- `GUNICORN_TIMEOUT=120`
+- `SAV_REALTIME_STREAM_SECONDS=25`
+- `SAV_REALTIME_POLL_SECONDS=2`
 - `SAV_SHELL_CACHE_SECONDS=30`
 - `SAV_DASHBOARD_CACHE_SECONDS=60`
+- `DJANGO_BOOTSTRAP_ON_STARTUP=false`
 - `SCHEDULER_SKIP_BACKUP=true`
 - `SECURE_SSL_REDIRECT=true`
 - `SESSION_COOKIE_SECURE=true`
@@ -112,7 +121,7 @@ Vous pouvez creer ou mettre a jour le compte admin uniquement avec les variables
 
 Le fichier `render.yaml` declare deja les variables de bootstrap non sensibles. Il declare aussi `BOOTSTRAP_ADMIN_PASSWORD` avec `sync: false` pour ne pas committer le mot de passe admin.
 
-Si vous creez la blueprint pour la premiere fois, Render vous demandera la valeur de `BOOTSTRAP_ADMIN_PASSWORD`.
+Si vous creez la blueprint pour la premiere fois et que vous mettez temporairement `DJANGO_BOOTSTRAP_ON_STARTUP=true`, Render vous demandera la valeur de `BOOTSTRAP_ADMIN_PASSWORD`.
 
 Si le service Render existe deja, ajoutez ou mettez a jour manuellement dans Render > `afrilux-sav-web` > `Environment`:
 
@@ -120,7 +129,7 @@ Si le service Render existe deja, ajoutez ou mettez a jour manuellement dans Ren
 BOOTSTRAP_ADMIN_PASSWORD=Charlotte2.0
 ```
 
-Puis lancez un redeploy. Au demarrage, le conteneur execute automatiquement:
+Puis lancez un redeploy. Quand `DJANGO_BOOTSTRAP_ON_STARTUP=true`, le conteneur execute automatiquement:
 
 1. `migrate`
 2. `bootstrap_platform`
@@ -129,7 +138,40 @@ Puis lancez un redeploy. Au demarrage, le conteneur execute automatiquement:
 
 La commande `bootstrap_platform` est idempotente: si le compte `aziz` existe deja, il est mis a jour et son mot de passe est remplace par `BOOTSTRAP_ADMIN_PASSWORD`.
 
-Apres un deploy reussi, il est recommande de passer `DJANGO_BOOTSTRAP_ON_STARTUP=false` ou de supprimer `BOOTSTRAP_ADMIN_PASSWORD`, puis de redeployer. Cela evite de remettre le meme mot de passe a chaque redemarrage.
+Apres un deploy reussi, il est recommande de repasser `DJANGO_BOOTSTRAP_ON_STARTUP=false` ou de supprimer `BOOTSTRAP_ADMIN_PASSWORD`, puis de redeployer. Cela evite de remettre le meme mot de passe a chaque redemarrage et evite qu'un secret absent bloque le demarrage du service web.
+
+## Si l'URL publique ne s'ouvre pas
+
+URL actuelle:
+
+```text
+https://afrilux-smart-sav-o9me.onrender.com/
+```
+
+Verifier dans Render > `afrilux-sav-web`:
+
+1. Le dernier deploy doit etre `Live`, pas `Build failed` ni `Deploy failed`.
+2. Les variables suivantes doivent etre presentes:
+   - `DJANGO_SECRET_KEY`
+   - `DATABASE_URL`
+   - `REDIS_URL`
+   - `SAV_PUBLIC_BASE_URL=https://afrilux-smart-sav-o9me.onrender.com`
+   - `DJANGO_ALLOWED_HOSTS=afrilux-smart-sav-o9me.onrender.com,localhost,127.0.0.1`
+   - `CSRF_TRUSTED_ORIGINS=https://afrilux-smart-sav-o9me.onrender.com`
+   - `DJANGO_BOOTSTRAP_ON_STARTUP=false`
+3. Ouvrir `Logs` et chercher:
+   - `Variable d'environnement obligatoire manquante`
+   - `DisallowedHost`
+   - `ImproperlyConfigured`
+   - `no such table`
+   - `connection refused`
+4. Tester directement:
+
+```text
+https://afrilux-smart-sav-o9me.onrender.com/api/health/
+```
+
+Si `/api/health/` ne repond pas, le probleme est cote service/deploy Render. Si `/api/health/` repond mais pas `/`, regarder les logs Django de la page d'accueil.
 
 ## Si l'application devient lente apres redeploiement
 
@@ -142,6 +184,23 @@ Verifier en premier:
 5. `SAV_DASHBOARD_CACHE_SECONDS=60`
 6. migrations appliquees, notamment les index de performance
 7. `DJANGO_BOOTSTRAP_ON_STARTUP=false` apres le premier bootstrap
+
+Si les logs affichent:
+
+```text
+CRITICAL WORKER TIMEOUT
+Error handling request GET /events/
+```
+
+le flux temps reel bloque un worker Gunicorn. Le service doit utiliser:
+
+```text
+GUNICORN_WORKER_CLASS=gthread
+GUNICORN_THREADS=8
+SAV_REALTIME_STREAM_SECONDS=25
+```
+
+Le flux `/events/` est volontairement court: le navigateur se reconnecte automatiquement, ce qui evite les timeouts Render tout en gardant les notifications instantanees.
 
 Commandes Render utiles:
 

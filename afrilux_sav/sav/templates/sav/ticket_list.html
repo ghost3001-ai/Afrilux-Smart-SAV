@@ -62,7 +62,7 @@
                 <span class="badge badge--neutral" data-ticket-public-status data-ticket-id="{{ ticket.id }}">Client: {{ ticket.public_status }}</span>
             </div>
             <h2><a href="{% url 'ticket-detail' ticket.pk %}">{{ ticket.title }}</a></h2>
-            <p class="muted">{{ ticket.reference }} · {{ ticket.client }}</p>
+            <p class="muted">{{ ticket.reference }} - {{ ticket.client }}</p>
             <p>{{ ticket.description|truncatechars:140 }}</p>
             <div class="ticket-card__meta">
                 <span>{{ ticket.get_category_display }}</span>

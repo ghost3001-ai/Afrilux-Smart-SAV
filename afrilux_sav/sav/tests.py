@@ -250,6 +250,20 @@ class SavPlatformTests(TestCase):
         self.assertEqual(response.json()["database"], "ok")
         self.assertEqual(response.json()["cache"], "ok")
 
+    @override_settings(SAV_REALTIME_STREAM_SECONDS=10, SAV_REALTIME_POLL_SECONDS=1)
+    def test_realtime_events_stream_is_short_lived_with_heartbeat(self):
+        self.client.force_login(self.manager)
+
+        with patch("sav.web_views.time.monotonic", side_effect=[0, 0, 11]), patch("sav.web_views.time.sleep"):
+            response = self.client.get(reverse("realtime-events"))
+            content = b"".join(response.streaming_content).decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/event-stream")
+        self.assertIn("retry: 3000", content)
+        self.assertIn("event: connected", content)
+        self.assertIn("event: heartbeat", content)
+
     def test_dashboard_returns_resolution_and_agent_metrics(self):
         ticket = Ticket.objects.create(
             client=self.client_user,

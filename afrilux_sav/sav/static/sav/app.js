@@ -51,6 +51,37 @@ function initializeThemeToggle() {
   });
 }
 
+function initializeMobileNavigation() {
+  const toggle = document.querySelector("[data-nav-toggle]");
+  const nav = document.querySelector("[data-nav]");
+  const topbar = document.querySelector(".topbar");
+  if (!toggle || !nav || !topbar) {
+    return;
+  }
+
+  const setOpen = (isOpen) => {
+    topbar.classList.toggle("is-nav-open", isOpen);
+    toggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    toggle.setAttribute("aria-label", isOpen ? "Fermer le menu" : "Ouvrir le menu");
+  };
+
+  toggle.addEventListener("click", () => {
+    setOpen(!topbar.classList.contains("is-nav-open"));
+  });
+
+  nav.addEventListener("click", (event) => {
+    if (event.target.closest("a, button[type='submit']")) {
+      setOpen(false);
+    }
+  });
+
+  window.addEventListener("resize", () => {
+    if (window.innerWidth > 720) {
+      setOpen(false);
+    }
+  });
+}
+
 function initializeTicketClientMode() {
   const root = document.querySelector("[data-ticket-client-mode]");
   if (!root) {
@@ -634,8 +665,8 @@ function showRealtimeToast(payload) {
   }
   const toast = document.createElement("div");
   toast.className = "realtime-toast";
-  const subject = payload.subject || "Mise a jour SAV";
-  const message = payload.message || "Un ticket a ete mis a jour.";
+  const subject = payload.subject || "Mise à jour SAV";
+  const message = payload.message || "Un ticket a été mis à jour.";
   toast.innerHTML = `<strong>${subject}</strong><span>${message}</span>`;
   stack.appendChild(toast);
   setTimeout(() => {
@@ -656,7 +687,7 @@ function updateTicketBadges(payload) {
   });
   document.querySelectorAll(`[data-ticket-public-status][data-ticket-id="${payload.ticket_id}"]`).forEach((node) => {
     if (payload.ticket_public_status) {
-      node.textContent = `Client: ${payload.ticket_public_status}`;
+      node.textContent = `Client : ${payload.ticket_public_status}`;
     }
   });
 }
@@ -671,13 +702,23 @@ function initializeRealtimeUpdates() {
   const source = new EventSource(`/events/?last_id=${encodeURIComponent(lastId)}`);
   const currentTicketNode = document.querySelector("[data-ticket-detail-id]");
   let reloadScheduled = false;
+  let reconnectTimer = null;
+
+  const clearReconnectTimer = () => {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+  };
 
   source.addEventListener("open", () => {
-    setRealtimeState("online", "Temps reel actif");
+    clearReconnectTimer();
+    setRealtimeState("online", "Temps réel actif");
   });
 
   source.addEventListener("connected", (event) => {
-    setRealtimeState("online", "Temps reel actif");
+    clearReconnectTimer();
+    setRealtimeState("online", "Temps réel actif");
     try {
       const payload = JSON.parse(event.data || "{}");
       if (payload.last_id) {
@@ -688,8 +729,22 @@ function initializeRealtimeUpdates() {
     }
   });
 
+  source.addEventListener("heartbeat", (event) => {
+    clearReconnectTimer();
+    setRealtimeState("online", "Temps réel actif");
+    try {
+      const payload = JSON.parse(event.data || "{}");
+      if (payload.last_id) {
+        localStorage.setItem(storageKey, String(payload.last_id));
+      }
+    } catch (_error) {
+      // Ignore malformed heartbeats.
+    }
+  });
+
   source.addEventListener("notification", (event) => {
-    setRealtimeState("online", "Temps reel actif");
+    clearReconnectTimer();
+    setRealtimeState("online", "Temps réel actif");
     let payload = null;
     try {
       payload = JSON.parse(event.data || "{}");
@@ -712,17 +767,31 @@ function initializeRealtimeUpdates() {
   });
 
   source.addEventListener("error", () => {
-    setRealtimeState(navigator.onLine ? "reconnecting" : "offline", navigator.onLine ? "Reconnexion" : "Hors ligne");
+    clearReconnectTimer();
+    if (!navigator.onLine) {
+      setRealtimeState("offline", "Hors ligne");
+      return;
+    }
+    reconnectTimer = setTimeout(() => {
+      setRealtimeState("reconnecting", "Reconnexion");
+    }, 3200);
   });
 
-  window.addEventListener("offline", () => setRealtimeState("offline", "Hors ligne"));
-  window.addEventListener("online", () => setRealtimeState("reconnecting", "Reconnexion"));
+  window.addEventListener("offline", () => {
+    clearReconnectTimer();
+    setRealtimeState("offline", "Hors ligne");
+  });
+  window.addEventListener("online", () => {
+    clearReconnectTimer();
+    setRealtimeState("reconnecting", "Reconnexion");
+  });
 }
 
 document.addEventListener("DOMContentLoaded", () => {
   registerServiceWorker();
   fadeFlashes();
   initializeThemeToggle();
+  initializeMobileNavigation();
   initializeClientRegistration();
   initializeTicketClientMode();
   initializeDashboardCharts();

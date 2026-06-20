@@ -326,14 +326,19 @@ class RealtimeEventsView(LoginRequiredMixin, View):
             if cursor <= 0:
                 latest = base_queryset.order_by("-id").first()
                 cursor = latest.id if latest else 0
-            yield f"event: connected\ndata: {json.dumps({'last_id': cursor})}\n\n"
-            for _ in range(90):
+            max_stream_seconds = max(10, min(int(getattr(settings, "SAV_REALTIME_STREAM_SECONDS", 25)), 60))
+            poll_seconds = max(1, min(float(getattr(settings, "SAV_REALTIME_POLL_SECONDS", 2)), 10))
+            deadline = time.monotonic() + max_stream_seconds
+            yield f"retry: 3000\nevent: connected\ndata: {json.dumps({'last_id': cursor})}\n\n"
+            while time.monotonic() < deadline:
                 notifications = list(base_queryset.filter(id__gt=cursor).order_by("id")[:20])
                 for notification in notifications:
                     cursor = max(cursor, notification.id)
                     data = json.dumps(serialize_notification(notification), ensure_ascii=True)
                     yield f"event: notification\ndata: {data}\n\n"
-                time.sleep(2)
+                if not notifications:
+                    yield f"event: heartbeat\ndata: {json.dumps({'last_id': cursor})}\n\n"
+                time.sleep(poll_seconds)
 
         response = StreamingHttpResponse(stream(), content_type="text/event-stream")
         response["Cache-Control"] = "no-cache"
