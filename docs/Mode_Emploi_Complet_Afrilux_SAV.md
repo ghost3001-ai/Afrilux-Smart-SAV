@@ -398,22 +398,89 @@ python afrilux_sav\manage.py fetch_inbound_emails --limit 25
 
 A automatiser via planificateur Windows ou cron serveur.
 
-## 9. Ordre de priorite des canaux
+## 9. Notifications multi-canaux
 
-Pour les notifications automatiques de workflow, l'application cree tous les canaux disponibles:
+Les evenements critiques du processus SAV declenchent une notification interne et, selon la configuration, des notifications externes WhatsApp, SMS et email.
 
-1. notification interne dans l'application;
-2. push mobile si Firebase est configure et si l'appareil est enregistre;
-3. email si SMTP et email utilisateur sont disponibles;
-4. SMS si Twilio SMS et telephone utilisateur sont disponibles;
-5. WhatsApp si Twilio WhatsApp et telephone utilisateur sont disponibles.
+### 9.1. Canaux supportes
 
-Pour un message agent envoye explicitement sur un canal:
+| Canal | Technologie | Usage |
+| --- | --- | --- |
+| WhatsApp | Twilio WhatsApp Business ou equivalent | Canal prioritaire terrain |
+| SMS | Twilio SMS ou gateway equivalent | Repli universel |
+| Email | SMTP, SendGrid, Mailgun ou equivalent | Trace officielle et pieces jointes |
+| Push | Firebase Cloud Messaging | Application mobile/web installee |
+| In-app | Base de donnees AFRILUX | Historique interne et temps reel |
 
-- canal email: cree une notification email si possible;
-- canal SMS: cree une notification SMS si possible;
-- canal WhatsApp: cree une notification WhatsApp si possible;
-- dans tous les cas, une notification interne peut etre creee.
+### 9.2. Evenements couverts
+
+| Evenement | Destinataire(s) | Canaux externes |
+| --- | --- | --- |
+| Ticket cree par client | Responsable SAV / Administrateur | WhatsApp + SMS + Email |
+| Ticket assigne | Technicien, chef, membres | WhatsApp + SMS + Email |
+| Proposition de planification | Client | WhatsApp + SMS + Email |
+| Client accepte/refuse une proposition | Technicien / Chef | WhatsApp + SMS |
+| Validation debut client | Technicien / Chef | WhatsApp + SMS |
+| Validation fin client | Technicien / Chef | WhatsApp + SMS |
+| Escalade demandee | Responsable SAV / Administrateur | WhatsApp + SMS + Email |
+| Solution responsable fournie | Technicien / Chef | WhatsApp + SMS + Email |
+| Reassignation | Nouveau technicien | WhatsApp + SMS + Email |
+| Ticket cloture / rapport genere | Responsable SAV / Administrateur | Email avec PDF joint |
+
+### 9.3. Preferences utilisateur
+
+Chaque utilisateur peut stocker:
+
+- `notification_whatsapp_enabled`;
+- `notification_sms_enabled`;
+- `notification_email_enabled`;
+- `notification_push_enabled`;
+- `whatsapp_phone`;
+- `sms_phone`;
+- `email` ou `professional_email`;
+- `preferred_language` (`fr` puis `en`);
+- plage "ne pas deranger";
+- limite quotidienne;
+- intervalle minimum entre deux notifications externes.
+
+Par defaut, les canaux sont actifs. Si un canal est desactive ou non configure, il n'est pas cree.
+
+### 9.4. Repli et audit
+
+Le moteur enregistre chaque tentative avec:
+
+- date de creation;
+- canal;
+- destinataire et contact exact utilise;
+- evenement;
+- statut: `pending`, `sent`, `failed`, `read`, `clicked`;
+- fournisseur (`smtp`, `twilio_sms`, `twilio_whatsapp`, `fcm`, `in_app`);
+- reference fournisseur;
+- message d'erreur;
+- lien profond vers le ticket;
+- payload d'action pour les validations.
+
+Si WhatsApp echoue, le systeme tente le SMS si le canal est disponible. Si le SMS echoue, le systeme tente l'email. Les echecs restent visibles dans la table des notifications pour relecture manuelle.
+
+### 9.5. Liens profonds et actions
+
+Chaque notification liee a un ticket contient un lien direct:
+
+```text
+https://votre-domaine/tickets/<id>/
+```
+
+Les notifications d'action contiennent aussi un payload exploitable par le mobile ou le web:
+
+- proposition de planification: `Accepter` / `Refuser`;
+- validation debut: `Oui, commencer` / `Non, reporter`;
+- validation fin: `Oui, terminer` / `Non, continuer`.
+
+L'API permet de marquer une notification comme cliquee avec:
+
+```http
+POST /api/notifications/<id>/mark-clicked/
+```
 
 ## 10. Fonctionnalites par profil
 
@@ -457,6 +524,17 @@ Le responsable SAV peut:
 - valider des rapports;
 - consulter les rapports et indicateurs.
 
+Regle de disponibilite:
+
+- un technicien est assignable s'il n'a aucun ticket SAV ou maintenance actif;
+- les tickets simplement `Assigne`, `Termine` ou `Cloture` ne bloquent pas;
+- les tickets `Planifie`, `En cours`, `En attente piece`, `En escalade`, `En attente solution responsable`, `En attente diagnostic` bloquent;
+- une maintenance `En cours` bloque toujours;
+- une maintenance planifiee a long terme ne bloque pas avant J-1;
+- le responsable peut forcer une affectation avec un motif obligatoire, et cette exception est journalisee.
+
+Le tableau de disponibilite affiche le statut global, les conflits SAV, les conflits maintenance, la prochaine disponibilite et la colonne `Assignable`.
+
 ### 10.3. Technicien seul
 
 Le technicien peut:
@@ -496,9 +574,72 @@ Le membre peut:
 
 Il ne remplace pas le chef pour les validations principales du ticket SAV, sauf regle metier ou droit responsable.
 
-## 11. Processus complet ticket SAV
+## 11. Role des boutons principaux
 
-### 11.1. Creation par client
+### 11.1. Boutons du detail ticket
+
+| Bouton | Fonction |
+|---|---|
+| Modifier | Ouvre le formulaire de modification du ticket pour corriger ou completer le dossier. |
+| Valider la resolution | Permet au client de confirmer que la resolution est acceptee. |
+| Rouvrir | Remet un ticket resolu ou ferme dans le circuit de traitement si le probleme persiste. |
+| Escalader | Envoie le ticket au responsable avec un motif obligatoire. Le responsable peut reassigner, apporter une solution ou decliner. |
+| Affecter technicien | Assigne le ticket a un technicien disponible. La disponibilite SAV + maintenance est verifiee. |
+| Constituer equipe | Cree une equipe d'intervention avec un chef et des membres. Le chef pilote le ticket. |
+| Resolution assistee | Lance l'assistance IA sur le ticket pour proposer diagnostic, actions, reponse ou recommandations. |
+| Executer processus | Lance manuellement le moteur d'automatisation du ticket. Il execute les regles de workflow actives ou les actions integrees : assignation automatique d'un ticket critique non assigne, notification responsable pour ticket prioritaire/en retard, creation d'une session AR si le sentiment client est tres negatif. Chaque execution est tracee dans `WorkflowExecution`. Ce bouton ne remplace pas les boutons Planifier, Commencer, Terminer, Valider debut/fin ou Fermer le dossier. |
+
+### 11.2. Boutons du processus SAV
+
+| Bouton | Fonction |
+|---|---|
+| Planifier | Le technicien propose une date et heure d'intervention au client. |
+| Accepter | Le client accepte la proposition. Le ticket devient planifie. |
+| Refuser | Le client refuse la proposition. Le ticket reste assignable pour une nouvelle proposition. |
+| Commencer | Le technicien demande la validation client avant debut. |
+| Valider le debut | Le client confirme le debut. Le ticket passe en cours et l'heure est enregistree automatiquement. |
+| Validation debut impossible | Le technicien contourne la validation client avec motif et justificatif obligatoires. |
+| Terminer | Le technicien demande la validation client de fin. |
+| Mettre en attente piece | Le technicien signale une piece manquante. Le ticket passe en attente piece. |
+| Valider la fin | Le client confirme la fin. Le ticket passe termine et l'heure de fin est enregistree automatiquement. |
+| Validation fin impossible | Le technicien contourne la validation de fin avec motif et justificatif obligatoires. |
+| Fermer le dossier | Le technicien renseigne diagnostic, action, pieces, signature et photos. Le dossier est cloture et le rapport PDF est genere. |
+| Apporter solution | Le responsable repond a une escalade avec une solution, un document, un lien ou une autorisation. |
+| Decliner | Le responsable refuse l'escalade avec motif. |
+| Continuer | Le technicien reprend le processus apres la solution responsable. |
+
+### 11.3. Boutons de maintenance
+
+| Bouton | Fonction |
+|---|---|
+| Planification | Ouvre la vue planning globale SAV + maintenance. |
+| Exporter bilan PDF | Genere ou telecharge le bilan de maintenance. |
+| Nouveau programme | Ouvre la creation d'un programme de maintenance. |
+| Ajouter la ligne | Ajoute une ligne de planning avec technicien/equipe, client, site, date/heure, trajet, nuitees, objectif, checklist et equipements. |
+| Enregistrer | Enregistre le programme en brouillon. |
+| Publier le programme | Cree les tickets de maintenance planifies a partir des lignes. Les dates sont en `datetime`, donc plusieurs interventions peuvent exister sur une meme journee. |
+| Annuler | Annule une maintenance avec motif obligatoire. |
+| Accuser reception | Le technicien confirme qu'il a bien pris connaissance de la maintenance. |
+| Demarrer | Passe la maintenance en cours. |
+| Cloturer | Ouvre la fiche d'intervention maintenance a remplir par le technicien. |
+| Valider la maintenance | Enregistre la fiche, genere le PDF et cree un ticket incident si anomalie detectee. |
+| PDF | Ouvre ou telecharge le rapport PDF genere. |
+| Valider | Le responsable valide le rapport de maintenance. |
+
+### 11.4. Boutons de support, reporting et notifications
+
+| Bouton | Fonction |
+|---|---|
+| Nouveau ticket | Cree un ticket SAV depuis le portail. |
+| Voir les rapports | Ouvre les indicateurs et exports de reporting. |
+| Export CSV / PDF / XLSX | Exporte les donnees de reporting dans le format choisi. |
+| Assistant support / Envoyer | Envoie la demande a l'assistant IA pour aide, qualification ou preparation de ticket. |
+| Marquer comme lu | Marque une notification comme lue. |
+| Ouvrir / lien profond | Ouvre directement le ticket ou l'objet concerne par une notification. |
+
+## 12. Processus complet ticket SAV
+
+### 12.1. Creation par client
 
 1. Le client cree une demande.
 2. Le ticket passe en statut interne `pending_assignment`.
@@ -506,7 +647,7 @@ Il ne remplace pas le chef pour les validations principales du ticket SAV, sauf 
 4. Seuls le responsable SAV et l'administrateur voient le ticket pour assignation.
 5. Apres assignation, le client voit `Assigne`.
 
-### 11.2. Creation par responsable
+### 12.2. Creation par responsable
 
 1. Le responsable cree le ticket.
 2. Il choisit le client.
@@ -514,7 +655,7 @@ Il ne remplace pas le chef pour les validations principales du ticket SAV, sauf 
 4. Le ticket passe en `Assigne`.
 5. Les techniciens recoivent la notification.
 
-### 11.3. Planification
+### 12.3. Planification
 
 1. Le technicien consulte le dossier.
 2. Il propose `Prevu pour`.
@@ -522,7 +663,7 @@ Il ne remplace pas le chef pour les validations principales du ticket SAV, sauf 
 4. Si le client accepte, le ticket passe `Planifie`.
 5. Si le client refuse, le ticket reste assignable pour une nouvelle proposition.
 
-### 11.4. Demarrage direct
+### 12.4. Demarrage direct
 
 1. Le technicien clique sur commencer.
 2. Le client recoit la validation debut.
@@ -530,7 +671,7 @@ Il ne remplace pas le chef pour les validations principales du ticket SAV, sauf 
 4. Le ticket passe `En cours`.
 5. Date et heure de debut sont figees automatiquement.
 
-### 11.5. Fin d'intervention
+### 12.5. Fin d'intervention
 
 1. Le technicien clique sur terminer.
 2. Le client recoit la validation fin.
@@ -538,7 +679,7 @@ Il ne remplace pas le chef pour les validations principales du ticket SAV, sauf 
 4. Le ticket passe `Termine`.
 5. Date et heure de fin sont figees automatiquement.
 
-### 11.6. Cloture
+### 12.6. Cloture
 
 Le technicien renseigne:
 
@@ -556,7 +697,7 @@ Ensuite:
 - le PDF est genere;
 - le rapport devient telechargeable.
 
-### 11.7. Validation client impossible
+### 12.7. Validation client impossible
 
 Si le client ne peut pas valider:
 
@@ -565,7 +706,7 @@ Si le client ne peut pas valider:
 - la photo justificative est obligatoire;
 - le ticket peut continuer avec indicateur de validation impossible.
 
-## 12. Escalade
+## 13. Escalade
 
 Le technicien ou le chef d'equipe peut demander aide responsable.
 
@@ -582,9 +723,9 @@ Regles:
 - au-dela, blocage direction;
 - retour au statut precedent apres application d'une solution.
 
-## 13. Maintenance planifiee
+## 14. Maintenance planifiee
 
-### 13.1. Creation programme
+### 14.1. Creation programme
 
 Le responsable cree un programme avec:
 
@@ -605,7 +746,7 @@ Chaque ligne contient:
 - instructions;
 - equipe technique.
 
-### 13.2. Date et heure
+### 14.2. Date et heure
 
 Le champ maintenance est en date + heure. Plusieurs interventions peuvent donc etre planifiees le meme jour a des horaires differents.
 
@@ -626,7 +767,7 @@ Exemple JSON:
 
 Le premier identifiant de `technician_ids` est le chef ou technicien principal.
 
-### 13.3. Publication
+### 14.3. Publication
 
 Quand le programme est publie:
 
@@ -635,7 +776,7 @@ Quand le programme est publie:
 - les techniciens voient les maintenances qui les concernent;
 - les rappels J-3 sont envoyes.
 
-### 13.4. Cloture maintenance
+### 14.4. Cloture maintenance
 
 Le technicien renseigne:
 
@@ -650,7 +791,7 @@ Le technicien renseigne:
 
 Le rapport PDF de maintenance inclut l'equipe technique.
 
-## 14. Temps reel
+## 15. Temps reel
 
 L'application dispose d'un flux evenementiel:
 
@@ -669,7 +810,7 @@ Les changements sont visibles sans rechargement manuel lorsque le client web est
 
 En cas d'indisponibilite reseau, les notifications restent stockees en base et peuvent etre redispatchees.
 
-## 15. Rapports et PDF
+## 16. Rapports et PDF
 
 Rapports generes:
 
@@ -691,7 +832,7 @@ Les rapports SAV incluent:
 - signature;
 - photos.
 
-## 16. Commandes utiles
+## 17. Commandes utiles
 
 Verifier le projet:
 
@@ -740,10 +881,13 @@ python afrilux_sav\manage.py fetch_inbound_emails --limit 25
 Automatisations SAV:
 
 ```powershell
-python afrilux_sav\manage.py run_sav_automation
+python afrilux_sav\manage.py run_sav_automation --skip-reports
+python afrilux_sav\manage.py run_platform_scheduler --once --skip-backup --skip-reports
 ```
 
-## 17. Checklist de mise en production
+Retirer `--skip-reports` uniquement lorsque SMTP est configure et que les rapports planifies doivent etre envoyes. En local Windows, ne pas utiliser `cd /app`: ce chemin est reserve a Render/Linux.
+
+## 18. Checklist de mise en production
 
 Avant production:
 
@@ -764,7 +908,7 @@ Avant production:
 - lancer les tests avant livraison;
 - verifier l'envoi reel email/SMS/WhatsApp sur un ticket test.
 
-## 18. Depannage
+## 19. Depannage
 
 ### Email non recu
 
@@ -835,7 +979,7 @@ Verifier:
 python afrilux_sav\manage.py dispatch_pending_notifications
 ```
 
-## 19. Verification rapide apres configuration
+## 20. Verification rapide apres configuration
 
 1. Creer un client avec email et telephone.
 2. Creer un ticket client.
@@ -853,7 +997,7 @@ python afrilux_sav\manage.py dispatch_pending_notifications
 14. Publier le programme.
 15. Verifier que chef et membres voient la maintenance.
 
-## 20. Resume configuration notifications
+## 21. Resume configuration notifications
 
 Configuration minimale email:
 
@@ -897,4 +1041,3 @@ POST /api/channels/twilio/inbound/
 POST /api/channels/email/inbound/
 POST /api/webhook/email/
 ```
-

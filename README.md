@@ -238,7 +238,11 @@ Webhook entrant email:
 
 Comportement:
 
-- les notifications de resolution, predictive maintenance et messages agents peuvent etre diffusees en in-app, push, email, SMS ou WhatsApp selon la configuration reelle disponible
+- les notifications de workflow sont multi-canaux: in-app, push, WhatsApp, SMS et email selon les preferences utilisateur et la configuration reelle disponible
+- chaque notification liee a un ticket contient un lien profond vers `/tickets/<id>/`
+- les evenements d'action client portent aussi un payload de boutons: planification, validation debut et validation fin
+- chaque tentative est journalisee avec canal, destinataire, statut, fournisseur, reference fournisseur et erreur eventuelle
+- en cas d'echec WhatsApp, le systeme tente le SMS; en cas d'echec SMS, il tente l'email si disponible
 - les messages WhatsApp / SMS entrants sont convertis en ticket ou rattaches a un ticket existant
 - les emails entrants peuvent creer un ticket, ajouter un message et enregistrer les pieces jointes recues
 - les appareils mobiles Flutter peuvent enregistrer leur token FCM sur `/api/device-registrations/register/`
@@ -316,8 +320,10 @@ Scheduler local AFRILUX:
 
 ```bash
 cd afrilux_sav
-python3 manage.py run_platform_scheduler --once
+python3 manage.py run_platform_scheduler --once --skip-backup --skip-reports
 ```
+
+Retirez `--skip-reports` uniquement quand SMTP est configure et teste. En local Windows, utilisez `python` au lieu de `python3`.
 
 Pour un fonctionnement continu, lancez la meme commande sans `--once` via `systemd`, `supervisor` ou un service Docker dedie.
 
@@ -363,11 +369,40 @@ export OPENAI_MODEL=gpt-5.1
 Fonctions qui utilisent OpenAI quand la cle est presente:
 
 - resolution agentique sur ticket
+- assistant support client sur `/api/support/assistant/`
 - synthese client
 - reformulation BI conversationnelle
 - maintenance predictive enrichie
 
-Sans cle OpenAI, le backend garde ses heuristiques de secours.
+Sans cle OpenAI, le backend garde ses heuristiques de secours et l'assistant renvoie `ai_mode=heuristique`.
+Pour verifier la configuration sans exposer la cle:
+
+```bash
+curl -u admin_afrilux:ChangeMe123! http://127.0.0.1:8000/api/ai/status/
+```
+
+En production Render, renseignez `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL`, `OPENAI_REASONING_EFFORT` et `OPENAI_TIMEOUT_SECONDS` dans `Environment`, puis redeployez.
+
+### 2.bis. Disponibilite unifiee techniciens
+
+Un technicien terrain ne peut pas recevoir une nouvelle intervention s'il a deja une intervention active SAV ou maintenance.
+
+Statuts SAV bloquants: `planned`, `start_requested`, `in_progress`, `collective_in_progress`, `waiting_part`, `escalated`, `waiting_solution`, `waiting_diagnostic`, `finish_requested`.
+
+Maintenances bloquantes:
+
+- `in_progress` bloque toujours;
+- `planned`, `notified` et `postponed` bloquent uniquement a J-1;
+- une maintenance planifiee plus tard ne bloque pas le technicien.
+
+Le Responsable SAV peut forcer une affectation avec `force_assignment=true` et un `force_reason` obligatoire. Le forcage est journalise dans l'audit avec la liste des conflits actifs.
+
+Endpoint utile:
+
+```bash
+curl -u admin_afrilux:ChangeMe123! \
+  "http://127.0.0.1:8000/api/technicians/availability/?assignable_only=true"
+```
 
 ### 3. Activer les canaux email, SMS et WhatsApp
 
@@ -391,7 +426,7 @@ export TWILIO_SMS_FROM=+1...
 export TWILIO_WHATSAPP_FROM=whatsapp:+1...
 ```
 
-Les messages agents envoyes depuis l'API ou l'app mobile peuvent alors partir sur le canal choisi. Les notifications de workflow utilisent automatiquement les canaux effectivement configures.
+Les messages agents envoyes depuis l'API ou l'app mobile peuvent alors partir sur le canal choisi. Les notifications de workflow utilisent les canaux configures, les preferences utilisateur, les liens profonds et le repli WhatsApp -> SMS -> Email.
 
 Email entrant:
 
@@ -443,10 +478,11 @@ Envoi planifie des rapports:
 
 Scheduler local AFRILUX:
 
-- `python3 manage.py run_platform_scheduler --once`
-- `python3 manage.py run_platform_scheduler`
+- `python3 manage.py run_platform_scheduler --once --skip-backup --skip-reports`
+- `python3 manage.py run_platform_scheduler --skip-backup --skip-reports`
 - le scheduler local enchaine alertes SLA, alertes maintenance J-3/J+1, auto-cloture 72h, rapports planifies et sauvegarde quotidienne
 - il ne depend d'aucun cloud proprietaire obligatoire et reste compatible avec une installation locale
+- retirez `--skip-reports` si les rapports planifies doivent etre envoyes par SMTP
 
 ### 4. Utiliser le portail web
 

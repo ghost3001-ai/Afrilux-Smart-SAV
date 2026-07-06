@@ -19,15 +19,47 @@ class LLMCompletion:
 
 
 class OpenAIResponsesClient:
-    def __init__(self):
-        self.api_key = settings.OPENAI_API_KEY
-        self.base_url = settings.OPENAI_BASE_URL.rstrip("/")
-        self.model = settings.OPENAI_MODEL
-        self.reasoning_effort = settings.OPENAI_REASONING_EFFORT
+    PLACEHOLDER_KEYS = {"", "sk-...", "sk-xxx", "change-me", "votre-cle-openai"}
+
+    @property
+    def api_key(self) -> str:
+        return str(getattr(settings, "OPENAI_API_KEY", "") or "").strip()
+
+    @property
+    def base_url(self) -> str:
+        return str(getattr(settings, "OPENAI_BASE_URL", "https://api.openai.com/v1") or "").rstrip("/")
+
+    @property
+    def model(self) -> str:
+        return str(getattr(settings, "OPENAI_MODEL", "gpt-5.1") or "gpt-5.1").strip()
+
+    @property
+    def reasoning_effort(self) -> str:
+        return str(getattr(settings, "OPENAI_REASONING_EFFORT", "") or "").strip()
 
     @property
     def enabled(self) -> bool:
-        return bool(self.api_key)
+        return bool(self.api_key and self.api_key.lower() not in self.PLACEHOLDER_KEYS)
+
+    def status(self) -> dict[str, Any]:
+        if not self.enabled:
+            reason = "OPENAI_API_KEY absente ou valeur placeholder."
+            return {
+                "enabled": False,
+                "mode": "heuristique",
+                "provider": "fallback",
+                "model": "",
+                "base_url": self.base_url,
+                "reason": reason,
+            }
+        return {
+            "enabled": True,
+            "mode": "openai",
+            "provider": "openai",
+            "model": self.model,
+            "base_url": self.base_url,
+            "reason": "",
+        }
 
     def complete_json(self, system_prompt: str, user_prompt: str, max_output_tokens: int = 1200) -> LLMCompletion:
         if not self.enabled:
@@ -38,7 +70,7 @@ class OpenAIResponsesClient:
                 provider="fallback",
                 model="",
                 request_id="",
-                error_message="OPENAI_API_KEY is not configured.",
+                error_message="OPENAI_API_KEY absente ou valeur placeholder.",
             )
 
         payload: dict[str, Any] = {
@@ -105,7 +137,8 @@ class OpenAIResponsesClient:
         )
 
         try:
-            with request.urlopen(req, timeout=60) as response:
+            timeout_seconds = int(getattr(settings, "OPENAI_TIMEOUT_SECONDS", 60) or 60)
+            with request.urlopen(req, timeout=timeout_seconds) as response:
                 raw_payload = json.loads(response.read().decode("utf-8"))
         except error.HTTPError as exc:
             response_body = exc.read().decode("utf-8", errors="replace")

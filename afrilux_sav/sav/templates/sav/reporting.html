@@ -7,7 +7,7 @@
     <div>
         <p class="eyebrow">Rapports SAV</p>
         <h1>Rapports journaliers, hebdomadaires et mensuels</h1>
-        <p class="hero__lead">Consultez les indicateurs d'activite, la performance terrain et exportez les rapports au format Excel, CSV ou PDF.</p>
+        <p class="hero__lead">Consultez les indicateurs d'activite, la performance terrain et exportez les rapports au format XLSX, CSV ou PDF.</p>
     </div>
     <div class="hero__actions">
         <a class="button button--primary" href="/api/rapports/export/journalier/?format=xlsx">Exporter journalier</a>
@@ -27,7 +27,7 @@
         <div class="list-row"><strong>Taux de resolution</strong><span>{{ daily_report.resolution_rate_percent }}%</span></div>
         <div class="list-row"><strong>Non assignes &gt; 30 min</strong><span>{{ daily_report.tickets_non_assignes_30min }}</span></div>
         <div class="hero__actions">
-            <a class="button button--ghost" href="/api/rapports/export/journalier/?format=xlsx">Excel</a>
+            <a class="button button--ghost" href="/api/rapports/export/journalier/?format=xlsx">XLSX</a>
             <a class="button button--ghost" href="/api/rapports/export/journalier/?format=csv">CSV</a>
             <a class="button button--ghost" href="/api/rapports/export/journalier/?format=pdf">PDF</a>
         </div>
@@ -44,7 +44,7 @@
         <div class="list-row"><strong>Dossiers annules</strong><span>{{ weekly_report.tickets_annules }}</span></div>
         <div class="list-row"><strong>Top clients</strong><span>{{ weekly_report.top_clients|length }}</span></div>
         <div class="hero__actions">
-            <a class="button button--ghost" href="/api/rapports/export/hebdomadaire/?format=xlsx">Excel</a>
+            <a class="button button--ghost" href="/api/rapports/export/hebdomadaire/?format=xlsx">XLSX</a>
             <a class="button button--ghost" href="/api/rapports/export/hebdomadaire/?format=csv">CSV</a>
             <a class="button button--ghost" href="/api/rapports/export/hebdomadaire/?format=pdf">PDF</a>
         </div>
@@ -61,7 +61,7 @@
         <div class="list-row"><strong>Satisfaction</strong><span>{{ monthly_report.satisfaction_moyenne }}/5</span></div>
         <div class="list-row"><strong>Causes recurrentes</strong><span>{{ monthly_report.causes_recurrentes|length }}</span></div>
         <div class="hero__actions">
-            <a class="button button--ghost" href="/api/rapports/export/mensuel/?format=xlsx">Excel</a>
+            <a class="button button--ghost" href="/api/rapports/export/mensuel/?format=xlsx">XLSX</a>
             <a class="button button--ghost" href="/api/rapports/export/mensuel/?format=csv">CSV</a>
             <a class="button button--ghost" href="/api/rapports/export/mensuel/?format=pdf">PDF</a>
         </div>

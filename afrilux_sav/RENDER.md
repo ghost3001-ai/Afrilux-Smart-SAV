@@ -51,6 +51,7 @@ Evitez `DJANGO_RUN_SCHEDULER_IN_WEB=true` sur les petits plans, sauf depannage t
 
 - `DJANGO_SECRET_KEY`
 - `DJANGO_DB_*`
+- `DJANGO_DB_WAIT_TIMEOUT_SECONDS=90`
 - `REDIS_URL`
 - `DJANGO_WAIT_FOR_DB=true`
 - `DJANGO_RUN_MIGRATIONS_ON_STARTUP=true`
@@ -80,13 +81,22 @@ Evitez `DJANGO_RUN_SCHEDULER_IN_WEB=true` sur les petits plans, sauf depannage t
 - `SAV_PUBLIC_BASE_URL=https://votre-domaine`
 - `DJANGO_ALLOWED_HOSTS=votre-domaine`
 - `CSRF_TRUSTED_ORIGINS=https://votre-domaine`
-- `OPENAI_API_KEY`, `OPENAI_MODEL`
+- `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL`, `OPENAI_REASONING_EFFORT`, `OPENAI_TIMEOUT_SECONDS`
 - `EMAIL_*`, `DEFAULT_FROM_EMAIL`
 - `INBOUND_EMAIL_IMAP_*`
 - `TWILIO_*`
 - `FIREBASE_PROJECT_ID`, `FIREBASE_CREDENTIALS_FILE`
 
 Si vous restez sur l'URL `onrender.com`, l'application sait aussi utiliser les variables Render injectees automatiquement pour l'URL publique et l'host.
+
+Pour verifier l'assistant support et l'IA apres redeploiement:
+
+```bash
+cd /app
+python manage.py shell -c "from django.conf import settings; print(bool(getattr(settings, 'OPENAI_API_KEY', '')))"
+```
+
+Puis ouvrez `/api/ai/status/` avec un compte interne. `mode=openai` indique que la cle est active; `mode=heuristique` indique que l'application fonctionne sans IA externe.
 
 ## Correction rapide: DJANGO_SECRET_KEY
 
@@ -172,6 +182,56 @@ https://afrilux-smart-sav-o9me.onrender.com/api/health/
 ```
 
 Si `/api/health/` ne repond pas, le probleme est cote service/deploy Render. Si `/api/health/` repond mais pas `/`, regarder les logs Django de la page d'accueil.
+
+## Erreur PostgreSQL `failed to resolve host 'dpg-...'`
+
+Exemple:
+
+```text
+django.db.utils.OperationalError: failed to resolve host 'dpg-xxxxxxxx-a': [Errno -2] Name or service not known
+```
+
+Cela veut dire que le service web essaie de joindre une base PostgreSQL dont l'hote interne Render n'est pas resolvable. La requete echoue avant Django: les migrations ne peuvent pas demarrer.
+
+Causes les plus frequentes:
+
+1. La base Render a ete supprimee puis recreee, mais `DATABASE_URL` ou `DJANGO_DB_HOST` pointe encore vers l'ancien hote.
+2. Le web service et la base ne sont pas dans la meme region Render.
+3. Les variables `DATABASE_URL` / `DJANGO_DB_*` ont ete saisies manuellement et ne sont plus synchronisees avec la base active.
+4. La base PostgreSQL est suspendue, indisponible ou pas encore creee par la blueprint.
+
+Correction recommandee:
+
+1. Ouvrir Render > `afrilux-sav-db`.
+2. Verifier que la base est `Available`.
+3. Copier l'`Internal Database URL` de cette base.
+4. Ouvrir Render > `afrilux-sav-web` > `Environment`.
+5. Remplacer `DATABASE_URL` par l'`Internal Database URL` actuelle.
+6. Remplacer aussi les variables individuelles si elles existent:
+   - `DJANGO_DB_HOST`
+   - `DJANGO_DB_PORT`
+   - `DJANGO_DB_NAME`
+   - `DJANGO_DB_USER`
+   - `DJANGO_DB_PASSWORD`
+7. Verifier que le service web et la base sont dans la meme region.
+8. Sauvegarder puis relancer `Manual Deploy > Clear build cache & deploy`.
+
+Dans le Shell Render du service web, verifier la resolution DNS:
+
+```bash
+python - <<'PY'
+import os
+import socket
+import urllib.parse
+
+url = os.getenv("DATABASE_URL", "")
+host = os.getenv("DJANGO_DB_HOST") or urllib.parse.urlparse(url).hostname
+print("DB host:", host)
+print(socket.getaddrinfo(host, 5432))
+PY
+```
+
+Si cette commande echoue avec `Name or service not known`, la variable de base est mauvaise ou la base n'est pas accessible depuis ce service.
 
 ## Si Render affiche `Live` mais le navigateur affiche `ERR_CONNECTION_TIMED_OUT`
 

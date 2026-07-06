@@ -23,15 +23,38 @@ DB_ENGINE="${DJANGO_DB_ENGINE:-}"
 if [ -z "$DB_ENGINE" ] && [ -n "${DJANGO_DB_HOST:-}" ]; then
   DB_ENGINE="django.db.backends.postgresql"
 fi
+if [ -z "$DB_ENGINE" ] && [ -n "${DATABASE_URL:-}" ]; then
+  DB_ENGINE="django.db.backends.postgresql"
+fi
 
-if echo "$DB_ENGINE" | grep -qi "postgresql" && is_true "${DJANGO_WAIT_FOR_DB:-true}" && [ -n "${DJANGO_DB_HOST:-}" ]; then
-  until pg_isready \
-    -h "$DJANGO_DB_HOST" \
-    -p "${DJANGO_DB_PORT:-5432}" \
-    -U "${DJANGO_DB_USER:-postgres}" \
-    -d "${DJANGO_DB_NAME:-afrilux_sav}" >/dev/null 2>&1; do
-    echo "Waiting for PostgreSQL at ${DJANGO_DB_HOST}:${DJANGO_DB_PORT:-5432}..."
-    sleep 1
+if echo "$DB_ENGINE" | grep -qi "postgresql" && is_true "${DJANGO_WAIT_FOR_DB:-true}"; then
+  DB_WAIT_HOST="${DJANGO_DB_HOST:-}"
+  DB_WAIT_PORT="${DJANGO_DB_PORT:-5432}"
+
+  if [ -z "$DB_WAIT_HOST" ] && [ -n "${DATABASE_URL:-}" ]; then
+    DB_WAIT_HOST="$(python -c "import os, urllib.parse; print(urllib.parse.urlparse(os.getenv('DATABASE_URL', '')).hostname or '')")"
+  fi
+  if [ "${DB_WAIT_PORT}" = "5432" ] && [ -n "${DATABASE_URL:-}" ]; then
+    DB_WAIT_PORT="$(python -c "import os, urllib.parse; print(urllib.parse.urlparse(os.getenv('DATABASE_URL', '')).port or os.getenv('DJANGO_DB_PORT', '5432'))")"
+  fi
+
+  if [ -z "$DB_WAIT_HOST" ]; then
+    echo "Configuration PostgreSQL incomplete: definir DATABASE_URL ou DJANGO_DB_HOST."
+    exit 1
+  fi
+
+  DB_WAIT_STARTED_AT="$(date +%s)"
+  DB_WAIT_TIMEOUT_SECONDS="${DJANGO_DB_WAIT_TIMEOUT_SECONDS:-90}"
+
+  until pg_isready -h "$DB_WAIT_HOST" -p "$DB_WAIT_PORT" >/dev/null 2>&1; do
+    DB_WAIT_NOW="$(date +%s)"
+    if [ $((DB_WAIT_NOW - DB_WAIT_STARTED_AT)) -ge "$DB_WAIT_TIMEOUT_SECONDS" ]; then
+      echo "PostgreSQL inaccessible apres ${DB_WAIT_TIMEOUT_SECONDS}s: ${DB_WAIT_HOST}:${DB_WAIT_PORT}"
+      echo "Verifier dans Render que DATABASE_URL/DJANGO_DB_HOST pointent vers une base active et dans la meme region."
+      exit 1
+    fi
+    echo "Waiting for PostgreSQL at ${DB_WAIT_HOST}:${DB_WAIT_PORT}..."
+    sleep 2
   done
 fi
 

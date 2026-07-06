@@ -51,22 +51,50 @@ services:
           property: connectionString
       - key: DJANGO_WAIT_FOR_DB
         value: "true"
+      - key: DJANGO_DB_WAIT_TIMEOUT_SECONDS
+        value: "90"
       - key: DJANGO_RUN_MIGRATIONS_ON_STARTUP
         value: "true"
       - key: DJANGO_COLLECTSTATIC_ON_STARTUP
         value: "true"
       - key: DJANGO_SERVE_STATIC_LOCAL
         value: "true"
+      - key: SAV_PUBLIC_BASE_URL
+        value: https://afrilux-smart-sav-o9me.onrender.com
+      - key: DJANGO_ALLOWED_HOSTS
+        value: afrilux-smart-sav-o9me.onrender.com,localhost,127.0.0.1
+      - key: CSRF_TRUSTED_ORIGINS
+        value: https://afrilux-smart-sav-o9me.onrender.com
       - key: DJANGO_RUN_SCHEDULER_IN_WEB
         value: "false"
       - key: GUNICORN_WORKERS
+        value: "2"
+      - key: GUNICORN_WORKER_CLASS
+        value: gthread
+      - key: GUNICORN_THREADS
+        value: "8"
+      - key: GUNICORN_TIMEOUT
+        value: "120"
+      - key: SAV_REALTIME_STREAM_SECONDS
+        value: "25"
+      - key: SAV_REALTIME_POLL_SECONDS
         value: "2"
       - key: SAV_SHELL_CACHE_SECONDS
         value: "30"
       - key: SAV_DASHBOARD_CACHE_SECONDS
         value: "60"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-5.1
+      - key: OPENAI_BASE_URL
+        value: https://api.openai.com/v1
+      - key: OPENAI_REASONING_EFFORT
+        value: medium
+      - key: OPENAI_TIMEOUT_SECONDS
+        value: "60"
       - key: DJANGO_BOOTSTRAP_ON_STARTUP
-        value: "true"
+        value: "false"
       - key: BOOTSTRAP_ORGANIZATION_NAME
         value: AFRILUX SMART SOLUTIONS
       - key: BOOTSTRAP_ORGANIZATION_SLUG

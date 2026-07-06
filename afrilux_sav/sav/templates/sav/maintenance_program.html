@@ -79,6 +79,7 @@
                 <div>
                     <strong>{{ item.title }}</strong>
                     <p>{{ item.client }} - {{ item.technician_team_label }} - {{ item.scheduled_date|date:"d/m/Y H:i" }}</p>
+                    <p>{{ item.location|default:"Site non renseigne" }}{% if item.route %} - Trajet: {{ item.route }}{% endif %}{% if item.overnight_stays %} - {{ item.overnight_stays }} nuitee(s){% endif %}</p>
                 </div>
                 <div class="list-row__stats">
                     <span class="badge badge--accent">Maintenance</span>

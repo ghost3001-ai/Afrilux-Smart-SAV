@@ -50,17 +50,67 @@ ThemeData _themeForSession(SavSession? session) {
       brightness: Brightness.light,
       primary: primary,
       secondary: accent,
-      surface: const Color(0xFFF8F2E7),
+      surface: const Color(0xFFF8FAF9),
+      error: const Color(0xFFA33728),
     ),
-    scaffoldBackgroundColor: const Color(0xFFF2EBDC),
+    scaffoldBackgroundColor: const Color(0xFFF2F6F4),
     appBarTheme: const AppBarTheme(
       centerTitle: false,
-      backgroundColor: Colors.transparent,
+      backgroundColor: Color(0xFFF2F6F4),
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
     ),
     cardTheme: CardThemeData(
-      color: Colors.white.withValues(alpha: 0.88),
+      color: Colors.white.withValues(alpha: 0.96),
       elevation: 0,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+    ),
+    navigationBarTheme: NavigationBarThemeData(
+      height: 68,
+      backgroundColor: Colors.white.withValues(alpha: 0.96),
+      indicatorColor: primary.withValues(alpha: 0.14),
+      labelTextStyle: WidgetStateProperty.resolveWith(
+        (states) => TextStyle(
+          fontSize: 11,
+          fontWeight: states.contains(WidgetState.selected)
+              ? FontWeight.w700
+              : FontWeight.w600,
+        ),
+      ),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: Colors.white,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.12)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.12)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: primary, width: 1.4),
+      ),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        minimumSize: const Size.fromHeight(48),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size.fromHeight(48),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    ),
+    floatingActionButtonTheme: FloatingActionButtonThemeData(
+      backgroundColor: primary,
+      foregroundColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     ),
   );
 }
@@ -293,7 +343,7 @@ class _LoginPageState extends State<LoginPage> {
       body: DecoratedBox(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFFF8F2E7), Color(0xFFEEDBC2)],
+            colors: [Color(0xFFF7F9F8), Color(0xFFEAF3EF)],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
@@ -326,7 +376,7 @@ class _LoginPageState extends State<LoginPage> {
                                 ),
                                 const SizedBox(height: 8),
                                 Text(
-                                  "Tickets, predictive maintenance, notifications and AI actions in one mobile cockpit.",
+                                  "Tickets, maintenance prédictive, notifications et interventions dans une interface terrain.",
                                   style: Theme.of(context).textTheme.bodyLarge
                                       ?.copyWith(
                                         color: Colors.black54,
@@ -671,7 +721,7 @@ class _ClientRegistrationPageState extends State<ClientRegistrationPage> {
                             width: 18,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Text("Creer mon compte"),
+                        : const Text("Créer mon compte"),
                   ),
                 ],
               ),
@@ -724,12 +774,12 @@ class _HomeShellState extends State<HomeShell> {
           ];
     final supportLabel = session.isInternal ? "Tickets" : "Support";
     final titles = [
-      "Dashboard",
+      "Accueil",
       supportLabel,
       "Produits",
-      "Knowledge",
+      "Base",
       "Offres",
-      "Inbox",
+      "Alertes",
     ];
 
     return Scaffold(
@@ -795,7 +845,7 @@ class _HomeShellState extends State<HomeShell> {
         destinations: [
           const NavigationDestination(
             icon: Icon(Icons.space_dashboard_outlined),
-            label: "Dashboard",
+            label: "Accueil",
           ),
           NavigationDestination(
             icon: const Icon(Icons.support_agent_outlined),
@@ -807,7 +857,7 @@ class _HomeShellState extends State<HomeShell> {
           ),
           const NavigationDestination(
             icon: Icon(Icons.menu_book_outlined),
-            label: "Knowledge",
+            label: "Base",
           ),
           const NavigationDestination(
             icon: Icon(Icons.local_offer_outlined),
@@ -815,7 +865,7 @@ class _HomeShellState extends State<HomeShell> {
           ),
           const NavigationDestination(
             icon: Icon(Icons.notifications_outlined),
-            label: "Inbox",
+            label: "Alertes",
           ),
         ],
       ),
@@ -918,7 +968,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ? "${widget.session.organizationTagline} · Connecte en tant que ${widget.session.displayName}."
                     : widget.session.isInternal
                     ? "Bienvenue ${widget.session.displayName}. Supervisez les tickets, les SLA, les interventions et le reporting SAV."
-                    : "Bienvenue ${widget.session.displayName}. Suivez vos demandes SAV, vos equipements et les notifications de traitement.",
+                    : "Bienvenue ${widget.session.displayName}. Suivez vos demandes SAV, vos équipements et les notifications de traitement.",
               ),
               const SizedBox(height: 20),
               Wrap(
@@ -962,12 +1012,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         "${data["support_sessions_active"] ?? 0}",
                       ),
                       _LineItem(
-                        "Knowledge articles publies",
+                        "Articles de connaissance publiés",
                         "${data["knowledge_articles_published"] ?? 0}",
                       ),
                       if (widget.session.isInternal) ...[
                         _LineItem(
-                          "Clients verifies",
+                          "Clients vérifiés",
                           "${data["clients_verified"] ?? 0}",
                         ),
                         _LineItem(
@@ -978,12 +1028,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ),
                       ] else ...[
                         _LineItem(
-                          "Compte verifie",
+                          "Compte vérifié",
                           widget.session.isVerified ? "Oui" : "En attente",
                         ),
                       ],
                       _LineItem(
-                        "Premiere reponse moyenne",
+                        "Première réponse moyenne",
                         data["average_first_response_hours"] != null
                             ? "${data["average_first_response_hours"]} h"
                             : "N/A",
@@ -1584,7 +1634,7 @@ class _TicketsScreenState extends State<TicketsScreen> {
                         const SizedBox(height: 12),
                         _LineItem("Tickets ouverts", "$openTickets"),
                         _LineItem(
-                          "Compte verifie",
+                          "Compte vérifié",
                           widget.session.isVerified ? "Oui" : "En attente",
                         ),
                         if (widget.session.organizationSupportEmail.isNotEmpty)
@@ -1911,17 +1961,26 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
       initialTime: TimeOfDay.now(),
     );
     if (time == null) return;
-    final scheduledAt = DateTime(picked.year, picked.month, picked.day, time.hour, time.minute);
+    final scheduledAt = DateTime(
+      picked.year,
+      picked.month,
+      picked.day,
+      time.hour,
+      time.minute,
+    );
 
     setState(() => _busy = true);
     try {
-      await widget.session.api.post("tickets/${widget.ticketId}/propose-planning/", {
-        "scheduled_at": scheduledAt.toIso8601String(),
-      });
+      await widget.session.api.post(
+        "tickets/${widget.ticketId}/propose-planning/",
+        {"scheduled_at": scheduledAt.toIso8601String()},
+      );
       await _refresh();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1930,13 +1989,16 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
   Future<void> _confirmPlanning(bool accepted) async {
     setState(() => _busy = true);
     try {
-      await widget.session.api.post("tickets/${widget.ticketId}/confirm-planning/", {
-        "accepted": accepted,
-      });
+      await widget.session.api.post(
+        "tickets/${widget.ticketId}/confirm-planning/",
+        {"accepted": accepted},
+      );
       await _refresh();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1945,28 +2007,38 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
   Future<void> _requestStart() async {
     setState(() => _busy = true);
     try {
-      await widget.session.api.post("tickets/${widget.ticketId}/request-start/", {});
+      await widget.session.api.post(
+        "tickets/${widget.ticketId}/request-start/",
+        {},
+      );
       await _refresh();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _validateStart({bool impossible = false, String reason = "", File? photo}) async {
+  Future<void> _validateStart({
+    bool impossible = false,
+    String reason = "",
+  }) async {
     setState(() => _busy = true);
     try {
       // In a real scenario, photo would be uploaded via multipart
-      await widget.session.api.post("tickets/${widget.ticketId}/validate-start/", {
-        "impossible": impossible,
-        "reason": reason,
-      });
+      await widget.session.api.post(
+        "tickets/${widget.ticketId}/validate-start/",
+        {"impossible": impossible, "reason": reason},
+      );
       await _refresh();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1975,27 +2047,37 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
   Future<void> _requestFinish() async {
     setState(() => _busy = true);
     try {
-      await widget.session.api.post("tickets/${widget.ticketId}/request-finish/", {});
+      await widget.session.api.post(
+        "tickets/${widget.ticketId}/request-finish/",
+        {},
+      );
       await _refresh();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _validateFinish({bool impossible = false, String reason = ""}) async {
+  Future<void> _validateFinish({
+    bool impossible = false,
+    String reason = "",
+  }) async {
     setState(() => _busy = true);
     try {
-      await widget.session.api.post("tickets/${widget.ticketId}/validate-finish/", {
-        "impossible": impossible,
-        "reason": reason,
-      });
+      await widget.session.api.post(
+        "tickets/${widget.ticketId}/validate-finish/",
+        {"impossible": impossible, "reason": reason},
+      );
       await _refresh();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -2369,6 +2451,115 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
     }
   }
 
+  bool _idMatches(dynamic value, int id) {
+    if (value is int) return value == id;
+    if (value is String) return int.tryParse(value) == id;
+    if (value is Map) return _idMatches(value["id"], id);
+    return false;
+  }
+
+  bool _canDriveWorkflow(Map<String, dynamic> ticket) {
+    if (!widget.session.isInternal) return false;
+    if (widget.session.isAdmin || widget.session.isManager) return true;
+    return _idMatches(ticket["assigned_agent"], widget.session.userId) ||
+        _idMatches(ticket["team_leader"], widget.session.userId);
+  }
+
+  List<Widget> _workflowActions(Map<String, dynamic> ticket) {
+    final status = (ticket["status"] ?? "").toString();
+    final canDrive = _canDriveWorkflow(ticket);
+    final isClient = !widget.session.isInternal;
+    final actions = <Widget>[];
+
+    void addAction(Widget action) => actions.add(action);
+
+    if (canDrive &&
+        const {
+          "assigned",
+          "team_ready",
+          "planning_proposed",
+        }.contains(status)) {
+      addAction(
+        OutlinedButton.icon(
+          onPressed: _busy ? null : _proposePlanning,
+          icon: const Icon(Icons.event_available_outlined),
+          label: const Text("Planifier"),
+        ),
+      );
+    }
+
+    if (isClient && status == "planning_proposed") {
+      addAction(
+        FilledButton.icon(
+          onPressed: _busy ? null : () => _confirmPlanning(true),
+          icon: const Icon(Icons.check_circle_outline),
+          label: const Text("Accepter"),
+        ),
+      );
+      addAction(
+        OutlinedButton.icon(
+          onPressed: _busy ? null : () => _confirmPlanning(false),
+          icon: const Icon(Icons.cancel_outlined),
+          label: const Text("Refuser"),
+        ),
+      );
+    }
+
+    if (canDrive &&
+        const {
+          "assigned",
+          "team_ready",
+          "planned",
+          "waiting_part",
+          "waiting_solution",
+        }.contains(status)) {
+      addAction(
+        FilledButton.icon(
+          onPressed: _busy ? null : _requestStart,
+          icon: const Icon(Icons.play_arrow_outlined),
+          label: const Text("Commencer"),
+        ),
+      );
+    }
+
+    if (isClient && status == "start_requested") {
+      addAction(
+        FilledButton.icon(
+          onPressed: _busy ? null : _validateStart,
+          icon: const Icon(Icons.verified_outlined),
+          label: const Text("Valider le debut"),
+        ),
+      );
+    }
+
+    if (canDrive &&
+        const {"in_progress", "collective_in_progress"}.contains(status)) {
+      addAction(
+        FilledButton.icon(
+          onPressed: _busy ? null : _requestFinish,
+          icon: const Icon(Icons.flag_outlined),
+          label: const Text("Terminer"),
+        ),
+      );
+    }
+
+    if (isClient && status == "finish_requested") {
+      addAction(
+        FilledButton.icon(
+          onPressed: _busy ? null : _validateFinish,
+          icon: const Icon(Icons.task_alt_outlined),
+          label: const Text("Valider la fin"),
+        ),
+      );
+    }
+
+    if (actions.isEmpty) return const [];
+    return [
+      const SizedBox(height: 16),
+      Wrap(spacing: 10, runSpacing: 10, children: actions),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -2474,12 +2665,15 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
                               ),
                             ),
                           ),
-                        const SizedBox(height: 16),
-                        FilledButton.icon(
-                          onPressed: _busy ? null : _runAgenticResolution,
-                          icon: const Icon(Icons.auto_awesome_outlined),
-                          label: const Text("Resolution agentique"),
-                        ),
+                        ..._workflowActions(ticket),
+                        if (widget.session.isInternal) ...[
+                          const SizedBox(height: 16),
+                          FilledButton.icon(
+                            onPressed: _busy ? null : _runAgenticResolution,
+                            icon: const Icon(Icons.auto_awesome_outlined),
+                            label: const Text("Resolution agentique"),
+                          ),
+                        ],
                         if (canTakeOwnership) ...[
                           const SizedBox(height: 12),
                           OutlinedButton.icon(

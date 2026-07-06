@@ -82,10 +82,43 @@ OPEN_TICKET_STATUSES = [
     Ticket.STATUS_WAITING_PART,
     Ticket.STATUS_ESCALATED,
     Ticket.STATUS_WAITING_SOLUTION,
+    Ticket.STATUS_WAITING_DIAGNOSTIC,
     Ticket.STATUS_FINISH_REQUESTED,
     Ticket.STATUS_REASSIGN_REQUIRED,
     Ticket.STATUS_REASSIGNED,
 ]
+
+SAV_ASSIGNMENT_BLOCKING_STATUSES = {
+    Ticket.STATUS_PLANNED,
+    Ticket.STATUS_START_REQUESTED,
+    Ticket.STATUS_IN_PROGRESS,
+    Ticket.STATUS_COLLECTIVE_IN_PROGRESS,
+    Ticket.STATUS_WAITING_PART,
+    Ticket.STATUS_ESCALATED,
+    Ticket.STATUS_WAITING_SOLUTION,
+    Ticket.STATUS_WAITING_DIAGNOSTIC,
+    Ticket.STATUS_FINISH_REQUESTED,
+}
+
+MAINTENANCE_ASSIGNMENT_BLOCKING_STATUSES = {
+    MaintenanceTicket.STATUS_IN_PROGRESS,
+}
+
+MAINTENANCE_NEAR_TERM_BLOCKING_STATUSES = {
+    MaintenanceTicket.STATUS_PLANNED,
+    MaintenanceTicket.STATUS_NOTIFIED,
+    MaintenanceTicket.STATUS_POSTPONED,
+}
+
+TECHNICIAN_AVAILABILITY_ROLES = tuple(
+    dict.fromkeys(
+        [
+            *User.TECHNICIAN_SPACE_ROLES,
+            User.ROLE_EXPERT,
+            User.ROLE_FIELD_TECHNICIAN,
+        ]
+    )
+)
 
 ESCALATION_PRIORITY_SEQUENCE = [
     Ticket.PRIORITY_LOW,
@@ -1484,6 +1517,10 @@ def _parse_completion_json(completion):
         return None
 
 
+def get_ai_runtime_status():
+    return LLM_CLIENT.status()
+
+
 def _coerce_bool(value, default=False):
     if isinstance(value, bool):
         return value
@@ -1779,55 +1816,57 @@ def compute_ticket_monthly_series(tickets, months=12):
 def compute_technician_availability_rows(organization):
     technicians = User.objects.filter(
         organization=organization,
-        role__in=[User.ROLE_TECHNICIAN, User.ROLE_CHIEF_TECHNICIAN, User.ROLE_FIELD_TECHNICIAN],
+        role__in=TECHNICIAN_AVAILABILITY_ROLES,
         is_active=True
-    )
+    ).order_by("first_name", "last_name", "username")
 
     dashboard = []
     now = timezone.now()
 
     for tech in technicians:
-        active_ticket = Ticket.objects.filter(
-            Q(assigned_agent=tech) | Q(team_leader=tech) | Q(team_members=tech),
-            status__in=[
-                Ticket.STATUS_START_REQUESTED,
-                Ticket.STATUS_IN_PROGRESS,
-                Ticket.STATUS_COLLECTIVE_IN_PROGRESS,
-                Ticket.STATUS_WAITING_PART,
-                Ticket.STATUS_FINISH_REQUESTED,
-            ],
-        ).first()
+        conflicts = technician_assignment_conflicts(tech)
+        sav_conflicts = [item for item in conflicts if item["type"] == "sav"]
+        maintenance_conflicts = [item for item in conflicts if item["type"] == "maintenance"]
+        assignable = tech.is_ticket_assignment_eligible and not conflicts
+        next_candidates = [item["scheduled_at"] for item in conflicts if item.get("scheduled_at")]
+        next_available = max(next_candidates) if next_candidates else None
 
-        status = "available"
-        next_available = None
-        current_ticket_ref = None
-
-        if active_ticket:
+        if conflicts:
             status = "busy"
-            current_ticket_ref = active_ticket.reference
-            active_intervention = active_ticket.interventions.filter(
-                Q(agent=tech) | Q(agent=active_ticket.team_leader) | Q(agent=active_ticket.assigned_agent)
-            ).order_by("-scheduled_for", "-created_at").first()
-            if active_intervention and active_intervention.finished_at:
-                next_available = active_intervention.finished_at
-            else:
-                next_available = active_ticket.sla_deadline or (now + timedelta(hours=2))
         elif tech.technician_status in {"on_leave", "unavailable"}:
             status = "absent"
         elif tech.technician_status == "on_site":
             status = "busy"
             next_available = now + timedelta(hours=2)
+            assignable = False
+        else:
+            status = "available"
 
         dashboard.append({
             "id": tech.id,
+            "name": tech.get_full_name() or tech.username,
+            "email": tech.email,
+            "role": tech.get_role_display(),
             "full_name": str(tech),
             "technician_name": str(tech),
             "status": status,
             "status_label": {"available": "Disponible", "busy": "Occupe", "absent": "Absent"}.get(status, status),
-            "current_ticket": current_ticket_ref,
+            "assignable": assignable,
+            "assignable_label": "Oui" if assignable else "Non",
+            "current_ticket": sav_conflicts[0]["reference"] if sav_conflicts else None,
+            "sav_active_count": len(sav_conflicts),
+            "maintenance_active_count": len(maintenance_conflicts),
+            "conflicts": serialize_assignment_conflicts(conflicts),
+            "conflicts_label": format_assignment_conflicts(conflicts) if conflicts else "",
             "next_available": next_available.isoformat() if next_available else None,
             "next_available_at": next_available,
-            "specialties": tech.specialties if hasattr(tech, 'specialties') else []
+            "busy_until": next_available,
+            "can_be_leader": tech.role in [User.ROLE_CHIEF_TECHNICIAN, User.ROLE_SUPERVISOR, User.ROLE_HEAD_SAV],
+            "can_be_member": tech.role in User.ASSIGNABLE_ROLES,
+            "current_tickets_count": len(sav_conflicts),
+            "specialties": tech.specialties if hasattr(tech, "specialties") else [],
+            "primary_city": tech.primary_city,
+            "primary_region": tech.primary_region,
         })
 
     return dashboard
@@ -2007,11 +2046,19 @@ def generate_maintenance_report_pdf(report, persist=True, force=False):
     products = list(maintenance_ticket.products.all())
     product_label = ", ".join(product.serial_number for product in products) if products else "-"
     parts_text = report.parts_used or _part_usage_records_summary(report.part_usages.select_related("spare_part").all()) or "-"
+    parts_status = report.parts_status or {}
+    intervention_types = ", ".join(str(item).replace("_", " ") for item in report.intervention_types or []) or "-"
     checklist_rows = [["Operation realisee"]]
     checklist_rows.extend([[str(item)] for item in report.checklist_completed or ["-"]])
     data = [
         ["Reference maintenance", f"MAINT-{maintenance_ticket.id}"],
         ["Client", str(maintenance_ticket.client)],
+        ["Systeme / outillage", maintenance_ticket.system_tools or "-"],
+        ["Marque", maintenance_ticket.equipment_brand or "-"],
+        ["Type", maintenance_ticket.equipment_type or "-"],
+        ["Numero", maintenance_ticket.equipment_identifier or "-"],
+        ["Cause d'appel / motif", maintenance_ticket.intervention_reason or maintenance_ticket.title],
+        ["Date d'appel", timezone.localtime(maintenance_ticket.call_date).strftime("%d/%m/%Y %H:%M") if maintenance_ticket.call_date else "-"],
         ["Technicien principal", str(report.technician)],
         ["Equipe technique", maintenance_ticket.technician_team_label],
         ["Service", maintenance_ticket.get_service_display()],
@@ -2020,6 +2067,9 @@ def generate_maintenance_report_pdf(report, persist=True, force=False):
         ["Execution reelle", f"{report.actual_started_at:%d/%m/%Y %H:%M} - {report.actual_finished_at:%d/%m/%Y %H:%M}"],
         ["Equipement(s)", product_label],
         ["Lieu", maintenance_ticket.location or maintenance_ticket.client.address or "-"],
+        ["Trajet", maintenance_ticket.route or "-"],
+        ["Nuitees", str(maintenance_ticket.overnight_stays or 0)],
+        ["Types d'intervention", intervention_types],
         ["Statut final", report.get_final_status_display()],
         ["Anomalie detectee", "Oui" if report.anomaly_detected else "Non"],
         ["Signature client", report.client_signed_by or "-"],
@@ -2060,7 +2110,20 @@ def generate_maintenance_report_pdf(report, persist=True, force=False):
             Paragraph("Observations techniques", styles["Heading2"]),
             Paragraph(report.observations or "-", styles["BodyText"]),
             Spacer(1, 12),
+            Paragraph("Observations, anomalies et travaux a prevoir", styles["Heading2"]),
+            Paragraph(report.work_to_plan or "-", styles["BodyText"]),
+            Spacer(1, 12),
             Paragraph("Pieces / consommables", styles["Heading2"]),
+            Paragraph(
+                " - ".join(
+                    [
+                        "Remplacables: Oui" if parts_status.get("remplacables") else "Remplacables: Non",
+                        "Ajoutables: Oui" if parts_status.get("ajoutables") else "Ajoutables: Non",
+                        "Defectueuses: Oui" if parts_status.get("defectueuses") else "Defectueuses: Non",
+                    ]
+                ),
+                styles["BodyText"],
+            ),
             Paragraph(parts_text, styles["BodyText"]),
         ]
     )
@@ -2131,8 +2194,16 @@ def send_intervention_assignment_email(intervention, pdf_content=None):
     )
     filename = f"intervention-{slugify(intervention.ticket.reference)}-{intervention.pk}.pdf"
     message.attach(filename, pdf_content, "application/pdf")
-    message.send(fail_silently=False)
-    return True
+    try:
+        return bool(message.send(fail_silently=False))
+    except Exception as exc:  # noqa: BLE001
+        log_audit_event(
+            actor=technician,
+            action="intervention_assignment_email_failed",
+            instance=intervention,
+            details={"recipient": recipient, "error": str(exc)[:1000]},
+        )
+        return False
 
 
 def send_ticket_closure_report_notifications(ticket, intervention, *, pdf_content=None, actor=None):
@@ -2232,8 +2303,18 @@ def send_report_to_recipients(*, report, report_type, recipients, filename, pdf_
 
     pdf_content = pdf_content or export_report_pdf(report)
     message.attach(filename, pdf_content, "application/pdf")
-    message.send(fail_silently=False)
-    return True
+    try:
+        return bool(message.send(fail_silently=False))
+    except Exception as exc:  # noqa: BLE001
+        GeneratedReport.objects.create(
+            organization=None,
+            report_type=report_type,
+            export_format=GeneratedReport.FORMAT_PDF,
+            period_label=report.get("period_label", ""),
+            payload={"email_failed": True, "error": str(exc)[:1000], "recipients": recipients},
+            sent_to=", ".join(recipients),
+        )
+        return False
 
 
 def sync_ticket_assignment(ticket, *, assigned_by=None, note="", release_status=TicketAssignment.STATUS_RELEASED):
@@ -2398,22 +2479,134 @@ def can_assign_ticket_technician(user, ticket):
     return bool(user.role in set(User.ESCALATION_TARGET_ROLES) and ticket.assigned_agent_id == user.id)
 
 
-def _technician_has_active_conflict(technician, *, exclude_ticket=None):
-    conflicting_statuses = {
-        Ticket.STATUS_START_REQUESTED,
-        Ticket.STATUS_IN_PROGRESS,
-        Ticket.STATUS_COLLECTIVE_IN_PROGRESS,
-        Ticket.STATUS_FINISH_REQUESTED,
-    }
-    queryset = Ticket.objects.filter(status__in=conflicting_statuses).filter(
-        Q(assigned_agent=technician) | Q(team_leader=technician) | Q(team_members=technician)
+def _maintenance_blocks_assignment(maintenance_ticket, *, now=None):
+    now = now or timezone.now()
+    if maintenance_ticket.status in MAINTENANCE_ASSIGNMENT_BLOCKING_STATUSES:
+        return True
+    if maintenance_ticket.status in MAINTENANCE_NEAR_TERM_BLOCKING_STATUSES:
+        return maintenance_ticket.scheduled_date <= now + timedelta(days=1)
+    return False
+
+
+def technician_assignment_conflicts(technician, *, exclude_ticket=None, exclude_maintenance_ticket=None):
+    conflicts = []
+    now = timezone.now()
+    ticket_queryset = (
+        Ticket.objects
+        .select_related("client")
+        .filter(status__in=SAV_ASSIGNMENT_BLOCKING_STATUSES)
+        .filter(Q(assigned_agent=technician) | Q(team_leader=technician) | Q(team_members=technician))
+        .distinct()
     )
     if exclude_ticket is not None and exclude_ticket.pk:
-        queryset = queryset.exclude(pk=exclude_ticket.pk)
-    return queryset.exists()
+        ticket_queryset = ticket_queryset.exclude(pk=exclude_ticket.pk)
+
+    for ticket in ticket_queryset.order_by("sla_deadline", "created_at")[:8]:
+        conflicts.append(
+            {
+                "type": "sav",
+                "label": "SAV",
+                "id": ticket.id,
+                "reference": ticket.reference,
+                "title": ticket.title,
+                "status": ticket.status,
+                "status_label": ticket.get_status_display(),
+                "scheduled_at": ticket.sla_deadline,
+            }
+        )
+
+    maintenance_queryset = (
+        MaintenanceTicket.objects
+        .select_related("client", "technician")
+        .filter(Q(technician=technician) | Q(team_members=technician))
+        .exclude(status__in=[
+            MaintenanceTicket.STATUS_DONE,
+            MaintenanceTicket.STATUS_ANOMALY,
+            MaintenanceTicket.STATUS_CANCELLED,
+        ])
+        .distinct()
+    )
+    if exclude_maintenance_ticket is not None and exclude_maintenance_ticket.pk:
+        maintenance_queryset = maintenance_queryset.exclude(pk=exclude_maintenance_ticket.pk)
+
+    for maintenance_ticket in maintenance_queryset.order_by("scheduled_date", "created_at")[:12]:
+        if not _maintenance_blocks_assignment(maintenance_ticket, now=now):
+            continue
+        conflicts.append(
+            {
+                "type": "maintenance",
+                "label": "Maintenance",
+                "id": maintenance_ticket.id,
+                "reference": f"MAINT-{maintenance_ticket.id}",
+                "title": maintenance_ticket.title,
+                "status": maintenance_ticket.status,
+                "status_label": maintenance_ticket.get_status_display(),
+                "scheduled_at": maintenance_ticket.scheduled_date,
+            }
+        )
+
+    return conflicts
 
 
-def assign_ticket_to_technician(ticket, technician, *, actor=None, note=""):
+def technician_is_assignable(technician, *, exclude_ticket=None, exclude_maintenance_ticket=None):
+    if not technician or not technician.is_ticket_assignment_eligible:
+        return False
+    return not technician_assignment_conflicts(
+        technician,
+        exclude_ticket=exclude_ticket,
+        exclude_maintenance_ticket=exclude_maintenance_ticket,
+    )
+
+
+def format_assignment_conflicts(conflicts):
+    parts = []
+    for item in conflicts:
+        date_label = ""
+        if item.get("scheduled_at"):
+            date_label = f" ({timezone.localtime(item['scheduled_at']):%d/%m/%Y %H:%M})"
+        parts.append(f"{item['label']} {item['reference']} - {item['status_label']}{date_label}")
+    return "; ".join(parts)
+
+
+def serialize_assignment_conflicts(conflicts):
+    serialized = []
+    for item in conflicts:
+        payload = dict(item)
+        scheduled_at = payload.get("scheduled_at")
+        if scheduled_at:
+            payload["scheduled_at"] = timezone.localtime(scheduled_at).isoformat()
+        serialized.append(payload)
+    return serialized
+
+
+def validate_technician_assignment_availability(
+    technician,
+    *,
+    actor=None,
+    exclude_ticket=None,
+    exclude_maintenance_ticket=None,
+    force=False,
+    force_reason="",
+):
+    conflicts = technician_assignment_conflicts(
+        technician,
+        exclude_ticket=exclude_ticket,
+        exclude_maintenance_ticket=exclude_maintenance_ticket,
+    )
+    if not conflicts:
+        return []
+    if force:
+        if not is_manager_user(actor):
+            raise ValueError("Seul le Responsable SAV peut forcer une affectation sur technicien occupe.")
+        if not (force_reason or "").strip():
+            raise ValueError("Le motif est obligatoire pour forcer une affectation.")
+        return conflicts
+    raise ValueError(
+        f"{technician} est indisponible. Interventions actives: {format_assignment_conflicts(conflicts)}"
+    )
+
+
+def assign_ticket_to_technician(ticket, technician, *, actor=None, note="", force=False, force_reason=""):
     if ticket.status not in OPEN_TICKET_STATUSES:
         raise ValueError("Seuls les tickets ouverts peuvent etre affectes.")
     if not can_assign_ticket_technician(actor, ticket):
@@ -2438,6 +2631,13 @@ def assign_ticket_to_technician(ticket, technician, *, actor=None, note=""):
             raise ValueError("Le technicien cible appartient a une autre agence.")
         if ticket_agency_ids and actor.agency_id not in ticket_agency_ids:
             raise ValueError("Ce ticket appartient a une autre agence.")
+    conflicts = validate_technician_assignment_availability(
+        technician,
+        actor=actor,
+        exclude_ticket=ticket,
+        force=force,
+        force_reason=force_reason,
+    )
 
     previous_status = ticket.status
     previous_assigned_agent = ticket.assigned_agent
@@ -2494,6 +2694,9 @@ def assign_ticket_to_technician(ticket, technician, *, actor=None, note=""):
             "new_status": ticket.status,
             "previous_assigned_agent": getattr(previous_assigned_agent, "id", None),
             "technician": technician.id,
+            "forced": bool(force and conflicts),
+            "force_reason": (force_reason or "").strip(),
+            "conflicts": serialize_assignment_conflicts(conflicts),
             "created_assignment": intervention_result.get("created_assignment", False),
             "assignment_id": getattr(intervention_result.get("assignment"), "id", None),
         },
@@ -2506,12 +2709,14 @@ def assign_ticket_to_technician(ticket, technician, *, actor=None, note=""):
         "status": ticket.status,
         "previous_assigned_agent": str(previous_assigned_agent) if previous_assigned_agent else None,
         "assigned_agent": str(ticket.assigned_agent) if ticket.assigned_agent else None,
+        "forced": bool(force and conflicts),
+        "conflicts": serialize_assignment_conflicts(conflicts),
         "assignment_id": getattr(intervention_result.get("assignment"), "id", None),
         "created_assignment": intervention_result.get("created_assignment", False),
     }
 
 
-def assign_ticket_to_team(ticket, *, leader, members, actor=None, note=""):
+def assign_ticket_to_team(ticket, *, leader, members, actor=None, note="", force=False, force_reason=""):
     if ticket.status not in OPEN_TICKET_STATUSES:
         raise ValueError("Seuls les tickets ouverts peuvent etre affectes.")
     if not can_assign_ticket_technician(actor, ticket):
@@ -2532,11 +2737,19 @@ def assign_ticket_to_team(ticket, *, leader, members, actor=None, note=""):
         if any(member.organization_id and member.organization_id != ticket.organization_id for member in selected):
             raise ValueError("Tous les techniciens doivent appartenir a la meme organisation que le ticket.")
     selected_technicians = [leader, *members]
+    forced_conflicts = {}
     for technician in selected_technicians:
         if not technician.is_ticket_assignment_eligible:
             raise ValueError(f"{technician} n'est pas disponible.")
-        if _technician_has_active_conflict(technician, exclude_ticket=ticket):
-            raise ValueError(f"{technician} est deja mobilise sur une intervention en cours.")
+        conflicts = validate_technician_assignment_availability(
+            technician,
+            actor=actor,
+            exclude_ticket=ticket,
+            force=force,
+            force_reason=force_reason,
+        )
+        if conflicts:
+            forced_conflicts[technician.id] = conflicts
 
     previous_status = ticket.status
     previous_assigned_agent = ticket.assigned_agent
@@ -2579,6 +2792,12 @@ def assign_ticket_to_team(ticket, *, leader, members, actor=None, note=""):
             "new_status": ticket.status,
             "leader": leader.id,
             "members": [member.id for member in members],
+            "forced": bool(force and forced_conflicts),
+            "force_reason": (force_reason or "").strip(),
+            "conflicts": {
+                str(technician_id): serialize_assignment_conflicts(conflicts)
+                for technician_id, conflicts in forced_conflicts.items()
+            },
             "assignment_id": getattr(intervention_result.get("assignment"), "id", None),
         },
     )
@@ -2589,6 +2808,11 @@ def assign_ticket_to_team(ticket, *, leader, members, actor=None, note=""):
         "status": ticket.status,
         "leader": str(leader),
         "members": [str(member) for member in members],
+        "forced": bool(force and forced_conflicts),
+        "conflicts": {
+            str(technician_id): serialize_assignment_conflicts(conflicts)
+            for technician_id, conflicts in forced_conflicts.items()
+        },
         "assignment_id": getattr(intervention_result.get("assignment"), "id", None),
     }
 
@@ -2904,11 +3128,30 @@ def _coerce_json_list(value, field_label):
     raise ValueError(f"Le champ {field_label} doit etre une liste.")
 
 
-def _coerce_bool(value):
+def _coerce_json_dict(value, field_label):
+    if value in (None, ""):
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return {}
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Le champ {field_label} doit etre un objet JSON valide.") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError(f"Le champ {field_label} doit etre un objet JSON.")
+        return parsed
+    raise ValueError(f"Le champ {field_label} doit etre un objet JSON.")
+
+
+def _coerce_bool(value, default=False):
     if isinstance(value, bool):
         return value
     if value is None:
-        return False
+        return default
     if isinstance(value, (int, float)):
         return bool(value)
     return str(value).strip().lower() in {"1", "true", "yes", "oui", "on"}
@@ -3106,17 +3349,75 @@ def _business_domain_for_maintenance_service(service):
     return mapping.get(service, Ticket.DOMAIN_OTHER)
 
 
+def _resolve_maintenance_client(line, *, program, index):
+    client_id = line.get("client_id") or line.get("client")
+    if client_id:
+        client = User.objects.filter(pk=client_id, role=User.ROLE_CLIENT, is_active=True).first()
+        if client is None:
+            raise ValueError(f"Ligne {index}: client introuvable.")
+        return client
+
+    client_label = str(
+        line.get("client_label")
+        or line.get("client_name")
+        or line.get("client_site")
+        or line.get("site_client")
+        or ""
+    ).strip()
+    if not client_label:
+        raise ValueError(f"Ligne {index}: le client / site concerne est obligatoire.")
+
+    normalized_label = re.sub(r"^#\d+\s*-\s*", "", client_label).strip()
+    organization = program.organization
+    queryset = User.objects.filter(role=User.ROLE_CLIENT, is_active=True)
+    if organization:
+        queryset = queryset.filter(Q(organization=organization) | Q(organization__isnull=True))
+    existing = queryset.filter(Q(company_name__iexact=normalized_label) | Q(username__iexact=slugify(normalized_label))).first()
+    if existing:
+        return existing
+
+    base_username = slugify(normalized_label)[:120] or f"client-maintenance-{index}"
+    username = base_username
+    suffix = 1
+    while User.objects.filter(username=username).exists():
+        suffix += 1
+        username = f"{base_username[:110]}-{suffix}"
+
+    return User.objects.create(
+        username=username,
+        role=User.ROLE_CLIENT,
+        organization=organization,
+        company_name=normalized_label[:255],
+        is_active=True,
+    )
+
+
 def publish_maintenance_program(program, *, actor=None):
     if program.status == MaintenanceProgram.STATUS_PUBLISHED and program.tickets.exists():
         return list(program.tickets.select_related("client", "technician").prefetch_related("products", "team_members"))
     if program.status == MaintenanceProgram.STATUS_ARCHIVED:
         raise ValueError("Un programme archive ne peut pas etre publie.")
-    if not isinstance(program.task_lines, list) or not program.task_lines:
-        raise ValueError("Ajoutez au moins une ligne de maintenance avant publication.")
+
+    # Normalisation / parsing des task_lines
+    task_lines = program.task_lines
+    if isinstance(task_lines, str):
+        raw = task_lines.strip()
+        if raw:
+            try:
+                task_lines = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise ValueError("task_lines: contenu doit etre un JSON valide (liste JSON attendu).") from exc
+        else:
+            task_lines = []
+
+    if not isinstance(task_lines, list) or not task_lines:
+        raise ValueError("Ajoutez au moins une ligne de maintenance avant publication (task_lines vide ou non-list).")
 
     created_tickets = []
     with transaction.atomic():
-        for index, line in enumerate(program.task_lines, start=1):
+        for index, line in enumerate(task_lines, start=1):
+            if not isinstance(line, dict):
+                raise ValueError(f"Ligne {index}: chaque ligne doit etre un objet JSON (dict).")
             if not isinstance(line, dict):
                 raise ValueError(f"Ligne {index}: format invalide.")
             title = str(line.get("title") or line.get("intitule") or line.get("task") or "").strip()
@@ -3141,9 +3442,8 @@ def publish_maintenance_program(program, *, actor=None):
                 if primary_technician_id not in technician_ids:
                     technician_ids.insert(0, primary_technician_id)
             technician_ids = list(dict.fromkeys(technician_ids))
-            client_id = line.get("client_id") or line.get("client")
-            if not technician_ids or not client_id:
-                raise ValueError(f"Ligne {index}: technicien et client sont obligatoires.")
+            if not technician_ids:
+                raise ValueError(f"Ligne {index}: technicien obligatoire.")
 
             technician_queryset = User.objects.filter(pk__in=technician_ids, role__in=User.TECHNICIAN_SPACE_ROLES, is_active=True)
             technician_by_id = {technician.pk: technician for technician in technician_queryset}
@@ -3155,9 +3455,7 @@ def publish_maintenance_program(program, *, actor=None):
             technicians = [technician_by_id[technician_id] for technician_id in technician_ids]
             technician = technicians[0]
             team_members = [member for member in technicians[1:] if member.pk != technician.pk]
-            client = User.objects.filter(pk=client_id, role=User.ROLE_CLIENT, is_active=True).first()
-            if client is None:
-                raise ValueError(f"Ligne {index}: client introuvable.")
+            client = _resolve_maintenance_client(line, program=program, index=index)
             if program.organization_id:
                 for technician_item in technicians:
                     if technician_item.organization_id and technician_item.organization_id != program.organization_id:
@@ -3173,6 +3471,17 @@ def publish_maintenance_program(program, *, actor=None):
                 or line.get("equipements")
             )
             products = list(Product.objects.filter(pk__in=product_ids)) if product_ids else []
+            equipment_label = str(
+                line.get("equipment_label")
+                or line.get("equipement_label")
+                or line.get("equipment")
+                or line.get("equipement")
+                or ""
+            ).strip()
+            if not equipment_label and products:
+                equipment_label = ", ".join(f"{product.name} / {product.serial_number}" for product in products)
+            if not equipment_label:
+                raise ValueError(f"Ligne {index}: le champ Equipement(s) est obligatoire.")
             for product in products:
                 if product.client_id != client.id:
                     raise ValueError(f"Ligne {index}: l'equipement {product.serial_number} n'appartient pas au client.")
@@ -3196,6 +3505,20 @@ def publish_maintenance_program(program, *, actor=None):
                 instructions=str(line.get("instructions") or line.get("notes") or "").strip(),
                 priority=str(line.get("priority") or line.get("priorite") or Ticket.PRIORITY_NORMAL).strip(),
                 location=str(line.get("location") or line.get("localisation") or client.address or "").strip()[:255],
+                route=str(line.get("route") or line.get("trajet") or "").strip()[:255],
+                overnight_stays=int(line.get("overnight_stays") or line.get("nuitees") or line.get("nuitées") or 0),
+                call_date=_parse_datetime_value(line.get("call_date") or line.get("date_appel") or scheduled_date, "date_appel"),
+                system_tools=str(line.get("system_tools") or line.get("systeme_outillage") or line.get("systeme") or "").strip()[:255],
+                equipment_brand=str(line.get("equipment_brand") or line.get("marque") or "").strip()[:120],
+                equipment_type=str(line.get("equipment_type") or line.get("type_equipement") or line.get("type") or "").strip()[:120],
+                equipment_identifier=str(
+                    line.get("equipment_identifier")
+                    or line.get("numero")
+                    or line.get("numero_serie")
+                    or equipment_label
+                    or ""
+                ).strip()[:120],
+                intervention_reason=str(line.get("intervention_reason") or line.get("motif") or title).strip(),
                 status=MaintenanceTicket.STATUS_PLANNED,
             )
             if products:
@@ -3365,6 +3688,7 @@ def _create_incident_from_maintenance(maintenance_ticket, report, *, actor=None)
         business_domain=_business_domain_for_maintenance_service(maintenance_ticket.service),
         category=Ticket.CATEGORY_BREAKDOWN,
         channel=Ticket.CHANNEL_WEB,
+        status=Ticket.STATUS_WAITING_DIAGNOSTIC,
         priority=maintenance_ticket.priority,
         location=maintenance_ticket.location,
         sla_deadline=compute_ticket_sla_deadline(maintenance_ticket.priority, organization=maintenance_ticket.organization),
@@ -3391,7 +3715,10 @@ def close_maintenance_ticket(
     actual_finished_at=None,
     checklist_completed=None,
     observations="",
+    work_to_plan="",
     parts_used="",
+    parts_status=None,
+    intervention_types=None,
     spare_parts=None,
     structured_parts_used=None,
     anomaly_detected=None,
@@ -3430,7 +3757,10 @@ def close_maintenance_ticket(
         "actual_finished_at": actual_finished_at,
         "checklist_completed": checklist_payload,
         "observations": normalized_observations,
+        "work_to_plan": str(work_to_plan or "").strip(),
         "parts_used": str(parts_used or "").strip(),
+        "parts_status": parts_status if isinstance(parts_status, dict) else _coerce_json_dict(parts_status, "etat_pieces"),
+        "intervention_types": _coerce_json_list(intervention_types, "types_intervention"),
         "anomaly_detected": anomaly_flag,
         "photos": _coerce_json_list(photos, "photos"),
         "client_signed_by": str(client_signed_by or "").strip(),
@@ -3752,6 +4082,7 @@ def answer_support_question(question, user, product=None, ticket=None):
         recommended_next_step = "Creer ou mettre a jour un ticket avec des preuves"
 
     openai_data = None
+    completion = None
     if LLM_CLIENT.enabled:
         system_prompt = (
             "You are Afrilux SAV's support assistant. Return valid JSON only with keys: "
@@ -3762,7 +4093,8 @@ def answer_support_question(question, user, product=None, ticket=None):
             "Answer this support question using the available context.\n"
             f"{json.dumps({'question': question, 'ticket': _ticket_context(ticket) if ticket else None, 'product': _product_context(product) if product else None, 'knowledge': matching_articles}, ensure_ascii=False)}"
         )
-        openai_data = _parse_completion_json(LLM_CLIENT.complete_json(system_prompt, user_prompt))
+        completion = LLM_CLIENT.complete_json(system_prompt, user_prompt)
+        openai_data = _parse_completion_json(completion)
 
     if openai_data:
         answer = openai_data.get("answer") or answer
@@ -3799,12 +4131,18 @@ def answer_support_question(question, user, product=None, ticket=None):
             "matched_articles": matching_articles,
             "should_create_ticket": should_create_ticket,
             "llm_used": bool(openai_data),
+            "llm_error": completion.error_message if completion and not completion.ok else "",
         },
         approved_by=None,
     )
+    ai_status = LLM_CLIENT.status()
 
     return {
         "answer": answer,
+        "ai_mode": "openai" if openai_data else "heuristique",
+        "ai_provider": "openai" if openai_data else ai_status["provider"],
+        "ai_model": completion.model if completion and openai_data else ai_status["model"],
+        "ai_configured": ai_status["enabled"],
         "suggested_priority": suggested_priority,
         "suggested_category": suggested_category,
         "likely_issue": likely_issue,

@@ -797,10 +797,10 @@ def handle_email_inbound(payload: dict[str, str], uploaded_files=None) -> dict:
 
 def _deliver_email(notification: Notification) -> DeliveryResult:
     if not email_enabled():
-        return DeliveryResult(success=False, provider="smtp", error_message="SMTP is not configured.")
+        return DeliveryResult(success=False, provider="smtp", error_message="SMTP n'est pas configure.")
     recipient_email = recipient_contact_for_channel(notification.recipient, Notification.CHANNEL_EMAIL)
     if not recipient_email:
-        return DeliveryResult(success=False, provider="smtp", error_message="Recipient has no email address.")
+        return DeliveryResult(success=False, provider="smtp", error_message="Le destinataire n'a pas d'adresse email.")
 
     try:
         sent_count = send_mail(
@@ -838,13 +838,13 @@ def _firebase_access_token():
 
 def _deliver_push(notification: Notification) -> DeliveryResult:
     if not firebase_push_enabled():
-        return DeliveryResult(success=False, provider="fcm", error_message="Firebase Cloud Messaging is not configured.")
+        return DeliveryResult(success=False, provider="fcm", error_message="Firebase Cloud Messaging n'est pas configure.")
 
     devices = list(
         DeviceRegistration.objects.filter(user=notification.recipient, is_active=True).order_by("-last_seen_at")
     )
     if not devices:
-        return DeliveryResult(success=False, provider="fcm", error_message="Recipient has no active push device.")
+        return DeliveryResult(success=False, provider="fcm", error_message="Le destinataire n'a aucun appareil de notification actif.")
 
     try:
         access_token = _firebase_access_token()
@@ -916,23 +916,23 @@ def _deliver_push(notification: Notification) -> DeliveryResult:
     return DeliveryResult(
         success=False,
         provider="fcm",
-        error_message=failures[0]["error"] if failures else "Unknown FCM failure.",
+        error_message=failures[0]["error"] if failures else "Echec FCM inconnu.",
         payload={"failures": failures},
     )
 
 
 def _deliver_twilio_message(notification: Notification, use_whatsapp: bool) -> DeliveryResult:
     if use_whatsapp and not twilio_whatsapp_enabled():
-        return DeliveryResult(success=False, provider="twilio_whatsapp", error_message="Twilio WhatsApp is not configured.")
+        return DeliveryResult(success=False, provider="twilio_whatsapp", error_message="Twilio WhatsApp n'est pas configure.")
     if not use_whatsapp and not twilio_sms_enabled():
-        return DeliveryResult(success=False, provider="twilio_sms", error_message="Twilio SMS is not configured.")
+        return DeliveryResult(success=False, provider="twilio_sms", error_message="Twilio SMS n'est pas configure.")
 
     to_phone = recipient_contact_for_channel(
         notification.recipient,
         Notification.CHANNEL_WHATSAPP if use_whatsapp else Notification.CHANNEL_SMS,
     )
     if not to_phone:
-        return DeliveryResult(success=False, provider="twilio", error_message="Recipient has no phone number.")
+        return DeliveryResult(success=False, provider="twilio", error_message="Le destinataire n'a pas de numero de telephone.")
 
     from_value = settings.TWILIO_WHATSAPP_FROM if use_whatsapp else settings.TWILIO_SMS_FROM
     to_value = f"whatsapp:{to_phone}" if use_whatsapp else to_phone

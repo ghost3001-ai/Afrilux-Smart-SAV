@@ -621,11 +621,21 @@ class TicketTechnicianAssignmentForm(forms.Form):
         label="Note d'affectation",
         widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Optionnel: consigne pour le technicien."}),
     )
+    force_assignment = forms.BooleanField(
+        required=False,
+        label="Forcer l'affectation",
+        help_text="Reserve au Responsable SAV si le technicien est deja occupe.",
+    )
+    force_reason = forms.CharField(
+        required=False,
+        label="Motif du forcage",
+        widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Motif obligatoire si affectation forcee."}),
+    )
 
     def __init__(self, *args, user=None, ticket=None, **kwargs):
         super().__init__(*args, **kwargs)
         queryset = User.objects.filter(
-            role=User.ROLE_TECHNICIAN,
+            role__in=User.ASSIGNABLE_ROLES,
             technician_status="available",
             is_active=True,
         )
@@ -633,6 +643,12 @@ class TicketTechnicianAssignmentForm(forms.Form):
         if organization:
             queryset = queryset.filter(organization=organization)
         self.fields["technician"].queryset = queryset.order_by("first_name", "last_name", "username")
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if cleaned_data.get("force_assignment") and not (cleaned_data.get("force_reason") or "").strip():
+            self.add_error("force_reason", "Le motif est obligatoire pour forcer l'affectation.")
+        return cleaned_data
 
 
 class TicketTeamAssignmentForm(forms.Form):
@@ -652,11 +668,21 @@ class TicketTeamAssignmentForm(forms.Form):
         label="Consigne equipe",
         widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Optionnel: consigne de mission pour l'equipe."}),
     )
+    force_assignment = forms.BooleanField(
+        required=False,
+        label="Forcer l'affectation",
+        help_text="Reserve au Responsable SAV si un membre est deja occupe.",
+    )
+    force_reason = forms.CharField(
+        required=False,
+        label="Motif du forcage",
+        widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Motif obligatoire si affectation forcee."}),
+    )
 
     def __init__(self, *args, user=None, ticket=None, **kwargs):
         super().__init__(*args, **kwargs)
         queryset = User.objects.filter(
-            role=User.ROLE_TECHNICIAN,
+            role__in=User.ASSIGNABLE_ROLES,
             technician_status="available",
             is_active=True,
         )
@@ -675,6 +701,8 @@ class TicketTeamAssignmentForm(forms.Form):
             self.add_error("members", "Le chef d'equipe ne doit pas etre selectionne comme membre.")
         if leader and not members:
             self.add_error("members", "Une equipe doit contenir au moins un membre.")
+        if cleaned_data.get("force_assignment") and not (cleaned_data.get("force_reason") or "").strip():
+            self.add_error("force_reason", "Le motif est obligatoire pour forcer l'affectation.")
         return cleaned_data
 
 
@@ -959,8 +987,8 @@ class MaintenanceProgramForm(forms.ModelForm):
         self.fields["month"].required = False
         self.fields["quarter"].required = False
         self.fields["task_lines"].help_text = (
-            "Liste JSON des maintenances a publier. Champs: title, technician_ids, client_id, "
-            "product_ids, scheduled_date (date et heure ISO), periodicity, checklist, instructions."
+            "Liste JSON des maintenances a publier. Champs: title, technician_ids, client_label, "
+            "equipment_label, product_ids, scheduled_date (date et heure ISO), periodicity, checklist, instructions."
         )
         if not self.initial.get("task_lines") and not self.instance.pk:
             self.initial["task_lines"] = json.dumps(
@@ -968,7 +996,8 @@ class MaintenanceProgramForm(forms.ModelForm):
                     {
                         "title": "Entretien preventif equipement client",
                         "technician_ids": [],
-                        "client_id": "",
+                        "client_label": "Client / site a renseigner",
+                        "equipment_label": "Equipement a renseigner",
                         "product_ids": [],
                         "scheduled_date": timezone.localtime().replace(second=0, microsecond=0).isoformat(timespec="minutes"),
                         "periodicity": MaintenanceTicket.PERIOD_MONTHLY,
@@ -1016,6 +1045,21 @@ class MaintenanceProgramForm(forms.ModelForm):
 
 
 class MaintenanceClosureForm(forms.Form):
+    INTERVENTION_TYPE_CHOICES = (
+        ("maintenance", "Maintenance"),
+        ("echange_composant", "Echange de composant"),
+        ("reglage_nettoyage", "Reglage, nettoyage"),
+        ("reparation", "Reparation"),
+        ("depannage", "Depannage"),
+        ("entretien", "Entretien"),
+        ("reprise_soudure", "Reprise de soudure"),
+        ("reprogrammation", "Reprogrammation"),
+        ("reconfiguration", "Reconfiguration"),
+        ("modification", "Modification"),
+        ("amelioration", "Amelioration"),
+        ("autre", "Autre"),
+    )
+
     final_status = forms.ChoiceField(label="Nouveau statut", choices=MaintenanceTicket.FINAL_STATUS_CHOICES)
     actual_started_at = forms.DateTimeField(
         label="Debut reel",
@@ -1032,6 +1076,21 @@ class MaintenanceClosureForm(forms.Form):
     )
     observations = forms.CharField(label="Observations techniques", widget=forms.Textarea(attrs={"rows": 4}))
     parts_used = forms.CharField(label="Pieces / consommables utilises", required=False, widget=forms.Textarea(attrs={"rows": 2}))
+    parts_replaceable = forms.BooleanField(label="Pieces remplacables", required=False)
+    parts_addable = forms.BooleanField(label="Pieces ajoutables", required=False)
+    parts_defective = forms.BooleanField(label="Pieces defectueuses", required=False)
+    intervention_types = forms.MultipleChoiceField(
+        label="Type d'intervention",
+        choices=INTERVENTION_TYPE_CHOICES,
+        required=False,
+        widget=forms.CheckboxSelectMultiple,
+    )
+    other_intervention_type = forms.CharField(label="Autre type d'intervention", required=False, max_length=120)
+    work_to_plan = forms.CharField(
+        label="Observations, anomalies, defauts, degats constates, travaux ou intervention a prevoir",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 4}),
+    )
     spare_parts = forms.ModelMultipleChoiceField(
         label="Pieces catalogue",
         queryset=SparePart.objects.none(),
@@ -1074,6 +1133,7 @@ class MaintenanceClosureForm(forms.Form):
         self.initial.setdefault("actual_finished_at", now)
         if maintenance_ticket and not self.initial.get("checklist_completed"):
             self.initial["checklist_completed"] = json.dumps(maintenance_ticket.checklist or [], indent=2)
+        self.initial.setdefault("intervention_types", ["maintenance"])
         part_queryset = SparePart.objects.filter(is_active=True)
         organization = None
         if maintenance_ticket and maintenance_ticket.organization_id:

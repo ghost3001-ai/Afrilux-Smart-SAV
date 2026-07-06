@@ -936,7 +936,17 @@ class MaintenanceTicketCloseView(LoginRequiredMixin, FormView):
                 actual_finished_at=form.cleaned_data["actual_finished_at"],
                 checklist_completed=form.cleaned_data["checklist_completed"],
                 observations=form.cleaned_data["observations"],
+                work_to_plan=form.cleaned_data.get("work_to_plan", ""),
                 parts_used=form.cleaned_data.get("parts_used", ""),
+                parts_status={
+                    "remplacables": form.cleaned_data.get("parts_replaceable", False),
+                    "ajoutables": form.cleaned_data.get("parts_addable", False),
+                    "defectueuses": form.cleaned_data.get("parts_defective", False),
+                },
+                intervention_types=[
+                    *form.cleaned_data.get("intervention_types", []),
+                    *([form.cleaned_data.get("other_intervention_type", "").strip()] if form.cleaned_data.get("other_intervention_type") else []),
+                ],
                 spare_parts=form.cleaned_data.get("spare_parts"),
                 anomaly_detected=form.cleaned_data.get("anomaly_detected", False),
                 photo_files=form.cleaned_data.get("maintenance_photos", []),
@@ -1496,6 +1506,8 @@ class TicketAssignTechnicianView(LoginRequiredMixin, View):
                 form.cleaned_data["technician"],
                 actor=request.user,
                 note=form.cleaned_data.get("note", ""),
+                force=form.cleaned_data.get("force_assignment", False),
+                force_reason=form.cleaned_data.get("force_reason", ""),
             )
         except ValueError as exc:
             django_messages.error(request, str(exc))
@@ -1523,6 +1535,8 @@ class TicketAssignTeamView(LoginRequiredMixin, View):
                 members=form.cleaned_data["members"],
                 actor=request.user,
                 note=form.cleaned_data.get("note", ""),
+                force=form.cleaned_data.get("force_assignment", False),
+                force_reason=form.cleaned_data.get("force_reason", ""),
             )
         except ValueError as exc:
             django_messages.error(request, str(exc))
@@ -1825,14 +1839,11 @@ class TicketAttachmentCreateView(LoginRequiredMixin, View):
 class TicketInterventionCreateView(LoginRequiredMixin, InternalRequiredMixin, View):
     def post(self, request, pk):
         ticket = get_object_or_404(scope_ticket_queryset(Ticket.objects.all(), request.user), pk=pk)
-        django_messages.error(
-            request,
-            "Le rapport d'intervention se renseigne uniquement apres validation client de fin, via 'Fermer le dossier'.",
-        )
-        return redirect("ticket-detail", pk=pk)
+
         if not can_record_ticket_intervention(request.user, ticket):
             django_messages.error(request, "Vous ne pouvez intervenir que sur les tickets qui vous sont affectes ou planifies.")
             return redirect("ticket-detail", pk=pk)
+
         form = InterventionForm(request.POST, request.FILES, user=request.user, ticket=ticket)
         if not form.is_valid():
             django_messages.error(request, "Impossible d'enregistrer l'intervention. Verifiez les champs saisis.")
@@ -1863,6 +1874,7 @@ class TicketInterventionCreateView(LoginRequiredMixin, InternalRequiredMixin, Vi
                 note="Piece terrain ajoutee depuis le portail.",
             )
 
+        # Génère au fil de l'eau : la signature client / rapport final reste gérée via la fermeture de dossier.
         generate_intervention_pdf(intervention)
         previous_status = ticket.status
         next_status = _ticket_status_from_intervention(intervention)
@@ -1873,6 +1885,7 @@ class TicketInterventionCreateView(LoginRequiredMixin, InternalRequiredMixin, Vi
         log_audit_event(request.user, "intervention_created_web", intervention, {"ticket": ticket.reference})
         django_messages.success(request, "Intervention enregistree et bon PDF genere.")
         return redirect("ticket-detail", pk=pk)
+
 
 
 class TicketInterventionPdfView(LoginRequiredMixin, InternalRequiredMixin, View):

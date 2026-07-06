@@ -256,12 +256,12 @@ class User(AbstractUser):
     )
     role = models.CharField("Fonction", max_length=20, choices=ROLE_CHOICES, default=ROLE_CLIENT)
     phone = models.CharField(max_length=20, blank=True)
-    sms_phone = models.CharField(max_length=30, blank=True)
     whatsapp_phone = models.CharField(max_length=30, blank=True)
+    sms_phone = models.CharField(max_length=30, blank=True)
     preferred_language = models.CharField(max_length=8, choices=LANGUAGE_CHOICES, default=LANGUAGE_FRENCH)
-    notification_whatsapp_enabled = models.BooleanField(default=True)
-    notification_sms_enabled = models.BooleanField(default=True)
     notification_email_enabled = models.BooleanField(default=True)
+    notification_sms_enabled = models.BooleanField(default=True)
+    notification_whatsapp_enabled = models.BooleanField(default=True)
     notification_push_enabled = models.BooleanField(default=True)
     notification_do_not_disturb_start = models.TimeField(null=True, blank=True)
     notification_do_not_disturb_end = models.TimeField(null=True, blank=True)
@@ -693,16 +693,16 @@ class Product(TimeStampedModel):
 
     class Meta:
         ordering = ["name", "serial_number"]
-        indexes = [
-            models.Index(fields=["organization", "status"], name="sav_product_org_status_idx"),
-            models.Index(fields=["client", "status"], name="sav_product_client_status_idx"),
-            models.Index(fields=["organization", "warranty_end"], name="sav_product_org_warranty_idx"),
-        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["organization", "serial_number"],
                 name="sav_product_unique_serial_per_organization",
             ),
+        ]
+        indexes = [
+            models.Index(fields=["organization", "status"], name="sav_product_org_status_idx"),
+            models.Index(fields=["client", "status"], name="sav_product_client_status_idx"),
+            models.Index(fields=["organization", "warranty_end"], name="sav_product_org_warranty_idx"),
         ]
 
     def __str__(self):
@@ -809,6 +809,7 @@ class Ticket(TimeStampedModel):
     STATUS_WAITING = STATUS_WAITING_PART
     STATUS_ESCALATED = "escalated"
     STATUS_WAITING_SOLUTION = "waiting_solution"
+    STATUS_WAITING_DIAGNOSTIC = "waiting_diagnostic"
     STATUS_FINISH_REQUESTED = "finish_requested"
     STATUS_DONE = "done"
     STATUS_RESOLVED = "resolved"
@@ -832,6 +833,7 @@ class Ticket(TimeStampedModel):
         (STATUS_WAITING_PART, "En attente de piece"),
         (STATUS_ESCALATED, "En escalade"),
         (STATUS_WAITING_SOLUTION, "En attente solution responsable"),
+        (STATUS_WAITING_DIAGNOSTIC, "En attente diagnostic"),
         (STATUS_FINISH_REQUESTED, "Demande de fin envoyee"),
         (STATUS_DONE, "Termine"),
         (STATUS_RESOLVED, "Resolue (valide client)"),
@@ -870,8 +872,8 @@ class Ticket(TimeStampedModel):
     }
 
     PUBLIC_STATUS_MAP = {
-        STATUS_NEW: "Assigné",
-        STATUS_PENDING_ASSIGNMENT: "Assigné",
+        STATUS_NEW: "Nouveau",
+        STATUS_PENDING_ASSIGNMENT: "Nouveau",
         STATUS_ASSIGNED: "Assigné",
         STATUS_REASSIGN_REQUIRED: "Assigné",
         STATUS_REASSIGNED: "Assigné",
@@ -885,6 +887,7 @@ class Ticket(TimeStampedModel):
         STATUS_WAITING_PART: "Planifié",
         STATUS_ESCALATED: "En cours",
         STATUS_WAITING_SOLUTION: "En cours",
+        STATUS_WAITING_DIAGNOSTIC: "En cours",
         STATUS_FINISH_REQUESTED: "En cours",
         STATUS_DONE: "Terminé",
         STATUS_RESOLVED: "Terminé",
@@ -892,9 +895,6 @@ class Ticket(TimeStampedModel):
         STATUS_CANCELLED: "Terminé",
         STATUS_BLOCKED_DIRECTION: "En cours",
     }
-
-    PUBLIC_STATUS_MAP[STATUS_NEW] = "Nouveau"
-    PUBLIC_STATUS_MAP[STATUS_PENDING_ASSIGNMENT] = "Nouveau"
 
     PROCESS_TRANSITIONS = {
         STATUS_NEW: {STATUS_NEW, STATUS_PENDING_ASSIGNMENT, STATUS_ASSIGNED, STATUS_TEAM_PENDING, STATUS_REASSIGN_REQUIRED, STATUS_CANCELLED},
@@ -910,6 +910,7 @@ class Ticket(TimeStampedModel):
         STATUS_WAITING_PART: {STATUS_WAITING_PART, STATUS_START_REQUESTED, STATUS_IN_PROGRESS, STATUS_COLLECTIVE_IN_PROGRESS, STATUS_ESCALATED, STATUS_CANCELLED},
         STATUS_ESCALATED: {STATUS_ESCALATED, STATUS_WAITING_SOLUTION, STATUS_REASSIGNED, STATUS_REASSIGN_REQUIRED, STATUS_ASSIGNED, STATUS_CANCELLED},
         STATUS_WAITING_SOLUTION: {STATUS_WAITING_SOLUTION, STATUS_IN_PROGRESS, STATUS_COLLECTIVE_IN_PROGRESS, STATUS_PLANNED, STATUS_ASSIGNED, STATUS_TEAM_READY, STATUS_CANCELLED},
+        STATUS_WAITING_DIAGNOSTIC: {STATUS_WAITING_DIAGNOSTIC, STATUS_PLANNING_PROPOSED, STATUS_PLANNED, STATUS_START_REQUESTED, STATUS_ESCALATED, STATUS_ASSIGNED, STATUS_REASSIGN_REQUIRED, STATUS_CANCELLED},
         STATUS_FINISH_REQUESTED: {STATUS_FINISH_REQUESTED, STATUS_DONE, STATUS_IN_PROGRESS, STATUS_COLLECTIVE_IN_PROGRESS, STATUS_CANCELLED},
         STATUS_DONE: {STATUS_DONE, STATUS_CLOSED, STATUS_RESOLVED, STATUS_CANCELLED},
         STATUS_RESOLVED: {STATUS_RESOLVED, STATUS_CLOSED, STATUS_ASSIGNED},
@@ -1685,6 +1686,14 @@ class MaintenanceTicket(TimeStampedModel):
     instructions = models.TextField(blank=True)
     priority = models.CharField(max_length=20, choices=Ticket.PRIORITY_CHOICES, default=Ticket.PRIORITY_NORMAL)
     location = models.CharField(max_length=255, blank=True)
+    route = models.CharField(max_length=255, blank=True)
+    overnight_stays = models.PositiveSmallIntegerField(default=0)
+    call_date = models.DateTimeField(null=True, blank=True)
+    system_tools = models.CharField(max_length=255, blank=True)
+    equipment_brand = models.CharField(max_length=120, blank=True)
+    equipment_type = models.CharField(max_length=120, blank=True)
+    equipment_identifier = models.CharField(max_length=120, blank=True)
+    intervention_reason = models.TextField(blank=True)
     initial_scheduled_date = models.DateTimeField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
@@ -1729,9 +1738,7 @@ class MaintenanceTicket(TimeStampedModel):
     @property
     def technician_team_label(self):
         members = self.technician_team_members
-        if not members:
-            return "-"
-        return ", ".join(str(member) for member in members)
+        return ", ".join(str(member) for member in members) if members else "Non affecte"
 
     @property
     def appears_in_technician_pipeline(self):
@@ -1810,7 +1817,10 @@ class MaintenanceReport(TimeStampedModel):
     actual_finished_at = models.DateTimeField()
     checklist_completed = models.JSONField(default=list, blank=True)
     observations = models.TextField()
+    work_to_plan = models.TextField(blank=True)
     parts_used = models.TextField(blank=True)
+    parts_status = models.JSONField(default=dict, blank=True)
+    intervention_types = models.JSONField(default=list, blank=True)
     anomaly_detected = models.BooleanField(default=False)
     photos = models.JSONField(default=list, blank=True)
     client_signed_by = models.CharField(max_length=255, blank=True)
@@ -2172,8 +2182,8 @@ class Notification(models.Model):
         (CHANNEL_EMAIL, "Email"),
         (CHANNEL_SMS, "SMS"),
         (CHANNEL_WHATSAPP, "WhatsApp"),
-        (CHANNEL_PUSH, "Push"),
-        (CHANNEL_IN_APP, "In-app"),
+        (CHANNEL_PUSH, "Notification mobile"),
+        (CHANNEL_IN_APP, "Dans l'application"),
     )
 
     STATUS_PENDING = "pending"
@@ -2204,13 +2214,13 @@ class Notification(models.Model):
     subject = models.CharField(max_length=255)
     message = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
-    recipient_contact = models.CharField(max_length=255, blank=True)
     provider = models.CharField(max_length=80, blank=True)
     provider_reference = models.CharField(max_length=255, blank=True)
-    error_message = models.TextField(blank=True)
-    delivery_payload = models.JSONField(default=dict, blank=True)
+    recipient_contact = models.CharField(max_length=255, blank=True)
     deep_link = models.URLField(max_length=500, blank=True)
     action_payload = models.JSONField(default=dict, blank=True)
+    delivery_payload = models.JSONField(default=dict, blank=True)
+    error_message = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     sent_at = models.DateTimeField(null=True, blank=True)
     read_at = models.DateTimeField(null=True, blank=True)
@@ -2521,7 +2531,7 @@ class GeneratedReport(TimeStampedModel):
 
     FORMAT_CHOICES = (
         (FORMAT_PDF, "PDF"),
-        (FORMAT_XLSX, "Excel"),
+        (FORMAT_XLSX, "Tableur XLSX"),
         (FORMAT_CSV, "CSV"),
     )
 
@@ -2747,24 +2757,17 @@ class EscalationHistory(TimeStampedModel):
     ACTION_CONTINUED = "continued"
 
     ACTION_CHOICES = (
-        (ACTION_ESCALATED, "Escaladée"),
-        (ACTION_REASSIGNED, "Réassignée à un autre technicien"),
+        (ACTION_ESCALATED, "Escaladee"),
+        (ACTION_REASSIGNED, "Reassignee a un autre technicien"),
         (ACTION_SOLUTION_PROVIDED, "Solution fournie"),
-        (ACTION_DECLINED, "Déclinée par le responsable"),
-        (ACTION_CONTINUED, "Continuée après solution"),
+        (ACTION_DECLINED, "Declinee par le responsable"),
+        (ACTION_CONTINUED, "Continuee apres solution"),
     )
 
     ticket = models.ForeignKey(
         Ticket,
         on_delete=models.CASCADE,
         related_name="escalation_history",
-    )
-    ACTION_CHOICES = (
-        (ACTION_ESCALATED, "Escaladee"),
-        (ACTION_REASSIGNED, "Reassignee a un autre technicien"),
-        (ACTION_SOLUTION_PROVIDED, "Solution fournie"),
-        (ACTION_DECLINED, "Declinee par le responsable"),
-        (ACTION_CONTINUED, "Continuee apres solution"),
     )
     action = models.CharField(
         max_length=30,
@@ -2805,9 +2808,9 @@ class EscalationHistory(TimeStampedModel):
     )
 
     class Meta:
+        ordering = ["-created_at"]
         verbose_name = "Historique d'escalade"
         verbose_name_plural = "Historiques d'escalade"
-        ordering = ["-created_at"]
 
     def __str__(self):
         return f"{self.ticket.reference} - {self.get_action_display()}"

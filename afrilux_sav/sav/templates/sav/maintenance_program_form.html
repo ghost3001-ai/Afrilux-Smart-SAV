@@ -54,16 +54,39 @@
         </div>
         <label class="field">
             <span>Client / site concerne</span>
-            <select data-maintenance-field="client_id">
-                <option value="">Choisir un client</option>
+            <input
+                type="text"
+                data-maintenance-field="client_label"
+                list="maintenance-client-suggestions"
+                placeholder="Ex: CCA-BANK - Douala"
+                autocomplete="off"
+            >
+            <datalist id="maintenance-client-suggestions">
                 {% for client in maintenance_clients %}
-                    <option value="{{ client.id }}">#{{ client.id }} - {{ client.company_name|default:client }}</option>
+                    <option value="#{{ client.id }} - {{ client.company_name|default:client }}"></option>
                 {% endfor %}
-            </select>
+            </datalist>
+            <small class="field__help">Saisissez librement le client ou choisissez une suggestion existante.</small>
         </label>
         <label class="field">
             <span>Date et heure prevues</span>
             <input type="datetime-local" data-maintenance-field="scheduled_date">
+        </label>
+        <label class="field">
+            <span>Date et heure d'appel</span>
+            <input type="datetime-local" data-maintenance-field="call_date">
+        </label>
+        <label class="field">
+            <span>Site / ville</span>
+            <input type="text" data-maintenance-field="location" placeholder="Douala, Yaounde, Kousseri...">
+        </label>
+        <label class="field">
+            <span>Trajet</span>
+            <input type="text" data-maintenance-field="route" placeholder="Douala - Edea">
+        </label>
+        <label class="field">
+            <span>Nuitees</span>
+            <input type="number" min="0" step="1" data-maintenance-field="overnight_stays" value="0">
         </label>
         <label class="field">
             <span>Periodicite</span>
@@ -84,11 +107,32 @@
         </label>
         <label class="field">
             <span>Equipement(s)</span>
-            <select data-maintenance-field="product_ids" multiple size="5">
-                {% for product in maintenance_products %}
-                    <option value="{{ product.id }}">#{{ product.id }} - {{ product.name }} / {{ product.serial_number }}</option>
-                {% endfor %}
-            </select>
+            <textarea
+                data-maintenance-field="equipment_label"
+                rows="4"
+                placeholder="Ex: #12 - Onduleur principal / SN-001&#10;Ou saisir librement les equipements concernes"
+            ></textarea>
+            <small class="field__help">Saisissez un ou plusieurs equipements. Les suggestions commencant par # seront liees automatiquement.</small>
+        </label>
+        <label class="field">
+            <span>Systeme / outillage</span>
+            <input type="text" data-maintenance-field="system_tools" placeholder="Systeme de securite, groupe, climatisation...">
+        </label>
+        <label class="field">
+            <span>Marque</span>
+            <input type="text" data-maintenance-field="equipment_brand">
+        </label>
+        <label class="field">
+            <span>Type</span>
+            <input type="text" data-maintenance-field="equipment_type">
+        </label>
+        <label class="field">
+            <span>No equipement</span>
+            <input type="text" data-maintenance-field="equipment_identifier">
+        </label>
+        <label class="field field--full">
+            <span>Cause d'appel / motif d'intervention</span>
+            <textarea data-maintenance-field="intervention_reason" rows="3"></textarea>
         </label>
         <label class="field field--full">
             <span>Instructions / check-list</span>

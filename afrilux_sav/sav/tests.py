@@ -13,6 +13,7 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from .ai import LLMCompletion
 from .comms import DeliveryResult, create_external_channel_notifications
 from .forms import TicketCreateForm
 from .models import (
@@ -679,6 +680,69 @@ class SavPlatformTests(TestCase):
         self.assertIn("draft_ticket", response.data)
         self.assertEqual(response.data["suggested_category"], Ticket.CATEGORY_BREAKDOWN)
         self.assertTrue(response.data["matched_articles"])
+
+    @override_settings(OPENAI_API_KEY="", OPENAI_MODEL="gpt-5.1")
+    def test_ai_status_reports_heuristic_mode_without_api_key(self):
+        response = self.api.get(reverse("sav_api:ai-status"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data["enabled"])
+        self.assertEqual(response.data["mode"], "heuristique")
+        self.assertNotIn("api_key", response.data)
+
+    @override_settings(OPENAI_API_KEY="", OPENAI_MODEL="gpt-5.1")
+    def test_support_assistant_exposes_heuristic_ai_metadata(self):
+        response = self.api.post(
+            reverse("sav_api:support-assistant"),
+            {
+                "question": "Mon equipement signale un probleme de batterie.",
+                "product": self.product.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["ai_mode"], "heuristique")
+        self.assertFalse(response.data["ai_configured"])
+
+    @override_settings(OPENAI_API_KEY="sk-test-openai-enabled", OPENAI_MODEL="gpt-5.1")
+    def test_support_assistant_uses_openai_payload_when_configured(self):
+        completion = LLMCompletion(
+            ok=True,
+            content=json.dumps(
+                {
+                    "answer": "Controlez la batterie puis ouvrez un ticket si le defaut persiste.",
+                    "suggested_priority": Ticket.PRIORITY_HIGH,
+                    "suggested_category": Ticket.CATEGORY_BREAKDOWN,
+                    "likely_issue": "battery_issue",
+                    "should_create_ticket": True,
+                    "recommended_next_step": "Programmer une verification batterie",
+                    "draft_title": "Defaut batterie",
+                    "draft_description": "Controle batterie recommande.",
+                    "confidence": "0.91",
+                }
+            ),
+            raw={"id": "resp_test"},
+            provider="openai",
+            model="gpt-5.1",
+            request_id="resp_test",
+        )
+
+        with patch("sav.ai.OpenAIResponsesClient.complete_json", return_value=completion):
+            response = self.api.post(
+                reverse("sav_api:support-assistant"),
+                {
+                    "question": "La batterie ne tient plus la charge.",
+                    "product": self.product.id,
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["ai_mode"], "openai")
+        self.assertTrue(response.data["ai_configured"])
+        self.assertEqual(response.data["ai_model"], "gpt-5.1")
+        self.assertEqual(response.data["draft_ticket"]["title"], "Defaut batterie")
 
     @override_settings(
         EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
@@ -2879,6 +2943,155 @@ class SavPlatformTests(TestCase):
         self.assertTrue(TicketAssignment.objects.filter(ticket=ticket, technician=self.agent).exists())
         intervention = ticket.interventions.get(agent=self.agent)
         self.assertTrue(bool(intervention.report_pdf))
+
+    def test_assigned_ticket_does_not_block_new_assignment(self):
+        Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            assigned_agent=self.technician,
+            title="Ticket seulement assigne",
+            description="Ce statut ne doit pas bloquer une nouvelle affectation.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            status=Ticket.STATUS_ASSIGNED,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            title="Nouvelle affectation autorisee",
+            description="Le technicien peut encore etre choisi.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            status=Ticket.STATUS_NEW,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+
+        response = self.api.post(
+            reverse("sav_api:ticket-assign", args=[ticket.pk]),
+            {"technician": self.technician.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.assigned_agent, self.technician)
+
+    def test_blocking_ticket_prevents_assignment_unless_manager_forces_it(self):
+        Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            assigned_agent=self.technician,
+            title="Intervention deja planifiee",
+            description="Ce ticket rend le technicien indisponible.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            status=Ticket.STATUS_PLANNED,
+            priority=Ticket.PRIORITY_NORMAL,
+            sla_deadline=timezone.now() + timedelta(hours=2),
+        )
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            title="Affectation bloquee",
+            description="Doit etre refusee sans forcage.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            status=Ticket.STATUS_NEW,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+
+        blocked_response = self.api.post(
+            reverse("sav_api:ticket-assign", args=[ticket.pk]),
+            {"technician": self.technician.pk},
+            format="json",
+        )
+        ticket.refresh_from_db()
+
+        self.assertEqual(blocked_response.status_code, 403)
+        self.assertIsNone(ticket.assigned_agent)
+        self.assertIn("indisponible", str(blocked_response.data["detail"]))
+
+        forced_response = self.api.post(
+            reverse("sav_api:ticket-assign", args=[ticket.pk]),
+            {
+                "technician": self.technician.pk,
+                "force_assignment": True,
+                "force_reason": "Urgence client validee par le responsable SAV.",
+            },
+            format="json",
+        )
+        ticket.refresh_from_db()
+
+        self.assertEqual(forced_response.status_code, 200)
+        self.assertEqual(ticket.assigned_agent, self.technician)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="ticket_technician_assigned",
+                target_id=ticket.id,
+                details__forced=True,
+            ).exists()
+        )
+
+    def test_technician_availability_is_unified_for_sav_and_maintenance(self):
+        maintenance_free = User.objects.create_user(
+            username="maintenance_free",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_TECHNICIAN,
+        )
+        maintenance_busy = User.objects.create_user(
+            username="maintenance_busy",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_TECHNICIAN,
+        )
+        Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            assigned_agent=self.technician,
+            title="SAV en cours",
+            description="Conflit SAV actif.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            status=Ticket.STATUS_IN_PROGRESS,
+            priority=Ticket.PRIORITY_HIGH,
+        )
+        MaintenanceTicket.objects.create(
+            organization=self.organization,
+            responsible=self.manager,
+            technician=maintenance_free,
+            client=self.client_user,
+            title="Maintenance long terme",
+            service=MaintenanceProgram.SERVICE_IT,
+            periodicity=MaintenanceTicket.PERIOD_MONTHLY,
+            scheduled_date=timezone.now() + timedelta(days=3),
+            checklist=["Controle"],
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+        MaintenanceTicket.objects.create(
+            organization=self.organization,
+            responsible=self.manager,
+            technician=maintenance_busy,
+            client=self.client_user,
+            title="Maintenance proche",
+            service=MaintenanceProgram.SERVICE_IT,
+            periodicity=MaintenanceTicket.PERIOD_MONTHLY,
+            scheduled_date=timezone.now() + timedelta(hours=6),
+            checklist=["Controle"],
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+
+        response = self.api.get(reverse("sav_api:technician-availability"))
+
+        self.assertEqual(response.status_code, 200)
+        rows = {row["id"]: row for row in response.data["results"]}
+        self.assertFalse(rows[self.technician.id]["assignable"])
+        self.assertEqual(rows[self.technician.id]["sav_active_count"], 1)
+        self.assertTrue(rows[maintenance_free.id]["assignable"])
+        self.assertEqual(rows[maintenance_free.id]["maintenance_active_count"], 0)
+        self.assertFalse(rows[maintenance_busy.id]["assignable"])
+        self.assertEqual(rows[maintenance_busy.id]["maintenance_active_count"], 1)
+
+        filtered_response = self.api.get(reverse("sav_api:technician-availability"), {"assignable_only": "true"})
+        filtered_ids = {row["id"] for row in filtered_response.data["results"]}
+        self.assertIn(maintenance_free.id, filtered_ids)
+        self.assertNotIn(maintenance_busy.id, filtered_ids)
 
     def test_assign_team_creates_collective_intervention_context(self):
         member = User.objects.create_user(

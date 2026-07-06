@@ -309,14 +309,26 @@ function initializeMaintenanceProgramBuilder() {
       .filter(Boolean);
   };
 
-  const readSelectedProducts = () => {
-    const productField = field("product_ids");
-    if (!productField) {
-      return [];
-    }
-    return Array.from(productField.selectedOptions)
-      .map((option) => Number(option.value))
-      .filter(Boolean);
+  const readEquipmentSelection = () => {
+    const rawLabel = (field("equipment_label")?.value || "").trim();
+    const productIds = [];
+    rawLabel
+      .split(/\r?\n|,/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .forEach((item) => {
+        const match = item.match(/^#(\d+)\b/);
+        if (match) {
+          const id = Number(match[1]);
+          if (id && !productIds.includes(id)) {
+            productIds.push(id);
+          }
+        }
+      });
+    return {
+      equipmentLabel: rawLabel,
+      productIds,
+    };
   };
 
   const readSelectedTechnicians = () => {
@@ -337,18 +349,42 @@ function initializeMaintenanceProgramBuilder() {
     return technicianIds;
   };
 
+  const readClientSelection = () => {
+    const rawLabel = (field("client_label")?.value || "").trim();
+    const match = rawLabel.match(/^#(\d+)\s*-\s*(.+)$/);
+    return {
+      clientId: match ? Number(match[1]) : 0,
+      clientLabel: rawLabel,
+    };
+  };
+
   const clearBuilder = () => {
-    ["title", "instructions", "checklist"].forEach((name) => {
+    [
+      "title",
+      "instructions",
+      "checklist",
+      "location",
+      "route",
+      "system_tools",
+      "equipment_brand",
+      "equipment_type",
+      "equipment_identifier",
+      "equipment_label",
+      "intervention_reason",
+      "client_label",
+    ].forEach((name) => {
       const input = field(name);
       if (input) {
         input.value = "";
       }
     });
-    const products = field("product_ids");
-    if (products) {
-      Array.from(products.options).forEach((option) => {
-        option.selected = false;
-      });
+    const overnight = field("overnight_stays");
+    if (overnight) {
+      overnight.value = "0";
+    }
+    const callDate = field("call_date");
+    if (callDate) {
+      callDate.value = "";
     }
     builder.querySelectorAll("[data-maintenance-leader], [data-maintenance-member]").forEach((input) => {
       input.checked = false;
@@ -359,10 +395,12 @@ function initializeMaintenanceProgramBuilder() {
   addButton?.addEventListener("click", () => {
     const title = (field("title")?.value || "").trim();
     const technicianIds = readSelectedTechnicians();
-    const clientId = Number(field("client_id")?.value || 0);
+    const { clientId, clientLabel } = readClientSelection();
+    const { equipmentLabel, productIds } = readEquipmentSelection();
     const dateValue = (field("scheduled_date")?.value || "").trim();
-    if (!title || !technicianIds.length || !clientId || !dateValue) {
-      alert("Renseignez l'intitule, le chef d'equipe, le client et la date prevue.");
+    const callDateValue = (field("call_date")?.value || "").trim();
+    if (!title || !technicianIds.length || !clientLabel || !equipmentLabel || !dateValue) {
+      alert("Renseignez l'intitule, le chef d'equipe, le client/site, les equipements et la date prevue.");
       return;
     }
 
@@ -372,12 +410,24 @@ function initializeMaintenanceProgramBuilder() {
       technician_id: technicianIds[0],
       technician_ids: technicianIds,
       client_id: clientId,
-      product_ids: readSelectedProducts(),
+      client_label: clientLabel,
+      client_name: clientLabel.replace(/^#\d+\s*-\s*/, ""),
+      product_ids: productIds,
+      equipment_label: equipmentLabel,
       scheduled_date: dateValue,
+      call_date: callDateValue || dateValue,
       periodicity: field("periodicity")?.value || "monthly",
       checklist: readChecklist(),
       instructions: (field("instructions")?.value || "").trim(),
       priority: field("priority")?.value || "normal",
+      location: (field("location")?.value || "").trim(),
+      route: (field("route")?.value || "").trim(),
+      overnight_stays: Number(field("overnight_stays")?.value || 0),
+      system_tools: (field("system_tools")?.value || "").trim(),
+      equipment_brand: (field("equipment_brand")?.value || "").trim(),
+      equipment_type: (field("equipment_type")?.value || "").trim(),
+      equipment_identifier: (field("equipment_identifier")?.value || "").trim(),
+      intervention_reason: (field("intervention_reason")?.value || "").trim(),
     });
     target.value = JSON.stringify(lines, null, 2);
     clearBuilder();
@@ -504,6 +554,7 @@ function initializeSupportChat() {
         <div class="support-bubble__meta">
           <span class="badge badge--neutral">${(payload.suggested_priority || "normal").toString()}</span>
           <span class="badge badge--neutral">${(payload.suggested_category || "breakdown").toString()}</span>
+          <span class="badge badge--calm">Mode IA : ${(payload.ai_mode || "heuristique").toString()}</span>
         </div>
       `;
       appendBubble(

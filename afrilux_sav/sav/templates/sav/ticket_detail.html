@@ -265,7 +265,11 @@
                     <tr>
                         <th>Technicien</th>
                         <th>Disponibilite</th>
+                        <th>Assignable</th>
+                        <th>SAV en cours</th>
+                        <th>Maintenances en cours</th>
                         <th>Prochaine disponibilite</th>
+                        <th>Conflits</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -273,7 +277,11 @@
                         <tr>
                             <td>{{ row.technician_name }}</td>
                             <td>{{ row.status_label }}</td>
+                            <td>{{ row.assignable_label }}</td>
+                            <td>{{ row.sav_active_count|default:0 }}</td>
+                            <td>{{ row.maintenance_active_count|default:0 }}</td>
                             <td>{{ row.next_available_at|default:"Maintenant" }}</td>
+                            <td>{{ row.conflicts_label|default:"-" }}</td>
                         </tr>
                     {% endfor %}
                 </tbody>

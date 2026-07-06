@@ -1074,3 +1074,68 @@ Cette annexe couvre l’ensemble des fichiers texte/source/configuration jugés 
 - `afrilux_sav_mobile/pubspec.lock` — `434` lignes — Fichier annexe du projet mobile Flutter. — Symboles: Aucun symbole top-level extrait automatiquement
 - `afrilux_sav_mobile/pubspec.yaml` — `92` lignes — Manifest Flutter : SDK, dépendances Firebase, messagerie push et image picker. — Symboles: Aucun symbole top-level extrait automatiquement
 - `afrilux_sav_mobile/test/widget_test.dart` — `13` lignes — Test Flutter de base généré par le template et à enrichir côté métier. — Symboles: Aucun symbole top-level extrait automatiquement
+## Annexe operationnelle - Role des boutons principaux de l'application
+
+Cette annexe decrit l'effet metier des boutons visibles dans les ecrans web principaux. Les libelles ci-dessous correspondent aux boutons effectivement relies aux vues Django du projet.
+
+### Boutons du detail ticket
+
+| Bouton | Profils concernes | Fonction |
+|---|---|---|
+| Modifier | Profils autorises a editer le ticket | Ouvre le formulaire de modification du ticket. Sert a corriger ou completer les informations du dossier tant que les droits et le statut le permettent. |
+| Valider la resolution | Client | Confirme que la resolution proposee est acceptee par le client. Le ticket peut avancer vers un etat resolu/cloture selon le flux. |
+| Rouvrir | Client ou profil autorise selon statut | Rouvre un ticket deja resolu ou ferme quand le probleme persiste. |
+| Escalader | Technicien, chef d'equipe ou interne autorise | Transmet le ticket au responsable avec un motif. Le ticket passe dans le circuit d'escalade pour decision, solution ou reassignation. |
+| Affecter technicien | Responsable SAV / administrateur / dispatcher autorise | Assigne le ticket a un technicien choisi dans le tableau de disponibilite. La disponibilite SAV + maintenance est verifiee. |
+| Constituer equipe | Responsable SAV / administrateur / dispatcher autorise | Assigne le ticket a une equipe : un chef d'equipe et un ou plusieurs membres. Le chef pilote le processus. |
+| Resolution assistee | Utilisateur interne | Lance l'assistance IA/agentique sur le ticket. L'IA analyse le contexte, propose diagnostic, priorite, actions, reponses ou recommandations selon la configuration. |
+| Executer processus | Utilisateur interne | Lance manuellement le moteur d'automatisation du ticket. Il execute les regles de workflow actives ou, a defaut, les actions integrees : assignation automatique d'un ticket critique non assigne, notification responsable pour ticket prioritaire/en retard, creation de session AR si sentiment tres negatif. Chaque execution est tracee dans `WorkflowExecution`. Ce bouton ne remplace pas le processus technicien/client de planification, debut, fin et cloture. |
+
+### Boutons du processus SAV dans un ticket
+
+| Bouton | Profils concernes | Fonction |
+|---|---|---|
+| Planifier | Technicien seul, chef d'equipe ou responsable autorise | Propose une date et heure previsionnelle d'intervention au client. Le client doit accepter ou refuser. |
+| Accepter | Client | Accepte la proposition de planification. Le ticket passe en statut planifie. |
+| Refuser | Client | Refuse la proposition de planification. Le ticket reste assignable pour une nouvelle proposition. |
+| Commencer | Technicien seul ou chef d'equipe | Demande au client de valider le debut d'intervention. Le ticket attend la confirmation client. |
+| Valider le debut | Client | Confirme le debut effectif. Le ticket passe en cours et l'heure de debut est enregistree automatiquement. |
+| Validation debut impossible | Technicien seul ou chef d'equipe | Permet de contourner la validation client si le client est absent, refuse ou si un probleme technique empeche la validation. Le motif et la preuve justificative sont obligatoires. |
+| Terminer | Technicien seul ou chef d'equipe | Demande au client de valider la fin d'intervention. Le ticket attend la confirmation client. |
+| Mettre en attente piece | Technicien seul ou chef d'equipe | Signale qu'une piece est indisponible. Le ticket passe en attente piece jusqu'a reprise. |
+| Valider la fin | Client | Confirme la fin effective. Le ticket passe termine et l'heure de fin est enregistree automatiquement. |
+| Validation fin impossible | Technicien seul ou chef d'equipe | Permet de terminer malgre l'impossibilite de validation client, avec motif et justificatif obligatoires. |
+| Fermer le dossier | Technicien seul ou chef d'equipe | Enregistre le formulaire de cloture : diagnostic, action effectuee, pieces, nom du signataire, signature et photos. Le dossier passe cloture, le temps passe est calcule et le PDF final est genere. |
+| Apporter solution | Responsable | Repond a une escalade par une solution, un document, un lien ou une autorisation. Le ticket passe en attente d'application de la solution. |
+| Decliner | Responsable | Refuse l'escalade avec motif. Le ticket retourne au technicien sans aide supplementaire. |
+| Continuer | Technicien seul ou chef d'equipe | Reprend le processus apres reception de la solution du responsable. Le ticket revient au statut operationnel precedent. |
+
+### Boutons de maintenance
+
+| Bouton | Profils concernes | Fonction |
+|---|---|---|
+| Planification | Responsable SAV / administrateur | Ouvre la vue planning globale. Sert a visualiser les charges SAV et maintenance. |
+| Exporter bilan PDF | Responsable SAV / administrateur / reporting autorise | Genere ou telecharge le bilan de maintenance au format PDF. |
+| Nouveau programme | Responsable SAV / administrateur | Ouvre le formulaire de creation d'un programme de maintenance. Le responsable renseigne les lignes du tableau : technicien ou equipe, client, site/ville, date et heure, trajet, nuitees, objectif, checklist et equipements. |
+| Ajouter la ligne | Responsable SAV / administrateur | Ajoute une ligne au programme de maintenance avant enregistrement. La ligne est stockee dans `task_lines`. |
+| Enregistrer | Responsable SAV / administrateur | Enregistre le programme de maintenance en brouillon. |
+| Publier le programme | Responsable SAV / administrateur | Transforme les lignes du programme en tickets de maintenance planifies. Les dates sont en `datetime`, ce qui permet plusieurs interventions dans une meme journee. |
+| Annuler | Responsable SAV / administrateur | Annule une maintenance avec motif obligatoire. |
+| Accuser reception | Technicien ou membre concerne | Confirme que le technicien a bien pris connaissance de la maintenance. |
+| Demarrer | Technicien ou membre concerne | Passe la maintenance en cours et enregistre le debut operationnel. |
+| Cloturer | Technicien ou chef concerne | Ouvre la fiche de cloture maintenance. Le technicien renseigne checklist realisee, observations, pieces, type d'intervention, etat des pieces, anomalies/travaux a prevoir, signature et photos. |
+| Valider la maintenance | Technicien ou chef concerne | Enregistre la fiche de cloture maintenance. Le rapport PDF maintenance est genere. En cas d'anomalie, un ticket incident peut etre cree automatiquement. |
+| PDF | Responsable / technicien autorise | Ouvre ou telecharge le rapport PDF de maintenance genere. |
+| Valider | Responsable SAV / administrateur | Valide le rapport de maintenance cloture. |
+
+### Boutons de navigation, support et reporting
+
+| Bouton | Fonction |
+|---|---|
+| Nouveau ticket | Ouvre le formulaire de creation d'un ticket SAV. Selon le profil, le ticket peut etre cree par le client ou par le responsable pour un client. |
+| Voir les rapports | Ouvre la page reporting avec indicateurs, exports et historiques. |
+| Export CSV / PDF / XLSX | Exporte les rapports operationnels au format choisi. |
+| Assistant support / Envoyer | Envoie la question ou la description de panne a l'assistant IA. L'assistant peut proposer une reponse, une classification ou une preparation de ticket. |
+| Connexion / Deconnexion | Ouvre ou ferme la session utilisateur. |
+| Marquer comme lu | Marque une notification comme lue. |
+| Ouvrir / lien profond | Ouvre directement le ticket, rapport ou objet concerne par la notification. |

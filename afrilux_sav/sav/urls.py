@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     AgencyViewSet,
     AIActionLogViewSet,
+    AIStatusView,
     AnalyticsAskView,
     AuditLogViewSet,
     AutomationRuleViewSet,
@@ -110,6 +111,7 @@ urlpatterns = [
     path("rapports/mensuel/", MonthlyReportView.as_view(), name="report-monthly"),
     path("rapports/export/<str:report_type>/", ReportExportView.as_view(), name="report-export"),
     path("maintenance/rapports/<str:periode>/", MaintenancePeriodReportView.as_view(), name="maintenance-period-report"),
+    path("ai/status/", AIStatusView.as_view(), name="ai-status"),
     path("analytics/ask/", AnalyticsAskView.as_view(), name="analytics-ask"),
     path("techniciens/<int:pk>/planning/", TechnicianPlanningView.as_view(), name="technician-planning"),
     path("support/assistant/", SupportAssistantView.as_view(), name="support-assistant"),

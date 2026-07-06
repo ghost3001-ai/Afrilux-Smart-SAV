@@ -362,18 +362,7 @@ class UserSerializer(serializers.ModelSerializer):
             "organization_support_phone",
             "role",
             "phone",
-            "sms_phone",
-            "whatsapp_phone",
             "professional_email",
-            "preferred_language",
-            "notification_whatsapp_enabled",
-            "notification_sms_enabled",
-            "notification_email_enabled",
-            "notification_push_enabled",
-            "notification_do_not_disturb_start",
-            "notification_do_not_disturb_end",
-            "notification_daily_limit",
-            "notification_min_interval_minutes",
             "company_name",
             "is_active",
             "is_verified",
@@ -710,7 +699,10 @@ class MaintenanceReportSerializer(serializers.ModelSerializer):
             "actual_finished_at",
             "checklist_completed",
             "observations",
+            "work_to_plan",
             "parts_used",
+            "parts_status",
+            "intervention_types",
             "anomaly_detected",
             "photos",
             "photo_files",
@@ -785,13 +777,6 @@ class MaintenanceTicketSerializer(serializers.ModelSerializer):
     program_title = serializers.CharField(source="program.title", read_only=True)
     responsible_name = serializers.SerializerMethodField()
     technician_name = serializers.SerializerMethodField()
-    team_members = serializers.PrimaryKeyRelatedField(
-        many=True,
-        required=False,
-        queryset=User.objects.filter(role__in=User.TECHNICIAN_SPACE_ROLES),
-    )
-    team_member_names = serializers.SerializerMethodField()
-    technician_team_label = serializers.CharField(read_only=True)
     client_name = serializers.SerializerMethodField()
     products = serializers.PrimaryKeyRelatedField(many=True, required=False, queryset=Product.objects.all())
     product_names = serializers.SerializerMethodField()
@@ -812,9 +797,6 @@ class MaintenanceTicketSerializer(serializers.ModelSerializer):
             "responsible_name",
             "technician",
             "technician_name",
-            "team_members",
-            "team_member_names",
-            "technician_team_label",
             "client",
             "client_name",
             "products",
@@ -830,6 +812,14 @@ class MaintenanceTicketSerializer(serializers.ModelSerializer):
             "instructions",
             "priority",
             "location",
+            "route",
+            "overnight_stays",
+            "call_date",
+            "system_tools",
+            "equipment_brand",
+            "equipment_type",
+            "equipment_identifier",
+            "intervention_reason",
             "started_at",
             "finished_at",
             "postponed_to",
@@ -852,8 +842,6 @@ class MaintenanceTicketSerializer(serializers.ModelSerializer):
             "program_title",
             "responsible_name",
             "technician_name",
-            "team_member_names",
-            "technician_team_label",
             "client_name",
             "product_names",
             "type_label",
@@ -877,9 +865,6 @@ class MaintenanceTicketSerializer(serializers.ModelSerializer):
     def get_technician_name(self, obj):
         return str(obj.technician)
 
-    def get_team_member_names(self, obj):
-        return [str(member) for member in obj.team_members.all()]
-
     def get_client_name(self, obj):
         return str(obj.client)
 
@@ -892,18 +877,11 @@ class MaintenanceTicketSerializer(serializers.ModelSerializer):
         technician = attrs.get("technician") or getattr(self.instance, "technician", None)
         client = attrs.get("client") or getattr(self.instance, "client", None)
         products = attrs.get("products")
-        team_members = attrs.get("team_members")
         organization = attrs.get("organization") or getattr(self.instance, "organization", None) or getattr(program, "organization", None)
         if technician and technician.role not in set(User.TECHNICIAN_SPACE_ROLES):
             raise serializers.ValidationError({"technician": "Selectionnez un technicien terrain ou responsable technique habilite."})
         if technician and organization and technician.organization_id and technician.organization_id != organization.id:
             raise serializers.ValidationError({"technician": "Le technicien appartient a une autre organisation."})
-        if team_members:
-            for member in team_members:
-                if member.role not in set(User.TECHNICIAN_SPACE_ROLES):
-                    raise serializers.ValidationError({"team_members": "Tous les membres doivent etre des techniciens habilites."})
-                if organization and member.organization_id and member.organization_id != organization.id:
-                    raise serializers.ValidationError({"team_members": "Un membre appartient a une autre organisation."})
         if client and organization and client.organization_id and client.organization_id != organization.id:
             raise serializers.ValidationError({"client": "Le client appartient a une autre organisation."})
         if products and client:
@@ -1308,32 +1286,9 @@ class NotificationSerializer(serializers.ModelSerializer):
             "subject",
             "message",
             "status",
-            "recipient_contact",
-            "provider",
-            "provider_reference",
-            "error_message",
-            "delivery_payload",
-            "deep_link",
-            "action_payload",
             "created_at",
             "sent_at",
             "read_at",
-            "clicked_at",
-        ]
-        read_only_fields = [
-            "organization",
-            "organization_name",
-            "recipient_name",
-            "ticket_reference",
-            "recipient_contact",
-            "provider",
-            "provider_reference",
-            "error_message",
-            "delivery_payload",
-            "created_at",
-            "sent_at",
-            "read_at",
-            "clicked_at",
         ]
 
     def get_recipient_name(self, obj):
@@ -1693,6 +1648,10 @@ class AuditLogSerializer(serializers.ModelSerializer):
 
 
 class TicketSerializer(serializers.ModelSerializer):
+    client = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.filter(role=User.ROLE_CLIENT, is_active=True),
+        required=False,
+    )
     client_name = serializers.SerializerMethodField()
     assigned_agent_name = serializers.SerializerMethodField()
     team_leader_name = serializers.SerializerMethodField()
@@ -1771,13 +1730,6 @@ class TicketSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        request = self.context.get("request")
-        user = getattr(request, "user", None)
-        if user and user.is_authenticated and getattr(user, "role", "") == User.ROLE_CLIENT:
-            self.fields["client"].required = False
 
     def get_client_name(self, obj):
         return str(obj.client)
@@ -1910,8 +1862,15 @@ class TechnicianAvailabilitySerializer(serializers.Serializer):
     email = serializers.EmailField()
     role = serializers.CharField()
     status = serializers.CharField()  # "available", "busy", "absent"
-    next_available_at = serializers.DateTimeField()
+    status_label = serializers.CharField(required=False)
+    assignable = serializers.BooleanField(required=False)
+    assignable_label = serializers.CharField(required=False)
+    next_available_at = serializers.DateTimeField(allow_null=True)
     busy_until = serializers.DateTimeField(allow_null=True)
     can_be_leader = serializers.BooleanField()
     can_be_member = serializers.BooleanField()
     current_tickets_count = serializers.IntegerField()
+    sav_active_count = serializers.IntegerField(required=False)
+    maintenance_active_count = serializers.IntegerField(required=False)
+    conflicts_label = serializers.CharField(required=False, allow_blank=True)
+    conflicts = serializers.ListField(required=False)

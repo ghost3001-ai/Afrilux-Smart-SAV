@@ -135,6 +135,7 @@ from .services import (
     compute_average_first_response_hours,
     compute_average_resolution_hours,
     compute_technician_availability_dashboard,
+    compute_technician_availability_rows,
     compute_ticket_hotspots,
     compute_ticket_monthly_series,
     compute_ticket_sla_deadline,
@@ -161,6 +162,7 @@ from .services import (
     request_start_intervention,
     request_ticket_escalation,
     generate_intervention_pdf,
+    get_ai_runtime_status,
     has_reporting_access,
     is_admin_user,
     is_internal_user,
@@ -209,10 +211,17 @@ from .services import (
     scope_ticket_queryset,
     scope_user_queryset,
     scope_workflow_execution_queryset,
-    notify_client_created_ticket,
     notify_ticket_status_change,
+    notify_client_created_ticket,
     archive_generated_report,
 )
+
+
+def _request_bool(data, key, default=False):
+    value = data.get(key, default)
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on", "oui"}
 
 
 def _ticket_status_from_intervention(intervention):
@@ -753,7 +762,7 @@ class MaintenanceTicketViewSet(AuditedModelViewSet):
             "client",
             "anomaly_ticket",
             "report",
-        ).prefetch_related("products", "team_members", "report__photo_files")
+        ).prefetch_related("products", "report__photo_files")
         queryset = scope_maintenance_ticket_queryset(queryset, self.request.user)
         technician = self.request.query_params.get("technicien") or self.request.query_params.get("technician")
         client = self.request.query_params.get("client")
@@ -762,7 +771,7 @@ class MaintenanceTicketViewSet(AuditedModelViewSet):
         date_from = _parse_anchor_date(self.request.query_params.get("date_from"))
         date_to = _parse_anchor_date(self.request.query_params.get("date_to"))
         if technician:
-            queryset = queryset.filter(Q(technician_id=technician) | Q(team_members__id=technician)).distinct()
+            queryset = queryset.filter(technician_id=technician)
         if client:
             queryset = queryset.filter(client_id=client)
         if status_value:
@@ -867,7 +876,10 @@ class MaintenanceTicketViewSet(AuditedModelViewSet):
                 actual_finished_at=request.data.get("actual_finished_at") or request.data.get("fin_reelle"),
                 checklist_completed=request.data.get("checklist_completed") or request.data.get("checklist_realisee"),
                 observations=request.data.get("observations", ""),
+                work_to_plan=request.data.get("work_to_plan") or request.data.get("travaux_a_prevoir") or "",
                 parts_used=request.data.get("parts_used") or request.data.get("pieces_utilisees") or "",
+                parts_status=request.data.get("parts_status") or request.data.get("etat_pieces") or {},
+                intervention_types=request.data.get("intervention_types") or request.data.get("types_intervention") or [],
                 anomaly_detected=request.data.get("anomaly_detected") or request.data.get("anomalie_detectee"),
                 photos=request.data.get("photo_refs") or request.data.get("photos_json"),
                 photo_files=photo_files,
@@ -1081,7 +1093,7 @@ class TicketViewSet(AuditedModelViewSet):
                 notify_ticket_status_change(instance, previous_status, actor=self.request.user)
 
         self.audit("ticket_created", instance)
-        if self.request.user.role == User.ROLE_CLIENT and instance.status == Ticket.STATUS_PENDING_ASSIGNMENT:
+        if self.request.user.role == User.ROLE_CLIENT:
             notify_client_created_ticket(instance, actor=self.request.user)
         run_automation_rules_for_ticket(instance, actor=self.request.user, trigger_event=AutomationRule.TRIGGER_TICKET_CREATED)
 
@@ -1169,6 +1181,8 @@ class TicketViewSet(AuditedModelViewSet):
                     technician,
                     actor=request.user,
                     note=str(request.data.get("note", "")).strip() or "Affectation depuis l'API.",
+                    force=_request_bool(request.data, "force_assignment"),
+                    force_reason=str(request.data.get("force_reason", "")).strip(),
                 )
             except ValueError as exc:
                 raise PermissionDenied(str(exc)) from exc
@@ -1201,7 +1215,11 @@ class TicketViewSet(AuditedModelViewSet):
         if not member_ids:
             return Response({"detail": "Selectionnez au moins un membre."}, status=status.HTTP_400_BAD_REQUEST)
 
-        technician_queryset = User.objects.filter(role=User.ROLE_TECHNICIAN, is_active=True)
+        technician_queryset = User.objects.filter(
+            role__in=User.ASSIGNABLE_ROLES,
+            technician_status="available",
+            is_active=True,
+        )
         leader = get_object_or_404(scope_user_queryset(technician_queryset, request.user), pk=leader_id)
         members = list(scope_user_queryset(technician_queryset, request.user).filter(pk__in=member_ids))
         if len(members) != len(set(str(item) for item in member_ids)):
@@ -1213,6 +1231,8 @@ class TicketViewSet(AuditedModelViewSet):
                 members=members,
                 actor=request.user,
                 note=str(request.data.get("note", "")).strip(),
+                force=_request_bool(request.data, "force_assignment"),
+                force_reason=str(request.data.get("force_reason", "")).strip(),
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
@@ -2116,7 +2136,7 @@ class NotificationViewSet(AuditedModelViewSet):
     ordering_fields = ["created_at", "sent_at", "read_at"]
 
     def get_permissions(self):
-        if self.action in {"mark_read", "mark_clicked"}:
+        if self.action == "mark_read":
             return [ReadOnlyForAuditors()]
         if self.action == "dispatch_pending":
             return [IsInternalUser()]
@@ -2172,17 +2192,13 @@ class NotificationViewSet(AuditedModelViewSet):
         notification = self.get_object()
         notification.status = Notification.STATUS_CLICKED
         notification.clicked_at = timezone.now()
-        if notification.read_at is None:
+        update_fields = ["status", "clicked_at"]
+        if not notification.read_at:
             notification.read_at = notification.clicked_at
-        notification.save(update_fields=["status", "clicked_at", "read_at"])
+            update_fields.append("read_at")
+        notification.save(update_fields=update_fields)
         self.audit("notification_clicked", notification)
-        return Response(
-            {
-                "status": notification.status,
-                "clicked_at": notification.clicked_at,
-                "deep_link": notification.deep_link,
-            }
-        )
+        return Response({"status": notification.status, "clicked_at": notification.clicked_at})
 
     @action(detail=False, methods=["post"])
     def dispatch_pending(self, request):
@@ -2190,6 +2206,13 @@ class NotificationViewSet(AuditedModelViewSet):
         organization = None if request.user.is_superuser or not request.user.organization_id else request.user.organization
         results = dispatch_pending_notifications(channel=channel, organization=organization)
         return Response({"count": len(results), "results": results})
+
+
+class AIStatusView(APIView):
+    permission_classes = [IsAuthenticatedSavUser]
+
+    def get(self, request):
+        return Response(get_ai_runtime_status())
 
 
 class DeviceRegistrationViewSet(viewsets.GenericViewSet):
@@ -2719,13 +2742,9 @@ class TechnicianPlanningView(APIView):
             request.user,
         ).filter(agent=technician, scheduled_for__gte=start_dt, scheduled_for__lt=end_dt)
         maintenance_tickets = scope_maintenance_ticket_queryset(
-            MaintenanceTicket.objects.select_related("client", "technician").prefetch_related("products", "team_members"),
+            MaintenanceTicket.objects.select_related("client", "technician").prefetch_related("products"),
             request.user,
-        ).filter(
-            Q(technician=technician) | Q(team_members=technician),
-            scheduled_date__gte=start_dt,
-            scheduled_date__lt=end_dt,
-        ).distinct()
+        ).filter(technician=technician, scheduled_date__gte=start_dt, scheduled_date__lt=end_dt)
 
         return Response(
             {
@@ -3029,3 +3048,63 @@ class TechnicianAvailabilityView(APIView):
             'results': serializer.data,
             'requested_at': timezone.now(),
         })
+
+
+class TechnicianAvailabilityView(APIView):
+    """Disponibilite unifiee SAV + maintenance."""
+
+    permission_classes = [IsManagerUser]
+
+    def get(self, request):
+        organization = request.user.organization
+        if not organization:
+            return Response(
+                {"detail": "Vous devez appartenir a une organisation."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        rows = compute_technician_availability_rows(organization)
+        after_param = request.query_params.get("after")
+        after_dt = None
+        if after_param:
+            try:
+                after_dt = timezone.datetime.fromisoformat(after_param.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                return Response(
+                    {"detail": "Format 'after' invalide. Utilisez ISO 8601."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        skills = [item.strip().lower() for item in request.query_params.get("skills", "").split(",") if item.strip()]
+        sector = (request.query_params.get("sector") or request.query_params.get("region") or "").strip().lower()
+        if skills:
+            rows = [
+                row
+                for row in rows
+                if any(skill in " ".join(row.get("specialties") or []).lower() for skill in skills)
+            ]
+        if sector:
+            rows = [
+                row
+                for row in rows
+                if sector in (row.get("primary_city") or "").lower()
+                or sector in (row.get("primary_region") or "").lower()
+            ]
+        if _request_bool(request.query_params, "assignable_only", False):
+            rows = [row for row in rows if row.get("assignable")]
+        if after_dt:
+            rows = [
+                row
+                for row in rows
+                if not row.get("next_available_at") or row["next_available_at"] <= after_dt
+            ]
+
+        rows.sort(key=lambda row: row.get("next_available_at") or timezone.now())
+        serializer = TechnicianAvailabilitySerializer(rows, many=True)
+        return Response(
+            {
+                "count": len(serializer.data),
+                "results": serializer.data,
+                "requested_at": timezone.now(),
+            }
+        )

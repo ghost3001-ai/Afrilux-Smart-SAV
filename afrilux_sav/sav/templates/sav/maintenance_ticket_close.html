@@ -54,7 +54,7 @@
             <div class="form-errors form-errors--full">{{ form.non_field_errors }}</div>
         {% endif %}
         {% for field in form %}
-            <label class="field {% if field.name == 'checklist_completed' or field.name == 'observations' or field.name == 'parts_used' or field.name == 'postponement_reason' or field.name == 'maintenance_photos' %}field--full{% endif %}">
+            <label class="field {% if field.name == 'checklist_completed' or field.name == 'observations' or field.name == 'parts_used' or field.name == 'work_to_plan' or field.name == 'intervention_types' or field.name == 'postponement_reason' or field.name == 'maintenance_photos' %}field--full{% endif %}">
                 <span>{{ field.label }}{% if field.field.required %} <strong>*</strong>{% endif %}</span>
                 {{ field }}
                 {% if field.help_text %}<small class="field__help">{{ field.help_text }}</small>{% endif %}
