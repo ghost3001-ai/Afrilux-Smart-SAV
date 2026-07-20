@@ -1,73 +1,54 @@
 {% extends "sav/base.html" %}
 {% block title %}Maintenance SAV | Tableau de bord{% endblock %}
 {% block content %}
-<<<<<<< ours
 <div class="cmms-page">
 {% include "sav/includes/maintenance_nav.html" %}
 <section class="cmms-header">
-    <div><p class="cmms-header__label">MAINTENANCE SAV</p><h1>Tableau de bord</h1><p>Une vue simple de l'activite, des urgences et du parc d'equipements.</p></div>
-    <div class="cmms-header__actions"><a class="button button--ghost" href="{% url 'maintenance-calendar' %}"><i class="bi bi-calendar3"></i> Calendrier</a>{% if can_manage_programs %}<a class="button button--primary" href="{% url 'maintenance-program-create' %}"><i class="bi bi-plus-lg"></i> Planifier</a>{% endif %}</div>
+    <div>
+        <p class="cmms-header__label">MAINTENANCE SAV</p>
+        <h1>Tableau de bord</h1>
+        <p>Une vue simple de l'activité, des urgences et du parc d'équipements.</p>
+    </div>
+    <div class="cmms-header__actions">
+        <a class="button button--ghost" href="{% url 'maintenance-calendar' %}"><i class="bi bi-calendar3"></i> Calendrier</a>
+        {% if can_manage_programs %}<a class="button button--primary" href="{% url 'maintenance-program-create' %}"><i class="bi bi-plus-lg"></i> Planifier</a>{% endif %}
+    </div>
 </section>
 
 <section class="cmms-kpi-grid">
-    <article class="cmms-kpi-card"><span class="cmms-kpi-card__icon cmms-kpi-card__icon--blue"><i class="bi bi-cpu"></i></span><div><span>Equipements</span><strong>{{ kpis.equipment }}</strong><small>parc suivi</small></div></article>
-    <article class="cmms-kpi-card"><span class="cmms-kpi-card__icon cmms-kpi-card__icon--blue"><i class="bi bi-calendar-check"></i></span><div><span>Prevues aujourd'hui</span><strong>{{ kpis.today }}</strong><small>a realiser</small></div></article>
+    <article class="cmms-kpi-card"><span class="cmms-kpi-card__icon cmms-kpi-card__icon--blue"><i class="bi bi-cpu"></i></span><div><span>Équipements</span><strong>{{ kpis.equipment }}</strong><small>parc suivi</small></div></article>
+    <article class="cmms-kpi-card"><span class="cmms-kpi-card__icon cmms-kpi-card__icon--blue"><i class="bi bi-calendar-check"></i></span><div><span>Prévues aujourd'hui</span><strong>{{ kpis.today }}</strong><small>à réaliser</small></div></article>
     <article class="cmms-kpi-card"><span class="cmms-kpi-card__icon cmms-kpi-card__icon--orange"><i class="bi bi-tools"></i></span><div><span>En cours</span><strong>{{ kpis.in_progress }}</strong><small>en intervention</small></div></article>
-    <article class="cmms-kpi-card"><span class="cmms-kpi-card__icon cmms-kpi-card__icon--green"><i class="bi bi-check-lg"></i></span><div><span>Terminees</span><strong>{{ kpis.done }}</strong><small>interventions cloturees</small></div></article>
-    <article class="cmms-kpi-card"><span class="cmms-kpi-card__icon cmms-kpi-card__icon--red"><i class="bi bi-bell"></i></span><div><span>Alertes</span><strong>{{ kpis.alerts }}</strong><small>a traiter rapidement</small></div></article>
-    <article class="cmms-kpi-card"><span class="cmms-kpi-card__icon cmms-kpi-card__icon--green"><i class="bi bi-speedometer2"></i></span><div><span>Disponibilite</span><strong>{{ kpis.availability }}%</strong><small>equipements operationnels</small></div></article>
+    <article class="cmms-kpi-card"><span class="cmms-kpi-card__icon cmms-kpi-card__icon--green"><i class="bi bi-check-lg"></i></span><div><span>Terminées</span><strong>{{ kpis.done }}</strong><small>interventions clôturées</small></div></article>
+    <article class="cmms-kpi-card"><span class="cmms-kpi-card__icon cmms-kpi-card__icon--red"><i class="bi bi-bell"></i></span><div><span>Alertes</span><strong>{{ kpis.alerts }}</strong><small>à traiter rapidement</small></div></article>
+    <article class="cmms-kpi-card"><span class="cmms-kpi-card__icon cmms-kpi-card__icon--green"><i class="bi bi-speedometer2"></i></span><div><span>Disponibilité</span><strong>{{ kpis.availability }}%</strong><small>équipements opérationnels</small></div></article>
 </section>
 
-<section class="cmms-summary-bar"><span><i class="bi bi-arrow-repeat"></i> <strong>{{ kpis.programs }}</strong> programmes actifs</span><span><i class="bi bi-exclamation-octagon"></i> <strong>{{ kpis.critical }}</strong> pannes critiques</span><span><i class="bi bi-alarm"></i> <strong>{{ kpis.upcoming }}</strong> maintenances sous 7 jours</span></section>
+<section class="cmms-summary-bar">
+    <span><i class="bi bi-arrow-repeat"></i> <strong>{{ kpis.programs }}</strong> programmes actifs</span>
+    <span><i class="bi bi-exclamation-octagon"></i> <strong>{{ kpis.critical }}</strong> pannes critiques</span>
+    <span><i class="bi bi-alarm"></i> <strong>{{ kpis.upcoming }}</strong> maintenances sous 7 jours</span>
+</section>
 
 <section class="cmms-analytics-grid">
-    <article class="cmms-panel cmms-panel--wide"><header><div><p>FIABILITE</p><h2>Pannes correctives par mois</h2></div><i class="bi bi-graph-up-arrow"></i></header><div class="cmms-chart-wrap"><canvas id="breakdownsChart"></canvas></div></article>
-    <article class="cmms-panel"><header><div><p>ACTIVITE</p><h2>Interventions</h2></div><i class="bi bi-pie-chart"></i></header><div class="cmms-chart-wrap"><canvas id="typesChart"></canvas></div></article>
-    <article class="cmms-panel"><header><div><p>PARC</p><h2>Disponibilite</h2></div><i class="bi bi-speedometer"></i></header><div class="cmms-chart-wrap"><canvas id="availabilityChart"></canvas></div></article>
+    <article class="cmms-panel cmms-panel--wide"><header><div><p>FIABILITÉ</p><h2>Pannes correctives par mois</h2></div><i class="bi bi-graph-up-arrow"></i></header><div class="cmms-chart-wrap"><canvas id="breakdownsChart"></canvas></div></article>
+    <article class="cmms-panel"><header><div><p>ACTIVITÉ</p><h2>Interventions</h2></div><i class="bi bi-pie-chart"></i></header><div class="cmms-chart-wrap"><canvas id="typesChart"></canvas></div></article>
+    <article class="cmms-panel"><header><div><p>PARC</p><h2>Disponibilité</h2></div><i class="bi bi-speedometer"></i></header><div class="cmms-chart-wrap"><canvas id="availabilityChart"></canvas></div></article>
 </section>
 
 <section class="cmms-alert-grid">
-    <article class="cmms-panel cmms-list-panel"><header><div><p>A VENIR</p><h2>Interventions sous 7 jours</h2></div><a href="{% url 'maintenance-interventions' %}?status=planned">Tout voir</a></header>{% for ticket in due_soon %}<a class="cmms-list-item" href="{% url 'maintenance-interventions' %}?q={{ ticket.pk }}"><span class="cmms-list-item__marker cmms-list-item__marker--blue"></span><span><strong>{{ ticket.title }}</strong><small>{{ ticket.client }} · {{ ticket.scheduled_date|date:"d/m/Y H:i" }}</small></span><i class="bi bi-chevron-right"></i></a>{% empty %}<p class="cmms-list-empty">Aucune intervention a anticiper.</p>{% endfor %}</article>
-    <article class="cmms-panel cmms-list-panel"><header><div><p>URGENT</p><h2>Interventions en retard</h2></div><a href="{% url 'maintenance-interventions' %}?status=late">Tout voir</a></header>{% for ticket in late_tickets %}<a class="cmms-list-item" href="{% url 'maintenance-interventions' %}?q={{ ticket.pk }}"><span class="cmms-list-item__marker cmms-list-item__marker--red"></span><span><strong>{{ ticket.title }}</strong><small>{{ ticket.client }} · prevue le {{ ticket.scheduled_date|date:"d/m/Y" }}</small></span><span class="badge badge--critical">En retard</span></a>{% empty %}<p class="cmms-list-empty">Aucun retard detecte.</p>{% endfor %}</article>
+    <article class="cmms-panel cmms-list-panel"><header><div><p>À VENIR</p><h2>Interventions sous 7 jours</h2></div><a href="{% url 'maintenance-interventions' %}?status=planned">Tout voir</a></header>{% for ticket in due_soon %}<a class="cmms-list-item" href="{% url 'maintenance-interventions' %}?q={{ ticket.pk }}"><span class="cmms-list-item__marker cmms-list-item__marker--blue"></span><span><strong>{{ ticket.title }}</strong><small>{{ ticket.client }} · {{ ticket.scheduled_date|date:"d/m/Y H:i" }}</small></span><i class="bi bi-chevron-right"></i></a>{% empty %}<p class="cmms-list-empty">Aucune intervention à anticiper.</p>{% endfor %}</article>
+    <article class="cmms-panel cmms-list-panel"><header><div><p>URGENT</p><h2>Interventions en retard</h2></div><a href="{% url 'maintenance-interventions' %}?status=late">Tout voir</a></header>{% for ticket in late_tickets %}<a class="cmms-list-item" href="{% url 'maintenance-interventions' %}?q={{ ticket.pk }}"><span class="cmms-list-item__marker cmms-list-item__marker--red"></span><span><strong>{{ ticket.title }}</strong><small>{{ ticket.client }} · prévue le {{ ticket.scheduled_date|date:"d/m/Y" }}</small></span><span class="badge badge--critical">En retard</span></a>{% empty %}<p class="cmms-list-empty">Aucun retard détecté.</p>{% endfor %}</article>
 </section>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script>document.addEventListener('DOMContentLoaded',function(){const d={{ chart_data|safe }};const common={responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:10,usePointStyle:true,padding:16,color:'#5f6b7a'}}}};new Chart(document.getElementById('breakdownsChart'),{type:'bar',data:{labels:d.months,datasets:[{label:'Pannes',data:d.breakdowns,backgroundColor:'#1d6fd8',borderRadius:6,borderSkipped:false,maxBarThickness:36}]},options:{...common,scales:{x:{grid:{display:false},ticks:{color:'#5f6b7a'}},y:{beginAtZero:true,ticks:{precision:0,color:'#5f6b7a'},grid:{color:'#edf0f4'}}}}});new Chart(document.getElementById('typesChart'),{type:'doughnut',data:{labels:['Preventive','Corrective','Predictive'],datasets:[{data:d.types,backgroundColor:['#1d6fd8','#f59e0b','#7c5ce0'],borderWidth:0}]},options:{...common,cutout:'70%'}});new Chart(document.getElementById('availabilityChart'),{type:'doughnut',data:{labels:['Disponible','Indisponible'],datasets:[{data:d.availability,backgroundColor:['#16a085','#e8edf3'],borderWidth:0}]},options:{...common,cutout:'70%'}});});</script>
-=======
-{% include "sav/includes/maintenance_nav.html" %}
-<section class="cmms-hero">
-    <div><p class="cmms-hero__eyebrow"><i class="bi bi-activity"></i> CENTRE DE PILOTAGE GMAO</p><h1>Maintenance SAV</h1><p>Suivez les interventions, la disponibilite du parc et les actions a traiter aujourd'hui.</p></div>
-    <div class="cmms-hero__actions"><a class="button button--ghost" href="{% url 'maintenance-calendar' %}"><i class="bi bi-calendar3"></i> Calendrier</a>{% if can_manage_programs %}<a class="button button--primary" href="{% url 'maintenance-program-create' %}"><i class="bi bi-plus-lg"></i> Nouveau programme</a>{% endif %}</div>
-</section>
-
-<section class="cmms-kpis cmms-kpis--professional">
-    <article class="cmms-kpi cmms-kpi--blue"><i class="bi bi-cpu"></i><span>Equipements</span><strong>{{ kpis.equipment }}</strong><small>parc suivi</small></article>
-    <article class="cmms-kpi cmms-kpi--violet"><i class="bi bi-arrow-repeat"></i><span>Programmes actifs</span><strong>{{ kpis.programs }}</strong><small>regles publiees</small></article>
-    <article class="cmms-kpi cmms-kpi--sky"><i class="bi bi-calendar-check"></i><span>Prevues aujourd'hui</span><strong>{{ kpis.today }}</strong><small>a realiser</small></article>
-    <article class="cmms-kpi cmms-kpi--orange"><i class="bi bi-tools"></i><span>En cours</span><strong>{{ kpis.in_progress }}</strong><small>sur le terrain</small></article>
-    <article class="cmms-kpi cmms-kpi--green"><i class="bi bi-check2-circle"></i><span>Terminees</span><strong>{{ kpis.done }}</strong><small>depuis le debut</small></article>
-    <article class="cmms-kpi cmms-kpi--red"><i class="bi bi-exclamation-octagon"></i><span>Pannes critiques</span><strong>{{ kpis.critical }}</strong><small>priorite immediate</small></article>
-    <article class="cmms-kpi cmms-kpi--gold"><i class="bi bi-alarm"></i><span>A venir sous 7 jours</span><strong>{{ kpis.upcoming }}</strong><small>preventives</small></article>
-    <article class="cmms-kpi cmms-kpi--red"><i class="bi bi-bell"></i><span>Alertes</span><strong>{{ kpis.alerts }}</strong><small>a verifier</small></article>
-    <article class="cmms-kpi cmms-kpi--green"><i class="bi bi-speedometer2"></i><span>Disponibilite</span><strong>{{ kpis.availability }}%</strong><small>equipements operationnels</small></article>
-</section>
-
-<section class="cmms-chart-grid cmms-chart-grid--professional">
-    <article class="card cmms-chart-card"><div class="cmms-card-head"><div><p class="eyebrow">FIABILITE</p><h2>Pannes correctives</h2></div><i class="bi bi-bar-chart"></i></div><canvas id="breakdownsChart"></canvas></article>
-    <article class="card cmms-chart-card"><div class="cmms-card-head"><div><p class="eyebrow">ACTIVITE</p><h2>Types d'intervention</h2></div><i class="bi bi-pie-chart"></i></div><canvas id="typesChart"></canvas></article>
-    <article class="card cmms-chart-card"><div class="cmms-card-head"><div><p class="eyebrow">PERFORMANCE</p><h2>Disponibilite du parc</h2></div><i class="bi bi-speedometer"></i></div><canvas id="availabilityChart"></canvas></article>
-</section>
-
-<section class="cmms-workspace-grid">
-    <article class="card cmms-priority-card"><div class="cmms-card-head"><div><p class="eyebrow">A PLANIFIER</p><h2>Interventions sous 7 jours</h2></div><a class="button button--ghost button--compact" href="{% url 'maintenance-interventions' %}?status=planned">Voir tout</a></div>{% for ticket in due_soon %}<a class="cmms-task" href="{% url 'maintenance-interventions' %}?q={{ ticket.pk }}"><span class="cmms-task__icon cmms-task__icon--blue"><i class="bi bi-calendar-event"></i></span><span><strong>{{ ticket.title }}</strong><small>{{ ticket.client }} · {{ ticket.scheduled_date|date:"d/m/Y H:i" }}</small></span><span class="badge badge--accent">{{ ticket.type_label }}</span></a>{% empty %}<p class="cmms-empty"><i class="bi bi-check-circle"></i> Aucune intervention a anticiper.</p>{% endfor %}</article>
-    <article class="card cmms-priority-card"><div class="cmms-card-head"><div><p class="eyebrow">URGENT</p><h2>Interventions en retard</h2></div><a class="button button--ghost button--compact" href="{% url 'maintenance-interventions' %}?status=late">Voir tout</a></div>{% for ticket in late_tickets %}<a class="cmms-task" href="{% url 'maintenance-interventions' %}?q={{ ticket.pk }}"><span class="cmms-task__icon cmms-task__icon--red"><i class="bi bi-exclamation-lg"></i></span><span><strong>{{ ticket.title }}</strong><small>{{ ticket.client }} · prevue le {{ ticket.scheduled_date|date:"d/m/Y" }}</small></span><span class="badge badge--critical">En retard</span></a>{% empty %}<p class="cmms-empty"><i class="bi bi-check-circle"></i> Aucun retard detecte.</p>{% endfor %}</article>
-</section>
-
-<section class="cmms-workspace-grid">
-    <article class="card cmms-priority-card"><div class="cmms-card-head"><div><p class="eyebrow">GARANTIES</p><h2>Garanties expirees</h2></div><i class="bi bi-shield-exclamation"></i></div>{% for product in warranty_expired %}<a class="cmms-task" href="{% url 'maintenance-equipment-detail' product.pk %}"><span class="cmms-task__icon cmms-task__icon--gold"><i class="bi bi-shield-x"></i></span><span><strong>{{ product.name }}</strong><small>{{ product.client }} · expiree le {{ product.warranty_end|date:"d/m/Y" }}</small></span></a>{% empty %}<p class="cmms-empty"><i class="bi bi-shield-check"></i> Aucune garantie expiree.</p>{% endfor %}</article>
-    <article class="card cmms-priority-card"><div class="cmms-card-head"><div><p class="eyebrow">MAGASIN</p><h2>Pieces a reapprovisionner</h2></div><i class="bi bi-box-seam"></i></div>{% for part in low_stock %}<a class="cmms-task" href="{% url 'maintenance-part-update' part.pk %}"><span class="cmms-task__icon cmms-task__icon--red"><i class="bi bi-box2-heart"></i></span><span><strong>{{ part.name }}</strong><small>{{ part.reference }} · seuil {{ part.minimum_stock }}</small></span><span class="badge badge--critical">{{ part.stock_quantity }} en stock</span></a>{% empty %}<p class="cmms-empty"><i class="bi bi-check-circle"></i> Tous les seuils de stock sont respectes.</p>{% endfor %}</article>
-</section>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script>document.addEventListener('DOMContentLoaded',function(){const d={{ chart_data|safe }};const common={responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{usePointStyle:true,padding:18,font:{size:12}}}}};new Chart(document.getElementById('breakdownsChart'),{type:'bar',data:{labels:d.months,datasets:[{label:'Pannes correctives',data:d.breakdowns,backgroundColor:'#d55b4a',borderRadius:8,borderSkipped:false}]},options:{...common,scales:{y:{beginAtZero:true,grid:{color:'rgba(91,109,126,.12)'},ticks:{precision:0}},x:{grid:{display:false}}}}});new Chart(document.getElementById('typesChart'),{type:'doughnut',data:{labels:['Preventive','Corrective','Predictive'],datasets:[{data:d.types,backgroundColor:['#2778b8','#d55b4a','#7464d6'],borderWidth:0,hoverOffset:8}]},options:{...common,cutout:'68%'}});new Chart(document.getElementById('availabilityChart'),{type:'doughnut',data:{labels:['Disponible','Indisponible'],datasets:[{data:d.availability,backgroundColor:['#249b6a','#e6ebf1'],borderWidth:0,hoverOffset:4}]},options:{...common,cutout:'68%'}})});</script>
->>>>>>> theirs
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const data = {{ chart_data|safe }};
+    const common = { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "bottom", labels: { boxWidth: 10, usePointStyle: true, padding: 16, color: "#5f6b7a" } } } };
+    new Chart(document.getElementById("breakdownsChart"), { type: "bar", data: { labels: data.months, datasets: [{ label: "Pannes", data: data.breakdowns, backgroundColor: "#1d6fd8", borderRadius: 6, borderSkipped: false, maxBarThickness: 36 }] }, options: { ...common, scales: { x: { grid: { display: false }, ticks: { color: "#5f6b7a" } }, y: { beginAtZero: true, ticks: { precision: 0, color: "#5f6b7a" }, grid: { color: "#edf0f4" } } } } });
+    new Chart(document.getElementById("typesChart"), { type: "doughnut", data: { labels: ["Préventive", "Corrective", "Prédictive"], datasets: [{ data: data.types, backgroundColor: ["#1d6fd8", "#f59e0b", "#7c5ce0"], borderWidth: 0 }] }, options: { ...common, cutout: "70%" } });
+    new Chart(document.getElementById("availabilityChart"), { type: "doughnut", data: { labels: ["Disponible", "Indisponible"], datasets: [{ data: data.availability, backgroundColor: ["#16a085", "#e8edf3"], borderWidth: 0 }] }, options: { ...common, cutout: "70%" } });
+});
+</script>
 {% endblock %}
