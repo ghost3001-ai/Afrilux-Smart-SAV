@@ -1,0 +1,7 @@
+{% extends "sav/base.html" %}
+{% block title %}{{ title }} | Maintenance SAV{% endblock %}
+{% block content %}
+{% include "sav/includes/maintenance_nav.html" %}
+<section class="section-head section-head--page"><div><p class="eyebrow">GMAO</p><h1>{{ title }}</h1><p class="muted">{{ subtitle }}</p></div></section>
+<section class="card"><div class="table-wrap"><table class="table"><thead><tr><th>{% if is_clients %}Client{% else %}Technicien{% endif %}</th><th>Contact</th><th>{% if is_clients %}Equipements{% else %}Interventions actives{% endif %}</th><th>{% if is_clients %}Interventions actives{% else %}Interventions terminees{% endif %}</th></tr></thead><tbody>{% for row in rows %}<tr><td><strong>{{ row.person }}</strong>{% if row.person.company_name %}<br><small>{{ row.person.company_name }}</small>{% endif %}</td><td>{{ row.person.email|default:row.person.phone|default:'-' }}</td><td>{{ row.planned }}</td><td>{{ row.done }}</td></tr>{% empty %}<tr><td colspan="4">Aucune donnee disponible.</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}

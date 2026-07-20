@@ -1,216 +1,58 @@
 {% extends "sav/base.html" %}
 
-{% block title %}Nouveau programme maintenance | Afrilux SAV{% endblock %}
+{% block title %}Programme de maintenance | Afrilux SAV{% endblock %}
 
 {% block content %}
+{% include "sav/includes/maintenance_nav.html" %}
 <section class="section-head section-head--page">
     <div>
-        <p class="eyebrow">Programme de maintenance</p>
-        <h1>Creation du programme</h1>
-    </div>
-</section>
-
-<section class="card" data-maintenance-builder>
-    <div class="section-head">
-        <div>
-            <p class="eyebrow">Lignes du programme</p>
-            <h2>Ajout rapide</h2>
-        </div>
-    </div>
-    <div class="form-grid form-grid--two">
-        <label class="field field--full">
-            <span>Intitule de la tache</span>
-            <input type="text" data-maintenance-field="title" placeholder="Entretien climatiseur salle serveurs">
-        </label>
-        <div class="field field--full">
-            <span>Equipe technique</span>
-            <div class="table-wrap">
-                <table class="table table--compact">
-                    <thead>
-                        <tr>
-                            <th>Technicien</th>
-                            <th>Fonction</th>
-                            <th>Chef</th>
-                            <th>Membre</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for technician in maintenance_technicians %}
-                            <tr>
-                                <td>#{{ technician.id }} - {{ technician }}</td>
-                                <td>{{ technician.get_role_display }}</td>
-                                <td><input type="radio" name="maintenance_team_leader" value="{{ technician.id }}" data-maintenance-leader></td>
-                                <td><input type="checkbox" value="{{ technician.id }}" data-maintenance-member></td>
-                            </tr>
-                        {% empty %}
-                            <tr>
-                                <td colspan="4">Aucun technicien disponible.</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            <small class="field__help">Choisissez un chef et, si besoin, un ou plusieurs membres. Le chef sera le technicien principal de la maintenance.</small>
-        </div>
-        <label class="field">
-            <span>Client / site concerne</span>
-            <input
-                type="text"
-                data-maintenance-field="client_label"
-                list="maintenance-client-suggestions"
-                placeholder="Ex: CCA-BANK - Douala"
-                autocomplete="off"
-            >
-            <datalist id="maintenance-client-suggestions">
-                {% for client in maintenance_clients %}
-                    <option value="#{{ client.id }} - {{ client.company_name|default:client }}"></option>
-                {% endfor %}
-            </datalist>
-            <small class="field__help">Saisissez librement le client ou choisissez une suggestion existante.</small>
-        </label>
-        <label class="field">
-            <span>Date et heure prevues</span>
-            <input type="datetime-local" data-maintenance-field="scheduled_date">
-        </label>
-        <label class="field">
-            <span>Date et heure d'appel</span>
-            <input type="datetime-local" data-maintenance-field="call_date">
-        </label>
-        <label class="field">
-            <span>Site / ville</span>
-            <input type="text" data-maintenance-field="location" placeholder="Douala, Yaounde, Kousseri...">
-        </label>
-        <label class="field">
-            <span>Trajet</span>
-            <input type="text" data-maintenance-field="route" placeholder="Douala - Edea">
-        </label>
-        <label class="field">
-            <span>Nuitees</span>
-            <input type="number" min="0" step="1" data-maintenance-field="overnight_stays" value="0">
-        </label>
-        <label class="field">
-            <span>Periodicite</span>
-            <select data-maintenance-field="periodicity">
-                {% for value, label in periodicity_choices %}
-                    <option value="{{ value }}">{{ label }}</option>
-                {% endfor %}
-            </select>
-        </label>
-        <label class="field">
-            <span>Priorite</span>
-            <select data-maintenance-field="priority">
-                <option value="normal">Normale</option>
-                <option value="low">Basse</option>
-                <option value="high">Haute</option>
-                <option value="critical">Critique</option>
-            </select>
-        </label>
-        <label class="field">
-            <span>Equipement(s)</span>
-            <textarea
-                data-maintenance-field="equipment_label"
-                rows="4"
-                placeholder="Ex: #12 - Onduleur principal / SN-001&#10;Ou saisir librement les equipements concernes"
-            ></textarea>
-            <small class="field__help">Saisissez un ou plusieurs equipements. Les suggestions commencant par # seront liees automatiquement.</small>
-        </label>
-        <label class="field">
-            <span>Systeme / outillage</span>
-            <input type="text" data-maintenance-field="system_tools" placeholder="Systeme de securite, groupe, climatisation...">
-        </label>
-        <label class="field">
-            <span>Marque</span>
-            <input type="text" data-maintenance-field="equipment_brand">
-        </label>
-        <label class="field">
-            <span>Type</span>
-            <input type="text" data-maintenance-field="equipment_type">
-        </label>
-        <label class="field">
-            <span>No equipement</span>
-            <input type="text" data-maintenance-field="equipment_identifier">
-        </label>
-        <label class="field field--full">
-            <span>Cause d'appel / motif d'intervention</span>
-            <textarea data-maintenance-field="intervention_reason" rows="3"></textarea>
-        </label>
-        <label class="field field--full">
-            <span>Instructions / check-list</span>
-            <textarea data-maintenance-field="checklist" rows="4" placeholder="Controle visuel&#10;Nettoyage&#10;Test fonctionnement"></textarea>
-        </label>
-        <label class="field field--full">
-            <span>Instructions complementaires</span>
-            <textarea data-maintenance-field="instructions" rows="2"></textarea>
-        </label>
-        <div class="form-actions field--full">
-            <button class="button button--ghost" type="button" data-maintenance-add-line>Ajouter la ligne</button>
-        </div>
+        <p class="eyebrow">GMAO / Planification</p>
+        <h1>{% if object %}Modifier le programme{% else %}Créer un programme de maintenance{% endif %}</h1>
+        <p class="muted">Remplissez simplement les trois étapes, puis publiez le programme depuis la liste.</p>
     </div>
 </section>
 
 <section class="three-col">
-    <article class="card">
-        <div class="section-head">
-            <p class="eyebrow">Techniciens</p>
-            <h2>Identifiants assignables</h2>
-        </div>
-        {% for technician in maintenance_technicians %}
-            <div class="list-row">
-                <strong>#{{ technician.id }} - {{ technician }}</strong>
-                <span>{{ technician.get_role_display }}</span>
-            </div>
-        {% empty %}
-            <p class="muted">Aucun technicien disponible.</p>
-        {% endfor %}
-    </article>
-    <article class="card">
-        <div class="section-head">
-            <p class="eyebrow">Clients</p>
-            <h2>Identifiants clients</h2>
-        </div>
-        {% for client in maintenance_clients %}
-            <div class="list-row">
-                <strong>#{{ client.id }} - {{ client.company_name|default:client }}</strong>
-                <span>{{ client.email|default:client.username }}</span>
-            </div>
-        {% empty %}
-            <p class="muted">Aucun client actif.</p>
-        {% endfor %}
-    </article>
-    <article class="card">
-        <div class="section-head">
-            <p class="eyebrow">Equipements</p>
-            <h2>Identifiants produits</h2>
-        </div>
-        {% for product in maintenance_products %}
-            <div class="list-row">
-                <strong>#{{ product.id }} - {{ product.name }}</strong>
-                <span>{{ product.serial_number }} / {{ product.client }}</span>
-            </div>
-        {% empty %}
-            <p class="muted">Aucun equipement actif.</p>
-        {% endfor %}
-    </article>
+    <article class="card"><p class="eyebrow">Étape 1</p><h2>Pour qui ?</h2><p class="muted">Choisissez le client et l'équipement à entretenir.</p></article>
+    <article class="card"><p class="eyebrow">Étape 2</p><h2>Quand ?</h2><p class="muted">Définissez la période, la fréquence et l'heure.</p></article>
+    <article class="card"><p class="eyebrow">Étape 3</p><h2>Comment ?</h2><p class="muted">Affectez l'équipe et ajoutez la checklist.</p></article>
 </section>
 
 <section class="card form-card">
-    <form method="post" class="form-grid form-grid--two">
+    <form method="post" class="form-grid form-grid--two" data-maintenance-rule-form>
         {% csrf_token %}
-        {% if form.non_field_errors %}
-            <div class="form-errors form-errors--full">{{ form.non_field_errors }}</div>
+        {% if form.non_field_errors %}<div class="form-errors form-errors--full">{{ form.non_field_errors }}</div>{% endif %}
+
+        <div class="field field--full"><span>Nom du programme</span>{{ form.title }}<small class="field__help">Exemple : Entretien mensuel du climatiseur salle serveur.</small>{{ form.title.errors }}</div>
+        <div class="field"><span>Service concerné</span>{{ form.service }}{{ form.service.errors }}</div>
+        <div class="field"><span>Type de maintenance</span>{{ form.maintenance_type }}{{ form.maintenance_type.errors }}</div>
+
+        <div class="field"><span>Client <strong>*</strong></span><input name="client_label" value="{{ form.client_label.value|default:'' }}" list="maintenance-clients" placeholder="Saisissez le nom du client" autocomplete="off"><datalist id="maintenance-clients">{% for client in maintenance_clients %}<option value="{{ client.company_name|default:client }}"></option>{% endfor %}</datalist><small class="field__help">Saisissez un client existant ou un nouveau nom.</small>{{ form.client_label.errors }}</div>
+        <div class="field"><span>Équipement <strong>*</strong></span><input name="equipment_label" value="{{ form.equipment_label.value|default:'' }}" list="maintenance-equipment" placeholder="Saisissez le nom ou le numéro de série" autocomplete="off"><datalist id="maintenance-equipment">{% for product in maintenance_products %}<option value="{{ product.name }}"></option><option value="{{ product.serial_number }}"></option>{% endfor %}</datalist><small class="field__help">Saisissez un équipement existant ou un nouvel équipement.</small>{{ form.equipment_label.errors }}</div>
+        <div class="field"><span>Technicien responsable <strong>*</strong></span>{{ form.technician }}{{ form.technician.errors }}</div>
+        <div class="field field--full"><span>Autres membres de l'équipe</span><div class="table-wrap"><table class="table table--compact"><thead><tr><th>Sélection</th><th>Technicien</th><th>Fonction</th></tr></thead><tbody>{% for checkbox in form.team_members %}<tr><td>{{ checkbox.tag }}</td><td>{{ checkbox.choice_label }}</td><td>Technicien</td></tr>{% empty %}<tr><td colspan="3">Aucun autre technicien disponible.</td></tr>{% endfor %}</tbody></table></div><small class="field__help">Cochez les techniciens qui accompagnent le responsable.</small>{{ form.team_members.errors }}</div>
+
+        <div class="field"><span>Date de début <strong>*</strong></span>{{ form.start_date }}{{ form.start_date.errors }}</div>
+        <div class="field"><span>Date de fin</span>{{ form.end_date }}<small class="field__help">Facultatif. Sans date de fin, le programme couvre un an.</small>{{ form.end_date.errors }}</div>
+        <div class="field"><span>Fréquence</span>{{ form.frequency }}{{ form.frequency.errors }}</div>
+        <div class="field"><span>Répéter tous les</span>{{ form.frequency_interval }}<small class="field__help">1 = chaque période, 2 = toutes les deux périodes.</small>{{ form.frequency_interval.errors }}</div>
+        <div class="field"><span>Heure prévue</span>{{ form.scheduled_time }}{{ form.scheduled_time.errors }}</div>
+        <div class="field"><span>Durée estimée</span>{{ form.estimated_duration_minutes }}{{ form.estimated_duration_minutes.errors }}</div>
+        <div class="field"><span>Priorité</span>{{ form.priority }}{{ form.priority.errors }}</div>
+
+        <div class="field field--full"><span>Checklist</span>{{ form.checklist }}<small class="field__help">Saisissez une opération par ligne : nettoyage, contrôle visuel, test de fonctionnement…</small>{{ form.checklist.errors }}</div>
+        <div class="field field--full"><span>Pièces nécessaires</span><input name="required_parts_label" value="{{ form.required_parts_label.value|default:'' }}" list="maintenance-parts" placeholder="Exemple : filtre, huile, courroie"><datalist id="maintenance-parts">{% for part in form.required_parts.field.queryset %}<option value="{{ part.name }}"></option><option value="{{ part.reference }}"></option>{% endfor %}</datalist><small class="field__help">Saisissez les pièces séparées par des virgules.</small>{{ form.required_parts_label.errors }}</div>
+        <div class="field field--full"><span>Notifications</span><div class="chip-row"><label>{{ form.notify_email }} E-mail</label><label>{{ form.notify_sms }} SMS</label><label>{{ form.notify_internal }} Notification interne</label></div></div>
+
+        {{ form.client.as_hidden }}{{ form.equipment.as_hidden }}{{ form.required_parts.as_hidden }}{{ form.period_type.as_hidden }}{{ form.month.as_hidden }}{{ form.quarter.as_hidden }}{{ form.year.as_hidden }}
+
+        {% if object and not object.is_rule_based %}
+            <details class="field field--full"><summary>Ancien programme manuel (mode avancé)</summary><p class="muted">Ces informations sont conservées pour compatibilité avec les anciens programmes.</p><span>Lignes techniques</span>{{ form.task_lines }}{{ form.task_lines.errors }}</details>
+        {% else %}
+            {{ form.task_lines.as_hidden }}
         {% endif %}
-        {% for field in form %}
-            <label class="field {% if field.name == 'task_lines' or field.name == 'title' %}field--full{% endif %}">
-                <span>{{ field.label }}{% if field.field.required %} <strong>*</strong>{% endif %}</span>
-                {{ field }}
-                {% if field.help_text %}<small class="field__help">{{ field.help_text }}</small>{% endif %}
-                {% if field.errors %}<small class="field__error">{{ field.errors|striptags }}</small>{% endif %}
-            </label>
-        {% endfor %}
-        <div class="form-actions field--full">
-            <button class="button button--primary" type="submit">Enregistrer</button>
-            <a class="button button--ghost" href="{% url 'maintenance-program' %}">Annuler</a>
-        </div>
+
+        <div class="form-actions field--full"><a class="button button--ghost" href="{% url 'maintenance-program' %}">Annuler</a><button class="button button--primary" type="submit">Enregistrer le programme</button></div>
     </form>
 </section>
 {% endblock %}

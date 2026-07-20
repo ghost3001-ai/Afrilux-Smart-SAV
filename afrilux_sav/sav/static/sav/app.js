@@ -295,7 +295,28 @@ function initializeMaintenanceProgramBuilder() {
   const readLines = () => {
     try {
       const parsed = JSON.parse(target.value || "[]");
-      return Array.isArray(parsed) ? parsed : [];
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+      return parsed.filter((item) => {
+        if (!item || typeof item !== "object") {
+          return true;
+        }
+        const title = (item.title || "").toString().trim().toLowerCase();
+        const clientLabel = (item.client_label || "").toString().trim().toLowerCase();
+        const equipmentLabel = (item.equipment_label || "").toString().trim().toLowerCase();
+        const clientId = item.client_id || item.client || "";
+        const technicianIds = Array.isArray(item.technician_ids) ? item.technician_ids : [];
+        const productIds = Array.isArray(item.product_ids) ? item.product_ids : [];
+        return !(
+          title === "entretien preventif equipement client" &&
+          (!clientLabel || clientLabel === "client / site a renseigner") &&
+          (!equipmentLabel || equipmentLabel === "equipement a renseigner") &&
+          !clientId &&
+          technicianIds.length === 0 &&
+          productIds.length === 0
+        );
+      });
     } catch (_error) {
       return [];
     }
@@ -353,7 +374,7 @@ function initializeMaintenanceProgramBuilder() {
     const rawLabel = (field("client_label")?.value || "").trim();
     const match = rawLabel.match(/^#(\d+)\s*-\s*(.+)$/);
     return {
-      clientId: match ? Number(match[1]) : 0,
+      clientId: match ? Number(match[1]) : null,
       clientLabel: rawLabel,
     };
   };
@@ -391,25 +412,41 @@ function initializeMaintenanceProgramBuilder() {
     });
   };
 
-  const addButton = builder.querySelector("[data-maintenance-add-line]");
-  addButton?.addEventListener("click", () => {
+  const buildLineFromBuilder = () => {
     const title = (field("title")?.value || "").trim();
     const technicianIds = readSelectedTechnicians();
     const { clientId, clientLabel } = readClientSelection();
     const { equipmentLabel, productIds } = readEquipmentSelection();
     const dateValue = (field("scheduled_date")?.value || "").trim();
     const callDateValue = (field("call_date")?.value || "").trim();
+    const hasDraftInput = Boolean(
+      title ||
+      technicianIds.length ||
+      clientLabel ||
+      equipmentLabel ||
+      callDateValue ||
+      (field("location")?.value || "").trim() ||
+      (field("route")?.value || "").trim() ||
+      (field("instructions")?.value || "").trim() ||
+      (field("checklist")?.value || "").trim() ||
+      (field("system_tools")?.value || "").trim() ||
+      (field("equipment_brand")?.value || "").trim() ||
+      (field("equipment_type")?.value || "").trim() ||
+      (field("equipment_identifier")?.value || "").trim() ||
+      (field("intervention_reason")?.value || "").trim()
+    );
     if (!title || !technicianIds.length || !clientLabel || !equipmentLabel || !dateValue) {
-      alert("Renseignez l'intitule, le chef d'equipe, le client/site, les equipements et la date prevue.");
-      return;
+      return {
+        ok: false,
+        hasDraftInput,
+        error: "Renseignez l'intitule, le chef d'equipe, le client/site, les equipements et la date prevue.",
+      };
     }
 
-    const lines = readLines();
-    lines.push({
+    const line = {
       title,
       technician_id: technicianIds[0],
       technician_ids: technicianIds,
-      client_id: clientId,
       client_label: clientLabel,
       client_name: clientLabel.replace(/^#\d+\s*-\s*/, ""),
       product_ids: productIds,
@@ -428,10 +465,57 @@ function initializeMaintenanceProgramBuilder() {
       equipment_type: (field("equipment_type")?.value || "").trim(),
       equipment_identifier: (field("equipment_identifier")?.value || "").trim(),
       intervention_reason: (field("intervention_reason")?.value || "").trim(),
-    });
+    };
+    if (clientId) {
+      line.client_id = clientId;
+    }
+    return { ok: true, hasDraftInput: true, line };
+  };
+
+  const appendBuilderLine = ({ clear = true, focus = true } = {}) => {
+    const result = buildLineFromBuilder();
+    if (!result.ok) {
+      if (result.hasDraftInput) {
+        alert(result.error);
+      }
+      return false;
+    }
+    const lines = readLines();
+    lines.push(result.line);
     target.value = JSON.stringify(lines, null, 2);
-    clearBuilder();
-    target.focus();
+    if (clear) {
+      clearBuilder();
+    }
+    if (focus) {
+      target.focus();
+    }
+    return true;
+  };
+
+  const addButton = builder.querySelector("[data-maintenance-add-line]");
+  addButton?.addEventListener("click", () => {
+    appendBuilderLine();
+  });
+
+  const targetForm = target.closest("form");
+  targetForm?.addEventListener("submit", (event) => {
+    const draft = buildLineFromBuilder();
+    if (draft.hasDraftInput) {
+      event.preventDefault();
+      if (!appendBuilderLine({ clear: true, focus: false })) {
+        return;
+      }
+      targetForm.requestSubmit();
+      return;
+    }
+    const hasRuleFields = targetForm?.hasAttribute("data-maintenance-rule-form") &&
+      ["client", "equipment", "technician", "start_date"].every((name) =>
+        Boolean(targetForm.querySelector(`[name="${name}"]`)?.value)
+      );
+    if (!readLines().length && !hasRuleFields) {
+      event.preventDefault();
+      alert("Ajoutez au moins une ligne de maintenance avant d'enregistrer le programme.");
+    }
   });
 }
 

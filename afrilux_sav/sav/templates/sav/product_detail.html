@@ -122,4 +122,19 @@
         {% endfor %}
     </article>
 </section>
+
+<section class="card">
+    <div class="section-head">
+        <div><p class="eyebrow">GMAO</p><h2>Historique des interventions de maintenance</h2></div>
+        <a class="button button--ghost" href="{% url 'maintenance-interventions' %}?equipment={{ product.pk }}">Voir toutes les interventions</a>
+    </div>
+    {% for maintenance in maintenance_history %}
+        <div class="list-row">
+            <div><strong>{{ maintenance.scheduled_date|date:"d/m/Y" }} - {{ maintenance.type_label }}</strong><p>{{ maintenance.title }}{% if maintenance.technician %} - Technicien : {{ maintenance.technician }}{% endif %}</p></div>
+            <span class="badge badge--{% if maintenance.cmms_status == 'late' %}critical{% elif maintenance.cmms_status == 'done' %}success{% elif maintenance.cmms_status == 'in_progress' %}warning{% else %}neutral{% endif %}">{{ maintenance.cmms_status_label }}</span>
+        </div>
+    {% empty %}
+        <p class="muted">Aucune intervention de maintenance n'est encore rattachee a cet equipement.</p>
+    {% endfor %}
+</section>
 {% endblock %}

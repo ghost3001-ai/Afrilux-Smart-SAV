@@ -1,5 +1,6 @@
 import json
 import re
+from calendar import monthrange
 from datetime import datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
@@ -526,8 +527,8 @@ def validate_finish_intervention(ticket, actor=None, impossible=False, reason=""
 
 
 def close_sav_dossier(ticket, diagnosis, action_taken, parts=None, client_name="", signature=None, photos=None, actor=None):
-    if not can_drive_ticket_workflow(actor, ticket):
-        raise ValueError("Seul le technicien responsable ou le chef d'equipe peut fermer le dossier.")
+    if not can_record_ticket_intervention(actor, ticket):
+        raise ValueError("Seul un technicien affecte au ticket peut fermer le dossier.")
     if ticket.status != Ticket.STATUS_DONE:
         raise ValueError("Le dossier doit etre en statut Termine pour etre clos.")
     if not diagnosis or not action_taken or not client_name or not signature:
@@ -696,7 +697,7 @@ def can_act_on_maintenance_ticket(user, maintenance_ticket):
         return True
     if maintenance_ticket.technician_id == user.id:
         return True
-    return maintenance_ticket.team_members.filter(pk=user.pk).exists()
+    return False
 
 
 def role_workspace_name(user):
@@ -986,8 +987,10 @@ def scope_maintenance_program_queryset(queryset, user):
                 | Q(tickets__team_members__agency=user.agency)
             ).distinct()
         return queryset
-    if getattr(user, "role", "") in set(User.ASSIGNABLE_ROLES):
-        return queryset.filter(Q(tickets__technician=user) | Q(tickets__team_members=user)).distinct()
+    if getattr(user, "role", "") in set(User.TECHNICIAN_SPACE_ROLES) | {User.ROLE_FIELD_TECHNICIAN, User.ROLE_EXPERT}:
+        if user.organization_id:
+            return queryset.filter(organization=user.organization)
+        return queryset
     return queryset.none()
 
 
@@ -1005,8 +1008,14 @@ def scope_maintenance_ticket_queryset(queryset, user):
                 | Q(team_members__organization=user.organization)
             ).distinct()
         return _apply_maintenance_agency_scope(queryset, user)
-    if getattr(user, "role", "") in set(User.ASSIGNABLE_ROLES):
-        return queryset.filter(Q(technician=user) | Q(team_members=user)).distinct()
+    if getattr(user, "role", "") in set(User.TECHNICIAN_SPACE_ROLES) | {User.ROLE_FIELD_TECHNICIAN, User.ROLE_EXPERT}:
+        if user.organization_id:
+            return queryset.filter(
+                Q(organization=user.organization)
+                | Q(client__organization=user.organization)
+                | Q(technician__organization=user.organization)
+            ).distinct()
+        return queryset
     if getattr(user, "role", "") == User.ROLE_CLIENT:
         return queryset.filter(client=user)
     return queryset.none()
@@ -2044,7 +2053,14 @@ def generate_maintenance_report_pdf(report, persist=True, force=False):
 
     maintenance_ticket = report.maintenance_ticket
     products = list(maintenance_ticket.products.all())
-    product_label = ", ".join(product.serial_number for product in products) if products else "-"
+    product_label = (
+        ", ".join(
+            f"{product.name} / {product.serial_number}".strip(" /")
+            for product in products
+        )
+        if products
+        else maintenance_ticket.equipment_identifier or "-"
+    )
     parts_text = report.parts_used or _part_usage_records_summary(report.part_usages.select_related("spare_part").all()) or "-"
     parts_status = report.parts_status or {}
     intervention_types = ", ".join(str(item).replace("_", " ") for item in report.intervention_types or []) or "-"
@@ -3351,7 +3367,7 @@ def _business_domain_for_maintenance_service(service):
 
 def _resolve_maintenance_client(line, *, program, index):
     client_id = line.get("client_id") or line.get("client")
-    if client_id:
+    if client_id not in (None, "", 0, "0"):
         client = User.objects.filter(pk=client_id, role=User.ROLE_CLIENT, is_active=True).first()
         if client is None:
             raise ValueError(f"Ligne {index}: client introuvable.")
@@ -3392,14 +3408,99 @@ def _resolve_maintenance_client(line, *, program, index):
     )
 
 
+def _is_placeholder_maintenance_line(line):
+    if not isinstance(line, dict):
+        return False
+    title = str(line.get("title") or "").strip().lower()
+    client_label = str(line.get("client_label") or "").strip().lower()
+    equipment_label = str(line.get("equipment_label") or "").strip().lower()
+    client_id = line.get("client_id") or line.get("client")
+    technician_ids = line.get("technician_ids") or line.get("technicien_ids") or []
+    product_ids = line.get("product_ids") or line.get("products") or line.get("equipment_ids") or []
+    return (
+        title == "entretien preventif equipement client"
+        and (not client_label or client_label == "client / site a renseigner")
+        and (not equipment_label or equipment_label == "equipement a renseigner")
+        and client_id in (None, "", 0, "0")
+        and not technician_ids
+        and not product_ids
+    )
+
+
+def _add_months(value, months):
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    return value.replace(year=year, month=month, day=min(value.day, monthrange(year, month)[1]))
+
+
+def _program_rule_dates(program):
+    if not program.is_rule_based:
+        return []
+    end_date = program.end_date or (program.start_date + timedelta(days=365))
+    interval = max(1, program.frequency_interval or 1)
+    current = program.start_date
+    dates = []
+    while current <= end_date:
+        dates.append(current)
+        if len(dates) > 1000:
+            raise ValueError("La periode du programme genere trop d'interventions. Reduisez la plage ou augmentez l'intervalle.")
+        if program.frequency == MaintenanceProgram.FREQUENCY_DAILY:
+            current += timedelta(days=interval)
+        elif program.frequency == MaintenanceProgram.FREQUENCY_WEEKLY:
+            current += timedelta(weeks=interval)
+        else:
+            months = {
+                MaintenanceProgram.FREQUENCY_MONTHLY: 1,
+                MaintenanceProgram.FREQUENCY_QUARTERLY: 3,
+                MaintenanceProgram.FREQUENCY_SEMIANNUAL: 6,
+                MaintenanceProgram.FREQUENCY_ANNUAL: 12,
+            }.get(program.frequency, 1)
+            current = _add_months(current, months * interval)
+    return dates
+
+
+def _rule_task_lines(program):
+    periodicity = {
+        MaintenanceProgram.FREQUENCY_QUARTERLY: MaintenanceTicket.PERIOD_QUARTERLY,
+        MaintenanceProgram.FREQUENCY_SEMIANNUAL: MaintenanceTicket.PERIOD_SEMIANNUAL,
+        MaintenanceProgram.FREQUENCY_ANNUAL: MaintenanceTicket.PERIOD_ANNUAL,
+    }.get(program.frequency, MaintenanceTicket.PERIOD_MONTHLY)
+    maintenance_type = {
+        MaintenanceProgram.TYPE_PREVENTIVE: MaintenanceTicket.TYPE_PREVENTIVE,
+        MaintenanceProgram.TYPE_INSPECTION: MaintenanceTicket.TYPE_INSPECTION,
+        MaintenanceProgram.TYPE_CALIBRATION: MaintenanceTicket.TYPE_CONTROL,
+        MaintenanceProgram.TYPE_CONTROL: MaintenanceTicket.TYPE_CONTROL,
+    }[program.maintenance_type]
+    technician_ids = [program.technician_id, *program.team_members.values_list("id", flat=True)]
+    title = program.title or f"{program.get_maintenance_type_display()} - {program.equipment.name}"
+    lines = []
+    for scheduled_day in _program_rule_dates(program):
+        scheduled_at = timezone.make_aware(datetime.combine(scheduled_day, program.scheduled_time))
+        lines.append({
+            "title": title,
+            "technician_ids": technician_ids,
+            "client_id": program.client_id,
+            "product_ids": [program.equipment_id],
+            "equipment_label": str(program.equipment),
+            "scheduled_date": scheduled_at.isoformat(),
+            "periodicity": periodicity,
+            "maintenance_type": maintenance_type,
+            "priority": program.priority,
+            "checklist": program.checklist,
+            "instructions": f"Duree estimee : {program.estimated_duration_minutes} min.",
+        })
+    return lines
+
+
 def publish_maintenance_program(program, *, actor=None):
-    if program.status == MaintenanceProgram.STATUS_PUBLISHED and program.tickets.exists():
+    if program.status == MaintenanceProgram.STATUS_PUBLISHED and program.tickets.exists() and not program.is_rule_based:
         return list(program.tickets.select_related("client", "technician").prefetch_related("products", "team_members"))
     if program.status == MaintenanceProgram.STATUS_ARCHIVED:
         raise ValueError("Un programme archive ne peut pas etre publie.")
 
-    # Normalisation / parsing des task_lines
-    task_lines = program.task_lines
+    # Programme recurrent moderne : les interventions sont derivees de la regle.
+    task_lines = _rule_task_lines(program) if program.is_rule_based else program.task_lines
     if isinstance(task_lines, str):
         raw = task_lines.strip()
         if raw:
@@ -3412,6 +3513,9 @@ def publish_maintenance_program(program, *, actor=None):
 
     if not isinstance(task_lines, list) or not task_lines:
         raise ValueError("Ajoutez au moins une ligne de maintenance avant publication (task_lines vide ou non-list).")
+    task_lines = [line for line in task_lines if not _is_placeholder_maintenance_line(line)]
+    if not task_lines:
+        raise ValueError("Ajoutez au moins une ligne de maintenance complete avant publication.")
 
     created_tickets = []
     with transaction.atomic():
@@ -3490,6 +3594,14 @@ def publish_maintenance_program(program, *, actor=None):
                 line.get("scheduled_date") or line.get("due_date") or line.get("date_prevue") or line.get("date"),
                 "date_prevue",
             )
+            existing_ticket = MaintenanceTicket.objects.filter(
+                program=program,
+                title=title[:255],
+                scheduled_date=scheduled_date,
+            ).first()
+            if existing_ticket:
+                created_tickets.append(existing_ticket)
+                continue
             ticket = MaintenanceTicket.objects.create(
                 organization=program.organization,
                 program=program,
@@ -3499,6 +3611,7 @@ def publish_maintenance_program(program, *, actor=None):
                 title=title[:255],
                 service=str(line.get("service") or program.service or MaintenanceProgram.SERVICE_IT).strip(),
                 periodicity=str(line.get("periodicity") or line.get("periodicite") or MaintenanceTicket.PERIOD_MONTHLY).strip(),
+                maintenance_type=str(line.get("maintenance_type") or line.get("type_maintenance") or MaintenanceTicket.TYPE_PREVENTIVE).strip(),
                 scheduled_date=scheduled_date,
                 initial_scheduled_date=scheduled_date,
                 checklist=_coerce_json_list(line.get("checklist") or line.get("check_list"), "checklist"),
@@ -3519,6 +3632,8 @@ def publish_maintenance_program(program, *, actor=None):
                     or ""
                 ).strip()[:120],
                 intervention_reason=str(line.get("intervention_reason") or line.get("motif") or title).strip(),
+                estimated_cost=Decimal(str(line.get("estimated_cost") or line.get("cout_prevu") or "0")),
+                actual_cost=Decimal(str(line.get("actual_cost") or line.get("cout_reel") or "0")),
                 status=MaintenanceTicket.STATUS_PLANNED,
             )
             if products:
@@ -3529,7 +3644,9 @@ def publish_maintenance_program(program, *, actor=None):
 
         program.status = MaintenanceProgram.STATUS_PUBLISHED
         program.published_at = timezone.now()
-        program.save(update_fields=["status", "published_at", "updated_at"])
+        upcoming_dates = [scheduled for scheduled in _program_rule_dates(program) if scheduled >= timezone.localdate()]
+        program.next_generation_date = upcoming_dates[0] if upcoming_dates else None
+        program.save(update_fields=["status", "published_at", "next_generation_date", "updated_at"])
 
     log_audit_event(
         actor=actor,
@@ -3715,6 +3832,7 @@ def close_maintenance_ticket(
     actual_finished_at=None,
     checklist_completed=None,
     observations="",
+    actual_cost=0,
     work_to_plan="",
     parts_used="",
     parts_status=None,
@@ -3794,7 +3912,8 @@ def close_maintenance_ticket(
     maintenance_ticket.status = final_status
     maintenance_ticket.started_at = maintenance_ticket.started_at or actual_started_at
     maintenance_ticket.finished_at = actual_finished_at
-    update_fields = ["status", "started_at", "finished_at", "updated_at"]
+    maintenance_ticket.actual_cost = Decimal(str(actual_cost or "0"))
+    update_fields = ["status", "started_at", "finished_at", "actual_cost", "updated_at"]
     if final_status == MaintenanceTicket.STATUS_POSTPONED:
         parsed_date = _parse_datetime_value(new_date, "nouvelle_date")
         maintenance_ticket.postponed_to = parsed_date

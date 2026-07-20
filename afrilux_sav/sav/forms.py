@@ -1,4 +1,5 @@
 import json
+import uuid
 
 from django import forms
 from django.contrib.auth.forms import AuthenticationForm
@@ -6,6 +7,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db.models import Q
 from django.utils import timezone
+from django.utils.text import slugify
 
 from .file_validation import MAX_TICKET_ATTACHMENT_BYTES, validate_ticket_attachment_file
 from .models import (
@@ -973,41 +975,84 @@ class CreditAccountForm(forms.Form):
 
 
 class MaintenanceProgramForm(forms.ModelForm):
+    client_label = forms.CharField(label="Client", max_length=255, required=False)
+    equipment_label = forms.CharField(label="Équipement", max_length=255, required=False)
+    required_parts_label = forms.CharField(label="Pièces nécessaires", max_length=500, required=False)
+    checklist = forms.CharField(label="Checklist", required=False, widget=forms.Textarea(attrs={"rows": 5, "placeholder": "Une tache par ligne"}))
     class Meta:
         model = MaintenanceProgram
-        fields = ["title", "service", "period_type", "month", "quarter", "year", "task_lines"]
+        fields = [
+            "title", "service", "client", "equipment", "technician", "team_members", "maintenance_type", "priority",
+            "start_date", "end_date", "frequency", "frequency_interval", "scheduled_time", "estimated_duration_minutes",
+            "checklist", "required_parts", "notify_email", "notify_sms", "notify_internal",
+            "period_type", "month", "quarter", "year", "task_lines",
+        ]
         widgets = {
             "task_lines": forms.Textarea(attrs={"rows": 12}),
+            "start_date": forms.DateInput(attrs={"type": "date"}),
+            "end_date": forms.DateInput(attrs={"type": "date"}),
+            "scheduled_time": forms.TimeInput(attrs={"type": "time"}),
+            "checklist": forms.Textarea(attrs={"rows": 5, "placeholder": "Une tache par ligne"}),
         }
 
     def __init__(self, *args, user=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.user = user
         self.fields["title"].required = False
+        self.fields["title"].label = "Nom du programme"
+        self.fields["client"].label = "Client"
+        self.fields["equipment"].label = "Équipement"
+        self.fields["technician"].label = "Technicien responsable"
+        self.fields["team_members"].label = "Autres membres de l'équipe (facultatif)"
+        self.fields["maintenance_type"].label = "Type de maintenance"
+        self.fields["priority"].label = "Priorité"
+        self.fields["start_date"].label = "Date de début"
+        self.fields["end_date"].label = "Date de fin (facultatif)"
+        self.fields["frequency"].label = "Fréquence"
+        self.fields["frequency_interval"].label = "Répéter tous les"
+        self.fields["scheduled_time"].label = "Heure prévue"
+        self.fields["estimated_duration_minutes"].label = "Durée estimée (minutes)"
+        self.fields["checklist"].label = "Checklist"
+        self.fields["required_parts"].label = "Pièces nécessaires (facultatif)"
+        self.fields["notify_email"].label = "Envoyer un e-mail"
+        self.fields["notify_sms"].label = "Envoyer un SMS"
+        self.fields["notify_internal"].label = "Créer une notification interne"
         self.fields["month"].required = False
         self.fields["quarter"].required = False
+        self.fields["task_lines"].required = False
+        self.fields["client"].required = False
+        self.fields["equipment"].required = False
+        self.fields["technician"].required = False
+        self.fields["end_date"].required = False
+        self.fields["checklist"].required = False
+        self.fields["client"].widget = forms.HiddenInput()
+        self.fields["equipment"].widget = forms.HiddenInput()
+        self.fields["required_parts"].widget = forms.HiddenInput()
+        self.fields["team_members"].widget = forms.CheckboxSelectMultiple()
+        clients = User.objects.filter(role=User.ROLE_CLIENT, is_active=True)
+        technicians = User.objects.filter(role__in=User.TECHNICIAN_SPACE_ROLES, is_active=True)
+        equipment = Product.objects.all()
+        parts = SparePart.objects.filter(is_active=True)
+        if user and user.is_authenticated and not user.is_superuser and user.organization_id:
+            clients = clients.filter(organization=user.organization)
+            technicians = technicians.filter(organization=user.organization)
+            equipment = equipment.filter(organization=user.organization)
+            parts = parts.filter(Q(organization=user.organization) | Q(organization__isnull=True))
+        self.fields["client"].queryset = clients.order_by("company_name", "username")
+        self.fields["technician"].queryset = technicians.order_by("first_name", "last_name")
+        self.fields["team_members"].queryset = technicians.order_by("first_name", "last_name")
+        self.fields["equipment"].queryset = equipment.select_related("client").order_by("name")
+        self.fields["required_parts"].queryset = parts.order_by("name", "reference")
+        if self.instance.pk:
+            self.initial.setdefault("client_label", self.instance.client.company_name or str(self.instance.client) if self.instance.client_id else "")
+            self.initial.setdefault("equipment_label", self.instance.equipment.name if self.instance.equipment_id else "")
+            self.initial.setdefault("required_parts_label", ", ".join(self.instance.required_parts.values_list("name", flat=True)))
         self.fields["task_lines"].help_text = (
             "Liste JSON des maintenances a publier. Champs: title, technician_ids, client_label, "
             "equipment_label, product_ids, scheduled_date (date et heure ISO), periodicity, checklist, instructions."
         )
         if not self.initial.get("task_lines") and not self.instance.pk:
-            self.initial["task_lines"] = json.dumps(
-                [
-                    {
-                        "title": "Entretien preventif equipement client",
-                        "technician_ids": [],
-                        "client_label": "Client / site a renseigner",
-                        "equipment_label": "Equipement a renseigner",
-                        "product_ids": [],
-                        "scheduled_date": timezone.localtime().replace(second=0, microsecond=0).isoformat(timespec="minutes"),
-                        "periodicity": MaintenanceTicket.PERIOD_MONTHLY,
-                        "checklist": ["Controle visuel", "Nettoyage", "Test fonctionnement"],
-                        "instructions": "Verifier les points critiques et signaler toute anomalie.",
-                        "priority": Ticket.PRIORITY_NORMAL,
-                    }
-                ],
-                indent=2,
-            )
+            self.initial["task_lines"] = "[]"
 
     def clean_month(self):
         value = self.cleaned_data.get("month")
@@ -1030,17 +1075,92 @@ class MaintenanceProgramForm(forms.ModelForm):
                 task_lines = json.loads(value or "[]")
             except json.JSONDecodeError as exc:
                 raise ValidationError("Les lignes de maintenance doivent etre un JSON valide.") from exc
-        if not isinstance(task_lines, list) or not task_lines:
+        if not isinstance(task_lines, list):
             raise ValidationError("Ajoutez au moins une ligne de maintenance.")
         return task_lines
+
+    def clean_checklist(self):
+        value = self.cleaned_data.get("checklist") or []
+        if isinstance(value, list):
+            return value
+        try:
+            parsed = json.loads(value)
+        except (TypeError, json.JSONDecodeError):
+            parsed = [line.strip() for line in str(value).splitlines() if line.strip()]
+        if not isinstance(parsed, list):
+            raise ValidationError("La check-list doit etre une liste ou une tache par ligne.")
+        return parsed
+
+    def _resolve_client_label(self, value):
+        label = " ".join((value or "").split())
+        if not label:
+            return None
+        identifier = label.split(" - ", 1)[0].lstrip("#") if label.startswith("#") else ""
+        clients = self.fields["client"].queryset
+        client = clients.filter(pk=identifier).first() if identifier.isdigit() else None
+        client = client or clients.filter(Q(company_name__iexact=label) | Q(username__iexact=label)).first()
+        if client:
+            return client
+        organization = getattr(self.user, "organization", None)
+        username = slugify(label)[:100] or f"client-maintenance-{uuid.uuid4().hex[:8]}"
+        base_username = username
+        suffix = 1
+        while User.objects.filter(username=username).exists():
+            suffix += 1
+            username = f"{base_username[:90]}-{suffix}"
+        return User.objects.create(username=username, company_name=label[:255], organization=organization, role=User.ROLE_CLIENT, is_active=True)
+
+    def _resolve_equipment_label(self, value, client):
+        label = " ".join((value or "").split())
+        if not label or not client:
+            return None
+        identifier = label.split(" - ", 1)[0].lstrip("#") if label.startswith("#") else ""
+        equipment = self.fields["equipment"].queryset
+        product = equipment.filter(pk=identifier).first() if identifier.isdigit() else None
+        product = product or equipment.filter(client=client).filter(Q(name__iexact=label) | Q(serial_number__iexact=label)).first()
+        if product:
+            return product
+        serial_number = f"SAISIE-{uuid.uuid4().hex[:10].upper()}"
+        return Product.objects.create(client=client, organization=client.organization, name=label[:255], serial_number=serial_number)
+
+    def _resolve_required_parts(self, value):
+        labels = [" ".join(item.split()) for item in (value or "").split(",") if item.strip()]
+        resolved = []
+        for label in labels:
+            part = self.fields["required_parts"].queryset.filter(Q(name__iexact=label) | Q(reference__iexact=label)).first()
+            if not part:
+                reference = f"SAISIE-{uuid.uuid4().hex[:8].upper()}"
+                part = SparePart.objects.create(name=label[:180], reference=reference, organization=getattr(self.user, "organization", None))
+            resolved.append(part)
+        return resolved
 
     def clean(self):
         cleaned_data = super().clean()
         period_type = cleaned_data.get("period_type")
-        if period_type == MaintenanceProgram.PERIOD_MONTHLY and not cleaned_data.get("month"):
+        client = self._resolve_client_label(cleaned_data.get("client_label"))
+        equipment = self._resolve_equipment_label(cleaned_data.get("equipment_label"), client)
+        cleaned_data["client"] = client
+        cleaned_data["equipment"] = equipment
+        cleaned_data["required_parts"] = self._resolve_required_parts(cleaned_data.get("required_parts_label"))
+        is_rule = all(cleaned_data.get(field) for field in ("client", "equipment", "technician", "start_date"))
+        if not cleaned_data.get("client"):
+            self.add_error("client_label", "Le client est obligatoire.")
+        if not cleaned_data.get("equipment"):
+            self.add_error("equipment_label", "L'equipement est obligatoire.")
+        if not cleaned_data.get("technician"):
+            self.add_error("technician", "Le technicien responsable est obligatoire.")
+        if not cleaned_data.get("start_date"):
+            self.add_error("start_date", "La date de debut est obligatoire.")
+        if not is_rule and period_type == MaintenanceProgram.PERIOD_MONTHLY and not cleaned_data.get("month"):
             self.add_error("month", "Le mois est obligatoire pour un programme mensuel.")
-        if period_type == MaintenanceProgram.PERIOD_QUARTERLY and not cleaned_data.get("quarter"):
+        if not is_rule and period_type == MaintenanceProgram.PERIOD_QUARTERLY and not cleaned_data.get("quarter"):
             self.add_error("quarter", "Le trimestre est obligatoire pour un programme trimestriel.")
+        if not is_rule and self.instance.pk and self.instance.task_lines and not cleaned_data.get("task_lines"):
+            self.add_error("task_lines", "Les lignes de l'ancien programme ne peuvent pas etre vides.")
+        if cleaned_data.get("equipment") and cleaned_data.get("client") and cleaned_data["equipment"].client_id != cleaned_data["client"].id:
+            self.add_error("equipment", "L'equipement doit appartenir au client selectionne.")
+        if cleaned_data.get("end_date") and cleaned_data.get("start_date") and cleaned_data["end_date"] < cleaned_data["start_date"]:
+            self.add_error("end_date", "La date de fin doit etre posterieure a la date de debut.")
         return cleaned_data
 
 
@@ -1075,6 +1195,7 @@ class MaintenanceClosureForm(forms.Form):
         help_text="JSON ou une operation par ligne.",
     )
     observations = forms.CharField(label="Observations techniques", widget=forms.Textarea(attrs={"rows": 4}))
+    actual_cost = forms.DecimalField(label="Cout reel de l'intervention (XAF)", required=False, min_value=0, decimal_places=2, max_digits=12, initial=0)
     parts_used = forms.CharField(label="Pieces / consommables utilises", required=False, widget=forms.Textarea(attrs={"rows": 2}))
     parts_replaceable = forms.BooleanField(label="Pieces remplacables", required=False)
     parts_addable = forms.BooleanField(label="Pieces ajoutables", required=False)
@@ -1131,6 +1252,8 @@ class MaintenanceClosureForm(forms.Form):
         now = timezone.localtime()
         self.initial.setdefault("actual_started_at", maintenance_ticket.started_at if maintenance_ticket else now)
         self.initial.setdefault("actual_finished_at", now)
+        if maintenance_ticket:
+            self.initial.setdefault("actual_cost", maintenance_ticket.actual_cost)
         if maintenance_ticket and not self.initial.get("checklist_completed"):
             self.initial["checklist_completed"] = json.dumps(maintenance_ticket.checklist or [], indent=2)
         self.initial.setdefault("intervention_types", ["maintenance"])
@@ -1194,6 +1317,34 @@ class MaintenanceCancelForm(forms.Form):
         label="Motif d'annulation",
         widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Client inaccessible, contrat suspendu, intervention annulee..."}),
     )
+
+
+class SparePartForm(forms.ModelForm):
+    class Meta:
+        model = SparePart
+        fields = [
+            "name", "reference", "category", "equipment_category", "description", "unit",
+            "stock_quantity", "minimum_stock", "unit_price", "supplier", "is_active",
+        ]
+        widgets = {"description": forms.Textarea(attrs={"rows": 3})}
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        categories = EquipmentCategory.objects.filter(is_active=True)
+        if user and user.is_authenticated and not user.is_superuser and user.organization_id:
+            categories = categories.filter(organization=user.organization)
+        self.fields["equipment_category"].queryset = categories.order_by("name")
+        self.fields["equipment_category"].required = False
+        self.fields["category"].required = False
+        self.fields["description"].required = False
+        self.fields["supplier"].required = False
+
+
+class MaintenanceSettingsForm(forms.ModelForm):
+    class Meta:
+        model = Organization
+        fields = ["support_email", "support_phone", "reporting_emails", "ticket_retention_years"]
+        widgets = {"reporting_emails": forms.Textarea(attrs={"rows": 3})}
 
 
 class ProductForm(forms.ModelForm):

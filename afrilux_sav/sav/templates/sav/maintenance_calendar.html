@@ -1,0 +1,11 @@
+{% extends "sav/base.html" %}
+{% block title %}Calendrier | Maintenance SAV{% endblock %}
+{% block content %}
+<div class="cmms-page">
+{% include "sav/includes/maintenance_nav.html" %}
+<section class="cmms-header cmms-header--calendar"><div><p class="cmms-header__label">PLANIFICATION TERRAIN</p><h1>Calendrier des interventions</h1><p>Consultez les interventions par mois, semaine ou liste.</p></div><div class="cmms-header__actions"><a class="button button--ghost" href="{% url 'maintenance-interventions' %}"><i class="bi bi-list-task"></i> Vue tableau</a></div></section>
+<section class="cmms-calendar-layout"><aside class="cmms-calendar-sidebar"><h2>Legende</h2><p>Les couleurs indiquent le statut de chaque intervention.</p><ul><li><i class="cmms-status-dot cmms-status-dot--planned"></i> Prevue</li><li><i class="cmms-status-dot cmms-status-dot--progress"></i> En cours</li><li><i class="cmms-status-dot cmms-status-dot--done"></i> Terminee</li><li><i class="cmms-status-dot cmms-status-dot--late"></i> En retard</li></ul><div class="cmms-calendar-tip"><i class="bi bi-info-circle"></i><span>Cliquez sur une intervention pour retrouver ses informations dans la liste.</span></div></aside><section class="cmms-calendar-surface"><div id="maintenanceCalendar" class="cmms-calendar"></div></section></section>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+<script>document.addEventListener('DOMContentLoaded',function(){const node=document.getElementById('maintenanceCalendar');if(!window.FullCalendar){node.innerHTML='<p class="cmms-list-empty">Calendrier indisponible : verifiez votre connexion Internet.</p>';return;}new FullCalendar.Calendar(node,{initialView:'dayGridMonth',locale:'fr',height:'auto',firstDay:1,buttonText:{today:"Aujourd'hui",month:'Mois',week:'Semaine',list:'Liste'},headerToolbar:{left:'prev,next today',center:'title',right:'dayGridMonth,timeGridWeek,listWeek'},events:{{ calendar_events|safe }},eventDisplay:'block',eventTimeFormat:{hour:'2-digit',minute:'2-digit',hour12:false}}).render();});</script>
+{% endblock %}

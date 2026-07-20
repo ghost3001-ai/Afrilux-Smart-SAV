@@ -4,6 +4,7 @@ from datetime import timedelta
 from email.message import EmailMessage
 from unittest.mock import patch
 
+from django.core import mail
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.forms import HiddenInput
@@ -15,7 +16,7 @@ from rest_framework.test import APIClient
 
 from .ai import LLMCompletion
 from .comms import DeliveryResult, create_external_channel_notifications
-from .forms import TicketCreateForm
+from .forms import MaintenanceProgramForm, TicketCreateForm
 from .models import (
     AccountCredit,
     Agency,
@@ -50,7 +51,7 @@ from .models import (
     User,
     WorkflowExecution,
 )
-from .services import dispatch_due_reports, dispatch_maintenance_operational_notifications
+from .services import close_sav_dossier, dispatch_due_reports, dispatch_maintenance_operational_notifications, publish_maintenance_program
 
 
 class SavPlatformTests(TestCase):
@@ -1847,6 +1848,46 @@ class SavPlatformTests(TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertFalse(Message.objects.filter(ticket=ticket, content="Tentative auditeur").exists())
 
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        EMAIL_HOST="smtp.test.local",
+        DEFAULT_FROM_EMAIL="noreply@afrilux.test",
+    )
+    def test_web_public_message_to_specific_recipient_sends_email(self):
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            assigned_agent=self.agent,
+            title="Message email sortant",
+            description="Verifier l'envoi email depuis le portail.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            status=Ticket.STATUS_IN_PROGRESS,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+        self.client.force_login(self.manager)
+
+        response = self.client.post(
+            reverse("ticket-message-create", args=[ticket.pk]),
+            {
+                "recipient": self.client_user.pk,
+                "message_type": Message.TYPE_PUBLIC,
+                "channel": Message.CHANNEL_EMAIL,
+                "content": "Votre intervention est bien programmee.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, [self.client_user.email])
+        self.assertTrue(
+            Notification.objects.filter(
+                ticket=ticket,
+                recipient=self.client_user,
+                channel=Notification.CHANNEL_EMAIL,
+                status=Notification.STATUS_SENT,
+            ).exists()
+        )
+
     def test_client_cannot_patch_ticket_directly(self):
         ticket = Ticket.objects.create(
             client=self.client_user,
@@ -3124,6 +3165,40 @@ class SavPlatformTests(TestCase):
         self.assertEqual(ticket.status, Ticket.STATUS_TEAM_READY)
         self.assertEqual(list(ticket.team_members.all()), [member])
 
+    def test_web_assign_team_redirects_without_key_error(self):
+        member = User.objects.create_user(
+            username="team_member_web",
+            password="secret123",
+            organization=self.organization,
+            role=User.ROLE_TECHNICIAN,
+        )
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            title="Equipe depuis portail",
+            description="Le bouton Constituer equipe ne doit pas lever d'erreur.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            status=Ticket.STATUS_PENDING_ASSIGNMENT,
+            priority=Ticket.PRIORITY_HIGH,
+        )
+        self.client.force_login(self.manager)
+
+        response = self.client.post(
+            reverse("ticket-assign-team-web", args=[ticket.pk]),
+            {
+                "leader": self.technician.pk,
+                "members": [member.pk],
+                "note": "",
+                "force_reason": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        ticket.refresh_from_db()
+        self.assertTrue(ticket.is_team_intervention)
+        self.assertEqual(ticket.team_leader, self.technician)
+        self.assertEqual(ticket.status, Ticket.STATUS_TEAM_READY)
+
     def test_ticket_reference_uses_cdc_format(self):
         ticket = Ticket.objects.create(
             client=self.client_user,
@@ -3344,6 +3419,64 @@ class SavPlatformTests(TestCase):
         self.assertEqual(operation.organization, self.organization)
         self.assertEqual(operation.status, OfflineSyncOperation.STATUS_PENDING)
 
+    def test_rule_based_program_generates_monthly_interventions(self):
+        start_date = timezone.localdate().replace(day=1)
+        program = MaintenanceProgram.objects.create(
+            organization=self.organization,
+            responsible=self.manager,
+            client=self.client_user,
+            equipment=self.product,
+            technician=self.technician,
+            title="Entretien mensuel onduleur",
+            start_date=start_date,
+            end_date=start_date + timedelta(days=95),
+            frequency=MaintenanceProgram.FREQUENCY_MONTHLY,
+            checklist=["Controle", "Nettoyage"],
+        )
+
+        tickets = publish_maintenance_program(program, actor=self.manager)
+
+        self.assertGreaterEqual(len(tickets), 3)
+        self.assertTrue(all(ticket.program_id == program.id for ticket in tickets))
+        self.assertTrue(all(ticket.maintenance_type == MaintenanceTicket.TYPE_PREVENTIVE for ticket in tickets))
+        self.assertEqual(MaintenanceTicket.objects.filter(program=program).count(), len(tickets))
+
+    def test_program_form_accepts_typed_client_equipment_parts_and_team(self):
+        self.expert.role = User.ROLE_TECHNICIAN
+        self.expert.save(update_fields=["role"])
+        form = MaintenanceProgramForm(
+            data={
+                "title": "Entretien climatiseur",
+                "service": MaintenanceProgram.SERVICE_COOLING,
+                "client_label": self.client_user.company_name,
+                "equipment_label": self.product.name,
+                "technician": self.technician.pk,
+                "team_members": [self.expert.pk],
+                "maintenance_type": MaintenanceProgram.TYPE_PREVENTIVE,
+                "priority": Ticket.PRIORITY_NORMAL,
+                "start_date": timezone.localdate().isoformat(),
+                "frequency": MaintenanceProgram.FREQUENCY_MONTHLY,
+                "frequency_interval": 1,
+                "scheduled_time": "08:00",
+                "estimated_duration_minutes": 60,
+                "checklist": "Nettoyage\nControle visuel",
+                "required_parts_label": "Filtre air, huile",
+                "notify_email": "on",
+                "notify_internal": "on",
+                "period_type": MaintenanceProgram.PERIOD_MONTHLY,
+                "year": timezone.localdate().year,
+                "task_lines": "[]",
+            },
+            user=self.manager,
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        program = form.save()
+        self.assertEqual(program.client, self.client_user)
+        self.assertEqual(program.equipment, self.product)
+        self.assertEqual(list(program.team_members.all()), [self.expert])
+        self.assertEqual(program.required_parts.count(), 2)
+
     def test_maintenance_program_publish_creates_planned_tickets(self):
         program = MaintenanceProgram.objects.create(
             organization=self.organization,
@@ -3377,7 +3510,124 @@ class SavPlatformTests(TestCase):
         self.assertEqual(maintenance_ticket.technician, self.technician)
         self.assertEqual(list(maintenance_ticket.products.all()), [self.product])
 
-    def test_maintenance_program_publish_creates_team_ticket_with_datetime(self):
+    def test_maintenance_program_publish_accepts_free_client_site_and_equipment(self):
+        program = MaintenanceProgram.objects.create(
+            organization=self.organization,
+            responsible=self.manager,
+            service=MaintenanceProgram.SERVICE_COOLING,
+            period_type=MaintenanceProgram.PERIOD_MONTHLY,
+            month=timezone.localdate().month,
+            year=timezone.localdate().year,
+            task_lines=[
+                {
+                    "title": "Maintenance climatiseur agence",
+                    "technician_ids": [self.technician.pk],
+                    "client_id": 0,
+                    "client_label": "AFRILUX Bonaberi - Salle technique",
+                    "equipment_label": "Climatiseur split mural LG / SN-LIBRE-001",
+                    "scheduled_date": (timezone.localdate() + timedelta(days=2)).isoformat(),
+                    "periodicity": MaintenanceTicket.PERIOD_MONTHLY,
+                    "checklist": ["Controle visuel", "Nettoyage filtres", "Test froid"],
+                    "instructions": "Renseigner la fiche intervention apres la maintenance.",
+                    "priority": Ticket.PRIORITY_NORMAL,
+                }
+            ],
+        )
+
+        response = self.api.post(reverse("sav_api:maintenance-program-publier", args=[program.pk]), {}, format="json")
+
+        self.assertEqual(response.status_code, 201)
+        program.refresh_from_db()
+        self.assertEqual(program.status, MaintenanceProgram.STATUS_PUBLISHED)
+        maintenance_ticket = MaintenanceTicket.objects.get(program=program)
+        self.assertEqual(maintenance_ticket.client.company_name, "AFRILUX Bonaberi - Salle technique")
+        self.assertEqual(maintenance_ticket.equipment_identifier, "Climatiseur split mural LG / SN-LIBRE-001")
+
+    def test_maintenance_program_publish_ignores_old_placeholder_line(self):
+        program = MaintenanceProgram.objects.create(
+            organization=self.organization,
+            responsible=self.manager,
+            service=MaintenanceProgram.SERVICE_IT,
+            period_type=MaintenanceProgram.PERIOD_MONTHLY,
+            month=timezone.localdate().month,
+            year=timezone.localdate().year,
+            task_lines=[
+                {
+                    "title": "Entretien preventif equipement client",
+                    "technician_ids": [],
+                    "client_id": "",
+                    "product_ids": [],
+                    "scheduled_date": timezone.localtime().replace(second=0, microsecond=0).isoformat(timespec="minutes"),
+                    "periodicity": MaintenanceTicket.PERIOD_MONTHLY,
+                    "checklist": ["Controle visuel", "Nettoyage", "Test fonctionnement"],
+                    "instructions": "Verifier les points critiques et signaler toute anomalie.",
+                    "priority": Ticket.PRIORITY_NORMAL,
+                },
+                {
+                    "title": "Maintenance valide",
+                    "technician_ids": [self.technician.pk],
+                    "client_label": "Site libre Douala",
+                    "equipment_label": "Groupe electrogene GE-01",
+                    "scheduled_date": (timezone.localdate() + timedelta(days=2)).isoformat(),
+                    "periodicity": MaintenanceTicket.PERIOD_MONTHLY,
+                    "checklist": ["Controle huile"],
+                    "priority": Ticket.PRIORITY_NORMAL,
+                },
+            ],
+        )
+
+        response = self.api.post(reverse("sav_api:maintenance-program-publier", args=[program.pk]), {}, format="json")
+
+        self.assertEqual(response.status_code, 201)
+        program.refresh_from_db()
+        self.assertEqual(program.status, MaintenanceProgram.STATUS_PUBLISHED)
+        self.assertEqual(MaintenanceTicket.objects.filter(program=program).count(), 1)
+        self.assertEqual(MaintenanceTicket.objects.get(program=program).title, "Maintenance valide")
+
+    def test_draft_maintenance_program_can_be_edited_from_web(self):
+        program = MaintenanceProgram.objects.create(
+            organization=self.organization,
+            responsible=self.manager,
+            service=MaintenanceProgram.SERVICE_IT,
+            period_type=MaintenanceProgram.PERIOD_MONTHLY,
+            month=timezone.localdate().month,
+            year=timezone.localdate().year,
+            task_lines=[],
+        )
+        self.client.force_login(self.manager)
+
+        response = self.client.post(
+            reverse("maintenance-program-update", args=[program.pk]),
+            {
+                "title": "Programme corrige",
+                "service": MaintenanceProgram.SERVICE_IT,
+                "period_type": MaintenanceProgram.PERIOD_MONTHLY,
+                "month": timezone.localdate().month,
+                "quarter": "",
+                "year": timezone.localdate().year,
+                "task_lines": json.dumps(
+                    [
+                        {
+                            "title": "Maintenance corrigee",
+                            "technician_ids": [self.technician.pk],
+                            "client_label": "Site corrige",
+                            "equipment_label": "Equipement corrige",
+                            "scheduled_date": (timezone.localdate() + timedelta(days=2)).isoformat(),
+                            "periodicity": MaintenanceTicket.PERIOD_MONTHLY,
+                            "checklist": ["Controle visuel"],
+                            "priority": Ticket.PRIORITY_NORMAL,
+                        }
+                    ]
+                ),
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        program.refresh_from_db()
+        self.assertEqual(program.title, "Programme corrige")
+        self.assertEqual(program.task_lines[0]["title"], "Maintenance corrigee")
+
+    def test_team_member_can_view_but_not_start_team_maintenance(self):
         teammate = User.objects.create_user(
             username="maintenance_member",
             password="MemberPass123!",
@@ -3428,9 +3678,68 @@ class SavPlatformTests(TestCase):
         self.assertEqual(detail_response.status_code, 200)
 
         start_response = self.api.post(reverse("sav_api:maintenance-ticket-demarrer", args=[maintenance_ticket.pk]), {})
-        self.assertEqual(start_response.status_code, 200)
+        self.assertEqual(start_response.status_code, 400)
         maintenance_ticket.refresh_from_db()
-        self.assertEqual(maintenance_ticket.status, MaintenanceTicket.STATUS_IN_PROGRESS)
+        self.assertEqual(maintenance_ticket.status, MaintenanceTicket.STATUS_PLANNED)
+
+        self.api.force_authenticate(user=self.technician)
+        leader_start_response = self.api.post(reverse("sav_api:maintenance-ticket-demarrer", args=[maintenance_ticket.pk]), {})
+        self.assertEqual(leader_start_response.status_code, 200)
+
+    def test_technician_can_view_maintenance_dashboard_calendar_and_interventions(self):
+        browser = Client()
+        browser.force_login(self.technician)
+
+        for route_name in ("maintenance-dashboard", "maintenance-calendar", "maintenance-interventions", "maintenance-program"):
+            response = browser.get(reverse(route_name))
+            self.assertEqual(response.status_code, 200, route_name)
+
+    def test_team_member_can_close_completed_team_ticket(self):
+        teammate = User.objects.create_user(
+            username="sav_team_member_close",
+            password="MemberPass123!",
+            role=User.ROLE_TECHNICIAN,
+            organization=self.organization,
+            is_active=True,
+        )
+        ticket = Ticket.objects.create(
+            client=self.client_user,
+            product=self.product,
+            assigned_agent=self.technician,
+            team_leader=self.technician,
+            is_team_intervention=True,
+            title="Resolution en equipe",
+            description="Verifier la cloture par un membre d'equipe.",
+            category=Ticket.CATEGORY_BREAKDOWN,
+            status=Ticket.STATUS_DONE,
+            priority=Ticket.PRIORITY_NORMAL,
+        )
+        ticket.team_members.add(teammate)
+        Intervention.objects.create(
+            organization=self.organization,
+            ticket=ticket,
+            agent=self.technician,
+            intervention_type=Intervention.TYPE_ON_SITE,
+            status=Intervention.STATUS_DONE,
+            started_at=timezone.now() - timedelta(hours=1),
+            finished_at=timezone.now(),
+            diagnosis="Diagnostic realise par l'equipe.",
+            action_taken="Resolution collective.",
+        )
+        signature = SimpleUploadedFile("signature.png", b"signature", content_type="image/png")
+
+        close_sav_dossier(
+            ticket,
+            diagnosis="Diagnostic confirme.",
+            action_taken="Action terminee en equipe.",
+            client_name="Client signataire",
+            signature=signature,
+            actor=teammate,
+        )
+
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.status, Ticket.STATUS_CLOSED)
+        self.assertIsNotNone(ticket.closed_at)
 
     def test_maintenance_closure_with_anomaly_generates_incident_ticket(self):
         maintenance_ticket = MaintenanceTicket.objects.create(

@@ -266,7 +266,6 @@ if _argon2_hasher_available():
 LANGUAGE_CODE = "fr"
 LANGUAGES = [
     ("fr", "Francais"),
-    ("en", "Anglais"),
 ]
 LANGUAGE_COOKIE_NAME = "django_language"
 LANGUAGE_COOKIE_PATH = "/"

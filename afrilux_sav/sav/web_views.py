@@ -1,5 +1,6 @@
 import json
 import time
+import csv
 from datetime import datetime, timedelta
 
 from django.conf import settings
@@ -8,7 +9,7 @@ from django.contrib.auth import login
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.db.models import Avg, Count, Q
+from django.db.models import Avg, Count, F, Q, Sum
 from django.http import HttpResponse, JsonResponse
 from django.http import StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect
@@ -26,8 +27,10 @@ from .forms import (
     MaintenanceCancelForm,
     MaintenanceClosureForm,
     MaintenanceProgramForm,
+    MaintenanceSettingsForm,
     MessageForm,
     ProductForm,
+    SparePartForm,
     SupportAssistantQuestionForm,
     TicketFeedbackForm,
     TicketClosureForm,
@@ -58,6 +61,7 @@ from .models import (
     PredictiveAlert,
     Product,
     SlaRule,
+    SparePart,
     TicketAttachment,
     TicketFeedback,
     Ticket,
@@ -123,6 +127,7 @@ from .services import (
     scope_attachment_queryset,
     scope_generated_report_queryset,
     scope_sla_rule_queryset,
+    scope_spare_part_queryset,
     scope_ticket_queryset,
     scope_user_queryset,
     start_maintenance_ticket,
@@ -734,7 +739,291 @@ class MaintenanceManagerRequiredMixin(UserPassesTestMixin):
         return can_manage_maintenance(self.request.user)
 
 
-class MaintenanceProgramListView(LoginRequiredMixin, MaintenanceManagerRequiredMixin, TemplateView):
+class MaintenanceReadRequiredMixin(UserPassesTestMixin):
+    def test_func(self):
+        user = self.request.user
+        return can_manage_maintenance(user) or getattr(user, "role", "") in (
+            set(User.TECHNICIAN_SPACE_ROLES) | {User.ROLE_FIELD_TECHNICIAN, User.ROLE_EXPERT}
+        )
+
+
+def _maintenance_queryset_for_cmms(user):
+    return scope_maintenance_ticket_queryset(
+        MaintenanceTicket.objects.select_related("client", "technician", "program").prefetch_related("products", "team_members"),
+        user,
+    )
+
+
+def _maintenance_product_queryset(user):
+    if getattr(user, "organization_id", None) and (
+        can_manage_maintenance(user) or getattr(user, "role", "") in (set(User.TECHNICIAN_SPACE_ROLES) | {User.ROLE_FIELD_TECHNICIAN, User.ROLE_EXPERT})
+    ):
+        return Product.objects.filter(organization=user.organization)
+    return scope_product_queryset(Product.objects.all(), user)
+
+
+def _maintenance_chart_context(tickets, products):
+    today = timezone.localdate()
+    months = []
+    cursor = today.replace(day=1)
+    for _ in range(6):
+        months.append(cursor)
+        cursor = (cursor - timedelta(days=1)).replace(day=1)
+    months.reverse()
+    labels = [item.strftime("%m/%Y") for item in months]
+    breakdowns = []
+    for month in months:
+        next_month = (month + timedelta(days=32)).replace(day=1)
+        breakdowns.append(tickets.filter(scheduled_date__date__gte=month, scheduled_date__date__lt=next_month, maintenance_type=MaintenanceTicket.TYPE_CORRECTIVE).count())
+    type_counts = [tickets.filter(maintenance_type=value).count() for value, _ in MaintenanceTicket.MAINTENANCE_TYPE_CHOICES[:3]]
+    total_equipment = products.count()
+    operational = products.filter(status=Product.STATUS_OPERATIONAL).count()
+    availability = round((operational / total_equipment) * 100, 1) if total_equipment else 0
+    return {
+        "chart_data": json.dumps({
+            "months": labels,
+            "breakdowns": breakdowns,
+            "types": type_counts,
+            "availability": [availability, round(100 - availability, 1)],
+        }),
+    }
+
+
+class MaintenanceDashboardView(LoginRequiredMixin, MaintenanceReadRequiredMixin, TemplateView):
+    template_name = "sav/maintenance_dashboard.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        tickets = _maintenance_queryset_for_cmms(self.request.user)
+        products = _maintenance_product_queryset(self.request.user).select_related("client", "site")
+        parts = scope_spare_part_queryset(SparePart.objects.all(), self.request.user)
+        programs = scope_maintenance_program_queryset(MaintenanceProgram.objects.all(), self.request.user)
+        today = timezone.localdate()
+        next_week = today + timedelta(days=7)
+        late_tickets = [ticket for ticket in tickets if ticket.is_late]
+        due_soon = tickets.filter(
+            scheduled_date__date__gte=today,
+            scheduled_date__date__lte=next_week,
+            status__in=[MaintenanceTicket.STATUS_PLANNED, MaintenanceTicket.STATUS_NOTIFIED, MaintenanceTicket.STATUS_POSTPONED],
+        )
+        warranty_expired = products.filter(warranty_end__lt=today)
+        low_stock = [part for part in parts if part.is_low_stock]
+        chart_context = _maintenance_chart_context(tickets, products)
+        availability_data = json.loads(chart_context["chart_data"])["availability"][0]
+        context.update({
+            "kpis": {
+                "equipment": products.count(),
+                "programs": programs.filter(status=MaintenanceProgram.STATUS_PUBLISHED).count(),
+                "today": tickets.filter(scheduled_date__date=today).count(),
+                "in_progress": tickets.filter(status=MaintenanceTicket.STATUS_IN_PROGRESS).count(),
+                "done": tickets.filter(status__in=[MaintenanceTicket.STATUS_DONE, MaintenanceTicket.STATUS_ANOMALY]).count(),
+                "critical": tickets.filter(priority=Ticket.PRIORITY_CRITICAL).exclude(status__in=[MaintenanceTicket.STATUS_DONE, MaintenanceTicket.STATUS_CANCELLED]).count(),
+                "upcoming": due_soon.count(),
+                "alerts": len(late_tickets) + warranty_expired.count() + len(low_stock),
+                "availability": availability_data,
+            },
+            "due_soon": due_soon.order_by("scheduled_date")[:6],
+            "late_tickets": late_tickets[:6],
+            "warranty_expired": warranty_expired.order_by("warranty_end")[:6],
+            "low_stock": low_stock[:6],
+            "can_manage_programs": can_manage_maintenance(self.request.user),
+        })
+        context.update(chart_context)
+        return context
+
+
+class MaintenanceInterventionListView(LoginRequiredMixin, MaintenanceReadRequiredMixin, ListView):
+    template_name = "sav/maintenance_intervention_list.html"
+    context_object_name = "interventions"
+    paginate_by = 20
+
+    def get_queryset(self):
+        queryset = _maintenance_queryset_for_cmms(self.request.user)
+        filters = self.request.GET
+        if filters.get("status"):
+            status = filters["status"]
+            if status == "late":
+                queryset = queryset.exclude(status__in=[MaintenanceTicket.STATUS_DONE, MaintenanceTicket.STATUS_ANOMALY, MaintenanceTicket.STATUS_CANCELLED]).filter(scheduled_date__lt=timezone.now())
+            elif status == "planned":
+                queryset = queryset.filter(status__in=[MaintenanceTicket.STATUS_PLANNED, MaintenanceTicket.STATUS_NOTIFIED, MaintenanceTicket.STATUS_POSTPONED], scheduled_date__gte=timezone.now())
+            elif status == "done":
+                queryset = queryset.filter(status__in=[MaintenanceTicket.STATUS_DONE, MaintenanceTicket.STATUS_ANOMALY])
+            elif status == "cancelled":
+                queryset = queryset.filter(status=MaintenanceTicket.STATUS_CANCELLED)
+            else:
+                queryset = queryset.filter(status=MaintenanceTicket.STATUS_IN_PROGRESS)
+        for key, field in (("technician", "technician_id"), ("client", "client_id"), ("equipment", "products__id")):
+            if filters.get(key):
+                queryset = queryset.filter(**{field: filters[key]})
+        if filters.get("from"):
+            queryset = queryset.filter(scheduled_date__date__gte=filters["from"])
+        if filters.get("to"):
+            queryset = queryset.filter(scheduled_date__date__lte=filters["to"])
+        if filters.get("q"):
+            query = filters["q"]
+            queryset = queryset.filter(Q(title__icontains=query) | Q(client__username__icontains=query) | Q(products__name__icontains=query) | Q(products__serial_number__icontains=query))
+        ordering = filters.get("sort", "scheduled_date")
+        allowed = {"scheduled_date", "-scheduled_date", "priority", "-priority", "status", "-status"}
+        return queryset.distinct().order_by(ordering if ordering in allowed else "scheduled_date")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            "filters": self.request.GET,
+            "technicians": scope_user_queryset(User.objects.filter(role__in=User.TECHNICIAN_SPACE_ROLES, is_active=True), self.request.user).order_by("first_name", "last_name"),
+            "clients": scope_user_queryset(User.objects.filter(role=User.ROLE_CLIENT, is_active=True), self.request.user).order_by("company_name", "username"),
+            "products": _maintenance_product_queryset(self.request.user).order_by("name")[:200],
+            "can_manage_programs": can_manage_maintenance(self.request.user),
+        })
+        for intervention in context["page_obj"].object_list:
+            intervention.can_modify = can_act_on_maintenance_ticket(self.request.user, intervention)
+        return context
+
+
+class MaintenanceCalendarView(LoginRequiredMixin, MaintenanceReadRequiredMixin, TemplateView):
+    template_name = "sav/maintenance_calendar.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        events = []
+        for ticket in _maintenance_queryset_for_cmms(self.request.user).order_by("scheduled_date")[:500]:
+            events.append({
+                "title": f"#{ticket.pk} · {ticket.title}",
+                "start": ticket.scheduled_date.isoformat(),
+                "url": reverse("maintenance-interventions") + f"?q={ticket.pk}",
+                "className": f"cmms-event--{ticket.cmms_status}",
+            })
+        context["calendar_events"] = json.dumps(events)
+        return context
+
+
+class MaintenanceTechnicianListView(LoginRequiredMixin, MaintenanceReadRequiredMixin, TemplateView):
+    template_name = "sav/maintenance_people.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        technicians = scope_user_queryset(User.objects.filter(role__in=User.TECHNICIAN_SPACE_ROLES, is_active=True), self.request.user)
+        tickets = _maintenance_queryset_for_cmms(self.request.user)
+        rows = []
+        for technician in technicians.order_by("first_name", "last_name", "username"):
+            rows.append({"person": technician, "planned": tickets.filter(technician=technician).exclude(status__in=[MaintenanceTicket.STATUS_DONE, MaintenanceTicket.STATUS_CANCELLED]).count(), "done": tickets.filter(technician=technician, status__in=[MaintenanceTicket.STATUS_DONE, MaintenanceTicket.STATUS_ANOMALY]).count()})
+        context.update({"rows": rows, "title": "Techniciens", "subtitle": "Charge et activite des equipes terrain"})
+        return context
+
+
+class MaintenanceClientListView(LoginRequiredMixin, MaintenanceReadRequiredMixin, TemplateView):
+    template_name = "sav/maintenance_people.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        clients = scope_user_queryset(User.objects.filter(role=User.ROLE_CLIENT, is_active=True), self.request.user)
+        products = scope_product_queryset(Product.objects.all(), self.request.user)
+        tickets = _maintenance_queryset_for_cmms(self.request.user)
+        rows = []
+        for client in clients.order_by("company_name", "username"):
+            rows.append({"person": client, "planned": tickets.filter(client=client).exclude(status__in=[MaintenanceTicket.STATUS_DONE, MaintenanceTicket.STATUS_CANCELLED]).count(), "done": products.filter(client=client).count()})
+        context.update({"rows": rows, "title": "Clients", "subtitle": "Parc installe et interventions en suivi", "is_clients": True})
+        return context
+
+
+class SparePartListView(LoginRequiredMixin, MaintenanceReadRequiredMixin, ListView):
+    template_name = "sav/spare_part_list.html"
+    context_object_name = "parts"
+    paginate_by = 20
+
+    def get_queryset(self):
+        queryset = scope_spare_part_queryset(SparePart.objects.select_related("equipment_category"), self.request.user)
+        if self.request.GET.get("q"):
+            query = self.request.GET["q"]
+            queryset = queryset.filter(Q(name__icontains=query) | Q(reference__icontains=query) | Q(supplier__icontains=query))
+        if self.request.GET.get("low"):
+            queryset = queryset.filter(stock_quantity__lte=F("minimum_stock"))
+        return queryset.order_by("name")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["q"] = self.request.GET.get("q", "")
+        context["low"] = self.request.GET.get("low", "")
+        return context
+
+
+class SparePartCreateView(LoginRequiredMixin, MaintenanceManagerRequiredMixin, CreateView):
+    model = SparePart
+    form_class = SparePartForm
+    template_name = "sav/spare_part_form.html"
+    success_url = reverse_lazy("maintenance-parts")
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["user"] = self.request.user
+        return kwargs
+
+    def form_valid(self, form):
+        form.instance.organization = self.request.user.organization
+        return super().form_valid(form)
+
+
+class SparePartUpdateView(LoginRequiredMixin, MaintenanceManagerRequiredMixin, UpdateView):
+    model = SparePart
+    form_class = SparePartForm
+    template_name = "sav/spare_part_form.html"
+    success_url = reverse_lazy("maintenance-parts")
+
+    def get_queryset(self):
+        return scope_spare_part_queryset(SparePart.objects.all(), self.request.user)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["user"] = self.request.user
+        return kwargs
+
+
+class MaintenanceReportsView(LoginRequiredMixin, MaintenanceReadRequiredMixin, TemplateView):
+    template_name = "sav/maintenance_reports.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        tickets = _maintenance_queryset_for_cmms(self.request.user)
+        completed = tickets.filter(status__in=[MaintenanceTicket.STATUS_DONE, MaintenanceTicket.STATUS_ANOMALY], finished_at__isnull=False, started_at__isnull=False)
+        durations = [(ticket.finished_at - ticket.started_at).total_seconds() / 3600 for ticket in completed]
+        mttr = round(sum(durations) / len(durations), 1) if durations else 0
+        products = scope_product_queryset(Product.objects.all(), self.request.user)
+        failures = tickets.filter(maintenance_type=MaintenanceTicket.TYPE_CORRECTIVE).count()
+        mtbf = round((products.count() * 30) / failures, 1) if failures else 0
+        top_technician = tickets.values("technician__first_name", "technician__last_name", "technician__username").annotate(total=Count("id")).order_by("-total").first()
+        failing_equipment = tickets.filter(maintenance_type=MaintenanceTicket.TYPE_CORRECTIVE).values("products__name", "products__serial_number").annotate(total=Count("id")).order_by("-total").first()
+        context.update({"metrics": {"total": tickets.count(), "cost": tickets.aggregate(total=Sum("actual_cost"))["total"] or 0, "mttr": mttr, "mtbf": mtbf, "availability": _maintenance_chart_context(tickets, products)["chart_data"], "top_technician": top_technician, "failing_equipment": failing_equipment}})
+        return context
+
+
+class MaintenanceReportCsvView(LoginRequiredMixin, MaintenanceReadRequiredMixin, View):
+    def get(self, request):
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = 'attachment; filename="rapport-maintenance.csv"'
+        response.write("\ufeff")
+        writer = csv.writer(response)
+        writer.writerow(["ID", "Intervention", "Client", "Technicien", "Type", "Priorite", "Statut", "Date", "Cout reel"])
+        for ticket in _maintenance_queryset_for_cmms(request.user).order_by("scheduled_date"):
+            writer.writerow([ticket.pk, ticket.title, str(ticket.client), str(ticket.technician), ticket.type_label, ticket.get_priority_display(), ticket.cmms_status_label, timezone.localtime(ticket.scheduled_date).strftime("%d/%m/%Y %H:%M"), ticket.actual_cost])
+        return response
+
+
+class MaintenanceSettingsView(LoginRequiredMixin, MaintenanceManagerRequiredMixin, UpdateView):
+    form_class = MaintenanceSettingsForm
+    template_name = "sav/maintenance_settings.html"
+    success_url = reverse_lazy("maintenance-settings")
+
+    def get_object(self, queryset=None):
+        if not self.request.user.organization_id:
+            raise ValidationError("Aucune organisation n'est associee a cet utilisateur.")
+        return self.request.user.organization
+
+    def form_valid(self, form):
+        django_messages.success(self.request, "Parametres de maintenance mis a jour.")
+        return super().form_valid(form)
+
+
+class MaintenanceProgramListView(LoginRequiredMixin, MaintenanceReadRequiredMixin, TemplateView):
     template_name = "sav/maintenance_program.html"
 
     def get_context_data(self, **kwargs):
@@ -773,6 +1062,7 @@ class MaintenanceProgramListView(LoginRequiredMixin, MaintenanceManagerRequiredM
                     tickets.filter(status=MaintenanceTicket.STATUS_DONE).count(),
                     tickets.count(),
                 ),
+                "can_manage_programs": can_manage_maintenance(self.request.user),
             }
         )
         return context
@@ -819,6 +1109,52 @@ class MaintenanceProgramCreateView(LoginRequiredMixin, MaintenanceManagerRequire
         return response
 
 
+class MaintenanceProgramUpdateView(LoginRequiredMixin, MaintenanceManagerRequiredMixin, UpdateView):
+    model = MaintenanceProgram
+    form_class = MaintenanceProgramForm
+    template_name = "sav/maintenance_program_form.html"
+    success_url = reverse_lazy("maintenance-program")
+
+    def get_queryset(self):
+        return scope_maintenance_program_queryset(MaintenanceProgram.objects.all(), self.request.user).exclude(
+            status=MaintenanceProgram.STATUS_ARCHIVED,
+        )
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["user"] = self.request.user
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        technicians = scope_user_queryset(
+            User.objects.filter(role__in=User.TECHNICIAN_SPACE_ROLES, is_active=True),
+            self.request.user,
+        ).order_by("first_name", "last_name", "username")
+        clients = scope_user_queryset(
+            User.objects.filter(role=User.ROLE_CLIENT, is_active=True),
+            self.request.user,
+        ).order_by("company_name", "first_name", "last_name", "username")
+        products = scope_product_queryset(Product.objects.select_related("client"), self.request.user).order_by("client__company_name", "name")
+        context.update(
+            {
+                "maintenance_technicians": technicians[:40],
+                "maintenance_clients": clients[:40],
+                "maintenance_products": products[:60],
+                "periodicity_choices": MaintenanceTicket.PERIODICITY_CHOICES,
+            }
+        )
+        return context
+
+    def form_valid(self, form):
+        form.instance.responsible = form.instance.responsible or self.request.user
+        form.instance.organization = form.instance.organization or getattr(self.request.user, "organization", None)
+        response = super().form_valid(form)
+        log_audit_event(self.request.user, "maintenance_program_updated_web", self.object, {"via": "portal"})
+        django_messages.success(self.request, "Programme de maintenance mis a jour. Vous pouvez le publier.")
+        return response
+
+
 class MaintenanceProgramPublishView(LoginRequiredMixin, MaintenanceManagerRequiredMixin, View):
     def post(self, request, pk):
         program = get_object_or_404(scope_maintenance_program_queryset(MaintenanceProgram.objects.all(), request.user), pk=pk)
@@ -828,6 +1164,38 @@ class MaintenanceProgramPublishView(LoginRequiredMixin, MaintenanceManagerRequir
             django_messages.error(request, str(exc))
             return redirect("maintenance-program")
         django_messages.success(request, f"Programme publie: {len(tickets)} ticket(s) de maintenance generes.")
+        return redirect("maintenance-program")
+
+
+class MaintenanceProgramStatusView(LoginRequiredMixin, MaintenanceManagerRequiredMixin, View):
+    def post(self, request, pk, action):
+        program = get_object_or_404(scope_maintenance_program_queryset(MaintenanceProgram.objects.all(), request.user), pk=pk)
+        if action == "suspend":
+            program.status = MaintenanceProgram.STATUS_SUSPENDED
+            message = "Programme suspendu. Les interventions deja creees sont conservees."
+        elif action == "activate":
+            program.status = MaintenanceProgram.STATUS_PUBLISHED
+            message = "Programme active."
+        else:
+            django_messages.error(request, "Action de programme inconnue.")
+            return redirect("maintenance-program")
+        program.save(update_fields=["status", "updated_at"])
+        log_audit_event(request.user, f"maintenance_program_{action}d", program)
+        django_messages.success(request, message)
+        return redirect("maintenance-program")
+
+
+class MaintenanceProgramDeleteView(LoginRequiredMixin, MaintenanceManagerRequiredMixin, View):
+    def post(self, request, pk):
+        program = get_object_or_404(scope_maintenance_program_queryset(MaintenanceProgram.objects.all(), request.user), pk=pk)
+        if program.tickets.exists():
+            program.status = MaintenanceProgram.STATUS_ARCHIVED
+            program.save(update_fields=["status", "updated_at"])
+            django_messages.success(request, "Programme archive pour conserver son historique d'interventions.")
+        else:
+            log_audit_event(request.user, "maintenance_program_deleted", program)
+            program.delete()
+            django_messages.success(request, "Programme supprime.")
         return redirect("maintenance-program")
 
 
@@ -936,6 +1304,7 @@ class MaintenanceTicketCloseView(LoginRequiredMixin, FormView):
                 actual_finished_at=form.cleaned_data["actual_finished_at"],
                 checklist_completed=form.cleaned_data["checklist_completed"],
                 observations=form.cleaned_data["observations"],
+                actual_cost=form.cleaned_data.get("actual_cost") or 0,
                 work_to_plan=form.cleaned_data.get("work_to_plan", ""),
                 parts_used=form.cleaned_data.get("parts_used", ""),
                 parts_status={
@@ -1314,7 +1683,7 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         }
         context["can_validate_finish"] = is_client_owner and ticket.status == Ticket.STATUS_FINISH_REQUESTED
         context["can_bypass_finish"] = workflow_driver and ticket.status == Ticket.STATUS_FINISH_REQUESTED
-        context["can_close_dossier"] = workflow_driver and ticket.status == Ticket.STATUS_DONE
+        context["can_close_dossier"] = is_assigned_technician and ticket.status == Ticket.STATUS_DONE
         context["can_answer_escalation"] = is_manager_user(user) and ticket.status == Ticket.STATUS_ESCALATED
         context["can_continue_solution"] = workflow_driver and ticket.status == Ticket.STATUS_WAITING_SOLUTION
         context["planning_form"] = TicketPlanningForm()
@@ -1543,7 +1912,7 @@ class TicketAssignTeamView(LoginRequiredMixin, View):
             return redirect("ticket-detail", pk=pk)
 
         notify_ticket_status_change(ticket, previous_status, actor=request.user)
-        django_messages.success(request, f"Equipe constituee avec {result['team_leader']} comme chef.")
+        django_messages.success(request, f"Equipe constituee avec {result['leader']} comme chef.")
         return redirect("ticket-detail", pk=pk)
 
 
@@ -1790,7 +2159,9 @@ class TicketMessageCreateView(LoginRequiredMixin, View):
             ticket.first_response_at = timezone.now()
             ticket.save(update_fields=["first_response_at", "updated_at"])
 
-        if message.recipient_id:
+        if message.recipient_id and direction == Message.DIRECTION_OUTBOUND and message_type == Message.TYPE_PUBLIC:
+            create_message_delivery_notifications(message)
+        elif message.recipient_id:
             create_notification(
                 recipient=message.recipient,
                 subject=f"{ticket.reference} - Nouveau message",
@@ -2065,6 +2436,10 @@ class ProductDetailView(LoginRequiredMixin, DetailView):
             product.tickets.select_related("assigned_agent").all(),
             self.request.user,
         ).order_by("-created_at")[:8]
+        context["maintenance_history"] = scope_maintenance_ticket_queryset(
+            MaintenanceTicket.objects.select_related("technician", "client").filter(products=product),
+            self.request.user,
+        ).order_by("-scheduled_date", "-updated_at")[:12]
         context["knowledge_articles"] = product.knowledge_articles.filter(status=KnowledgeArticle.STATUS_PUBLISHED)[:6]
         context["location_history"] = product.location_history.select_related("from_site", "to_site", "moved_by").all()[:8]
         if product.organization and product.organization.personal_data_access_logging_enabled:

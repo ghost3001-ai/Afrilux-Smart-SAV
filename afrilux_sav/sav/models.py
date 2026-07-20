@@ -114,7 +114,6 @@ class User(AbstractUser):
 
     LANGUAGE_CHOICES = (
         (LANGUAGE_FRENCH, "Francais"),
-        (LANGUAGE_ENGLISH, "Anglais"),
     )
 
     ROLE_CLIENT = "client"
@@ -491,6 +490,10 @@ class SparePart(TimeStampedModel):
     )
     description = models.TextField(blank=True)
     unit = models.CharField(max_length=40, default="piece")
+    stock_quantity = models.PositiveIntegerField(default=0)
+    minimum_stock = models.PositiveIntegerField(default=0)
+    unit_price = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    supplier = models.CharField(max_length=180, blank=True)
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -509,6 +512,10 @@ class SparePart(TimeStampedModel):
         if self.equipment_category_id and self.equipment_category.organization_id and not self.organization_id:
             self.organization = self.equipment_category.organization
         super().save(*args, **kwargs)
+
+    @property
+    def is_low_stock(self):
+        return self.stock_quantity <= self.minimum_stock
 
 
 class FinancialTransaction(TimeStampedModel):
@@ -1544,14 +1551,36 @@ class MaintenanceProgram(TimeStampedModel):
         (PERIOD_QUARTERLY, "Trimestrielle"),
     )
 
+    FREQUENCY_DAILY = "daily"
+    FREQUENCY_WEEKLY = "weekly"
+    FREQUENCY_MONTHLY = "monthly"
+    FREQUENCY_QUARTERLY = "quarterly"
+    FREQUENCY_SEMIANNUAL = "semiannual"
+    FREQUENCY_ANNUAL = "annual"
+    FREQUENCY_CHOICES = (
+        (FREQUENCY_DAILY, "Quotidienne"), (FREQUENCY_WEEKLY, "Hebdomadaire"),
+        (FREQUENCY_MONTHLY, "Mensuelle"), (FREQUENCY_QUARTERLY, "Trimestrielle"),
+        (FREQUENCY_SEMIANNUAL, "Semestrielle"), (FREQUENCY_ANNUAL, "Annuelle"),
+    )
+    TYPE_PREVENTIVE = "preventive"
+    TYPE_INSPECTION = "inspection"
+    TYPE_CALIBRATION = "calibration"
+    TYPE_CONTROL = "control"
+    MAINTENANCE_TYPE_CHOICES = (
+        (TYPE_PREVENTIVE, "Préventive"), (TYPE_INSPECTION, "Inspection"),
+        (TYPE_CALIBRATION, "Calibration"), (TYPE_CONTROL, "Contrôle"),
+    )
+
     STATUS_DRAFT = "draft"
     STATUS_PUBLISHED = "published"
     STATUS_ARCHIVED = "archived"
+    STATUS_SUSPENDED = "suspended"
 
     STATUS_CHOICES = (
         (STATUS_DRAFT, "Brouillon"),
         (STATUS_PUBLISHED, "Publie"),
         (STATUS_ARCHIVED, "Archive"),
+        (STATUS_SUSPENDED, "Suspendu"),
     )
 
     organization = models.ForeignKey(
@@ -1569,12 +1598,30 @@ class MaintenanceProgram(TimeStampedModel):
         null=True,
         blank=True,
     )
+    client = models.ForeignKey(User, on_delete=models.SET_NULL, related_name="maintenance_rules", null=True, blank=True, limit_choices_to={"role": User.ROLE_CLIENT})
+    equipment = models.ForeignKey(Product, on_delete=models.SET_NULL, related_name="maintenance_rules", null=True, blank=True)
+    technician = models.ForeignKey(User, on_delete=models.SET_NULL, related_name="scheduled_maintenance_programs", null=True, blank=True, limit_choices_to={"role__in": User.TECHNICIAN_SPACE_ROLES})
+    team_members = models.ManyToManyField(User, related_name="maintenance_program_teams", blank=True, limit_choices_to={"role__in": User.TECHNICIAN_SPACE_ROLES})
     title = models.CharField(max_length=255, blank=True)
     service = models.CharField(max_length=20, choices=SERVICE_CHOICES, default=SERVICE_IT)
     period_type = models.CharField(max_length=20, choices=PERIOD_CHOICES, default=PERIOD_MONTHLY)
     month = models.PositiveSmallIntegerField(null=True, blank=True)
     quarter = models.PositiveSmallIntegerField(null=True, blank=True)
     year = models.PositiveSmallIntegerField(default=_current_year)
+    maintenance_type = models.CharField(max_length=20, choices=MAINTENANCE_TYPE_CHOICES, default=TYPE_PREVENTIVE)
+    priority = models.CharField(max_length=20, choices=Ticket.PRIORITY_CHOICES, default=Ticket.PRIORITY_NORMAL)
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
+    frequency = models.CharField(max_length=20, choices=FREQUENCY_CHOICES, default=FREQUENCY_MONTHLY)
+    frequency_interval = models.PositiveSmallIntegerField(default=1)
+    scheduled_time = models.TimeField(default=time(8, 0))
+    estimated_duration_minutes = models.PositiveIntegerField(default=60)
+    checklist = models.JSONField(default=list, blank=True)
+    required_parts = models.ManyToManyField(SparePart, related_name="maintenance_programs", blank=True)
+    notify_email = models.BooleanField(default=True)
+    notify_sms = models.BooleanField(default=False)
+    notify_internal = models.BooleanField(default=True)
+    next_generation_date = models.DateField(null=True, blank=True)
     task_lines = models.JSONField(default=list, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT)
     published_at = models.DateTimeField(null=True, blank=True)
@@ -1597,6 +1644,10 @@ class MaintenanceProgram(TimeStampedModel):
         if not self.title:
             self.title = f"Programme {self.get_service_display()} - {self.period_label}"
         super().save(*args, **kwargs)
+
+    @property
+    def is_rule_based(self):
+        return bool(self.equipment_id and self.client_id and self.technician_id and self.start_date)
 
 
 class MaintenanceTicket(TimeStampedModel):
@@ -1664,6 +1715,20 @@ class MaintenanceTicket(TimeStampedModel):
         related_name="maintenance_tickets",
         limit_choices_to={"role__in": User.TECHNICIAN_SPACE_ROLES},
     )
+
+    TYPE_PREVENTIVE = "preventive"
+    TYPE_CORRECTIVE = "corrective"
+    TYPE_PREDICTIVE = "predictive"
+    TYPE_INSPECTION = "inspection"
+    TYPE_CONTROL = "control"
+
+    MAINTENANCE_TYPE_CHOICES = (
+        (TYPE_PREVENTIVE, "Preventive"),
+        (TYPE_CORRECTIVE, "Corrective"),
+        (TYPE_PREDICTIVE, "Predictive"),
+        (TYPE_INSPECTION, "Inspection"),
+        (TYPE_CONTROL, "Controle"),
+    )
     team_members = models.ManyToManyField(
         User,
         related_name="maintenance_team_tickets",
@@ -1680,6 +1745,7 @@ class MaintenanceTicket(TimeStampedModel):
     title = models.CharField(max_length=255)
     service = models.CharField(max_length=20, choices=MaintenanceProgram.SERVICE_CHOICES, default=MaintenanceProgram.SERVICE_IT)
     periodicity = models.CharField(max_length=20, choices=PERIODICITY_CHOICES, default=PERIOD_MONTHLY)
+    maintenance_type = models.CharField(max_length=20, choices=MAINTENANCE_TYPE_CHOICES, default=TYPE_PREVENTIVE)
     scheduled_date = models.DateTimeField()
     status = models.CharField(max_length=24, choices=STATUS_CHOICES, default=STATUS_PLANNED)
     checklist = models.JSONField(default=list, blank=True)
@@ -1694,6 +1760,8 @@ class MaintenanceTicket(TimeStampedModel):
     equipment_type = models.CharField(max_length=120, blank=True)
     equipment_identifier = models.CharField(max_length=120, blank=True)
     intervention_reason = models.TextField(blank=True)
+    estimated_cost = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    actual_cost = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     initial_scheduled_date = models.DateTimeField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
@@ -1725,7 +1793,29 @@ class MaintenanceTicket(TimeStampedModel):
 
     @property
     def type_label(self):
-        return "Maintenance planifiee"
+        return self.get_maintenance_type_display()
+
+    @property
+    def cmms_status(self):
+        if self.status == self.STATUS_CANCELLED:
+            return "cancelled"
+        if self.is_late:
+            return "late"
+        if self.status == self.STATUS_IN_PROGRESS:
+            return "in_progress"
+        if self.status in {self.STATUS_DONE, self.STATUS_ANOMALY}:
+            return "done"
+        return "planned"
+
+    @property
+    def cmms_status_label(self):
+        return {
+            "planned": "Prevue",
+            "in_progress": "En cours",
+            "done": "Terminee",
+            "cancelled": "Annulee",
+            "late": "En retard",
+        }[self.cmms_status]
 
     @property
     def technician_team_members(self):

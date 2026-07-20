@@ -1,0 +1,8 @@
+{% extends "sav/base.html" %}
+{% block title %}Pieces de rechange | Maintenance SAV{% endblock %}
+{% block content %}
+{% include "sav/includes/maintenance_nav.html" %}
+<section class="section-head section-head--page"><div><p class="eyebrow">GMAO / Magasin</p><h1>Pieces de rechange</h1></div><a class="button button--primary" href="{% url 'maintenance-part-create' %}">Ajouter une piece</a></section>
+<section class="card filter-card"><form method="get" class="filter-grid"><input name="q" type="search" value="{{ q }}" placeholder="Nom, reference, fournisseur"><label><input type="checkbox" name="low" value="1" {% if low %}checked{% endif %}> Stock insuffisant</label><button class="button button--ghost">Filtrer</button></form></section>
+<section class="card"><div class="table-wrap"><table class="table"><thead><tr><th>Nom</th><th>Reference</th><th>Stock</th><th>Stock minimum</th><th>Prix unitaire</th><th>Fournisseur</th><th></th></tr></thead><tbody>{% for part in parts %}<tr><td>{{ part.name }}</td><td>{{ part.reference }}</td><td><span class="badge badge--{% if part.is_low_stock %}critical{% else %}success{% endif %}">{{ part.stock_quantity }} {{ part.unit }}</span></td><td>{{ part.minimum_stock }}</td><td>{{ part.unit_price }} XAF</td><td>{{ part.supplier|default:'-' }}</td><td><a class="button button--ghost button--compact" href="{% url 'maintenance-part-update' part.pk %}">Modifier</a></td></tr>{% empty %}<tr><td colspan="7">Aucune piece enregistree.</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}

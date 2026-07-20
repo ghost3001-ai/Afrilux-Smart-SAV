@@ -48,6 +48,7 @@ def sav_shell(request):
                 "has_reporting_access": False,
                 "has_management_access": False,
                 "can_manage_maintenance": False,
+                "can_view_maintenance": False,
                 "has_technician_space_access": False,
                 "unread_notifications": 0,
                 "open_tickets": 0,
@@ -63,7 +64,7 @@ def sav_shell(request):
         }
 
     cache_timeout = max(0, int(getattr(settings, "SAV_SHELL_CACHE_SECONDS", 30)))
-    cache_key = f"sav-shell:v2:{user.pk}:{user.role}:{user.organization_id}:{int(user.is_superuser)}"
+    cache_key = f"sav-shell:v3:{user.pk}:{user.role}:{user.organization_id}:{int(user.is_superuser)}"
     if cache_timeout:
         cached_payload = cache.get(cache_key)
         if cached_payload is not None:
@@ -79,6 +80,7 @@ def sav_shell(request):
             "has_management_access": is_manager_user(user),
             "can_manage_maintenance": can_manage_maintenance(user),
             "has_technician_space_access": has_technician_space_access(user),
+            "can_view_maintenance": can_manage_maintenance(user) or has_technician_space_access(user),
             "unread_notifications": notifications.exclude(status=Notification.STATUS_READ).count(),
             "open_tickets": tickets.filter(status__in=OPEN_TICKET_STATUSES).count(),
             "organization_name": user.organization.display_name if getattr(user, "organization_id", None) else "",

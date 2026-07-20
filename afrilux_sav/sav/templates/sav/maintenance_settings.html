@@ -1,0 +1,7 @@
+{% extends "sav/base.html" %}
+{% block title %}Parametres | Maintenance SAV{% endblock %}
+{% block content %}
+{% include "sav/includes/maintenance_nav.html" %}
+<section class="section-head section-head--page"><div><p class="eyebrow">GMAO / Configuration</p><h1>Parametres de maintenance</h1><p class="muted">Coordonnees et diffusion des rapports pour votre organisation.</p></div></section>
+<section class="card"><form method="post" class="form-grid">{% csrf_token %}{% for field in form %}<div class="form-field"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{% for error in field.errors %}<p class="field-error">{{ error }}</p>{% endfor %}</div>{% endfor %}<div class="form-actions"><button class="button button--primary">Enregistrer les parametres</button></div></form></section>
+{% endblock %}
