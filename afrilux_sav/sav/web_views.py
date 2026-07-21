@@ -380,12 +380,12 @@ class WebManifestView(View):
 class ServiceWorkerView(View):
     def get(self, request, *args, **kwargs):
         script = """
-const CACHE_NAME = "afrilux-sav-offline-v1";
+const CACHE_NAME = "afrilux-sav-offline-v3";
 const CORE_ASSETS = [
   "/login/",
   "/workspace/",
-  "/static/sav/styles.css",
-  "/static/sav/app.js",
+  "/static/sav/styles.css?v=20260721.3",
+  "/static/sav/app.js?v=20260721.3",
   "/static/sav/images/afrilux-smart-solutions-logo.jpeg"
 ];
 
@@ -419,6 +419,7 @@ self.addEventListener("fetch", (event) => {
 """
         response = HttpResponse(script.strip(), content_type="application/javascript")
         response["Service-Worker-Allowed"] = "/"
+        response["Cache-Control"] = "no-cache, no-store, must-revalidate"
         return response
 
 

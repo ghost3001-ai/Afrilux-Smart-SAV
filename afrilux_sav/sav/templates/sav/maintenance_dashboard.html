@@ -1,8 +1,9 @@
 {% extends "sav/base.html" %}
 {% block title %}Maintenance SAV | Tableau de bord{% endblock %}
 {% block content %}
-<div class="cmms-page">
+<div class="maintenance-layout">
 {% include "sav/includes/maintenance_nav.html" %}
+<main class="cmms-page cmms-dashboard-page">
 <section class="cmms-header">
     <div>
         <p class="cmms-header__label">MAINTENANCE SAV</p>
@@ -40,6 +41,7 @@
     <article class="cmms-panel cmms-list-panel"><header><div><p>À VENIR</p><h2>Interventions sous 7 jours</h2></div><a href="{% url 'maintenance-interventions' %}?status=planned">Tout voir</a></header>{% for ticket in due_soon %}<a class="cmms-list-item" href="{% url 'maintenance-interventions' %}?q={{ ticket.pk }}"><span class="cmms-list-item__marker cmms-list-item__marker--blue"></span><span><strong>{{ ticket.title }}</strong><small>{{ ticket.client }} · {{ ticket.scheduled_date|date:"d/m/Y H:i" }}</small></span><i class="bi bi-chevron-right"></i></a>{% empty %}<p class="cmms-list-empty">Aucune intervention à anticiper.</p>{% endfor %}</article>
     <article class="cmms-panel cmms-list-panel"><header><div><p>URGENT</p><h2>Interventions en retard</h2></div><a href="{% url 'maintenance-interventions' %}?status=late">Tout voir</a></header>{% for ticket in late_tickets %}<a class="cmms-list-item" href="{% url 'maintenance-interventions' %}?q={{ ticket.pk }}"><span class="cmms-list-item__marker cmms-list-item__marker--red"></span><span><strong>{{ ticket.title }}</strong><small>{{ ticket.client }} · prévue le {{ ticket.scheduled_date|date:"d/m/Y" }}</small></span><span class="badge badge--critical">En retard</span></a>{% empty %}<p class="cmms-list-empty">Aucun retard détecté.</p>{% endfor %}</article>
 </section>
+</main>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
