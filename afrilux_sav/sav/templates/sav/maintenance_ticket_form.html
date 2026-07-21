@@ -1,0 +1,9 @@
+{% extends "sav/base.html" %}
+{% block title %}Nouvelle intervention | Maintenance SAV{% endblock %}
+{% block content %}
+<div class="cmms-page">
+{% include "sav/includes/maintenance_nav.html" %}
+<section class="cmms-header"><div><p class="cmms-header__label">PLANNING DES INTERVENTIONS</p><h1>Nouvelle intervention</h1><p>Cette fiche crée une mission unique. Elle ne crée pas de programme récurrent.</p></div><div class="cmms-header__actions"><a class="button button--ghost" href="{% url 'maintenance-calendar' %}">Retour au planning</a></div></section>
+<form method="post" class="card form-card">{% csrf_token %}<div class="form-grid">{% for field in form %}<div class="field {% if field.name == 'checklist' or field.name == 'intervention_reason' %}field--wide{% endif %}"><label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} *{% endif %}</label>{{ field }}{{ field.errors }}</div>{% endfor %}</div><div class="form-actions"><a class="button button--ghost" href="{% url 'maintenance-calendar' %}">Annuler</a><button class="button button--primary">Créer l'intervention</button></div></form>
+</div>
+{% endblock %}

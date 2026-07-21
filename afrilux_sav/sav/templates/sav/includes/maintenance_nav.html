@@ -1,12 +1,29 @@
-<nav class="cmms-nav" aria-label="Navigation maintenance SAV">
-    <a href="{% url 'maintenance-dashboard' %}"><i class="bi bi-grid"></i> Tableau de bord</a>
-    <a href="{% url 'maintenance-program' %}"><i class="bi bi-arrow-repeat"></i> Programmes</a>
-    <a href="{% url 'maintenance-interventions' %}"><i class="bi bi-tools"></i> Interventions</a>
-    <a href="{% url 'maintenance-calendar' %}"><i class="bi bi-calendar3"></i> Calendrier</a>
-    <a href="{% url 'maintenance-equipment' %}"><i class="bi bi-cpu"></i> Équipements</a>
-    <a href="{% url 'maintenance-technicians' %}"><i class="bi bi-people"></i> Techniciens</a>
-    <a href="{% url 'maintenance-clients' %}"><i class="bi bi-building"></i> Clients</a>
-    <a href="{% url 'maintenance-parts' %}"><i class="bi bi-box-seam"></i> Pièces de rechange</a>
-    <a href="{% url 'maintenance-reports' %}"><i class="bi bi-bar-chart"></i> Rapports</a>
-    {% if sav_shell.can_manage_maintenance %}<a href="{% url 'maintenance-settings' %}"><i class="bi bi-gear"></i> Paramètres</a>{% endif %}
+<nav class="cmms-nav maintenance-sidebar" aria-label="Navigation Maintenance SAV">
+    <a class="maintenance-sidebar__brand" href="{% url 'maintenance-dashboard' %}"><span><i class="bi bi-wrench-adjustable-circle"></i></span><strong>AFRILUX<span>GMAO</span></strong></a>
+    <div class="maintenance-sidebar__group">
+        <p>VUE D'ENSEMBLE</p>
+        <a href="{% url 'maintenance-dashboard' %}"><i class="bi bi-grid-1x2"></i> Tableau de bord</a>
+        <a href="{% url 'maintenance-calendar' %}"><i class="bi bi-calendar3"></i> Planning</a>
+    </div>
+    <div class="maintenance-sidebar__group">
+        <p>INTERVENTIONS</p>
+        <a href="{% url 'maintenance-interventions' %}"><i class="bi bi-tools"></i> Interventions</a>
+        {% if sav_shell.can_manage_maintenance %}<a href="{% url 'maintenance-ticket-create' %}"><i class="bi bi-plus-square"></i> Nouvelle intervention</a>{% endif %}
+        <a href="{% url 'maintenance-program' %}"><i class="bi bi-arrow-repeat"></i> Programmes</a>
+    </div>
+    <div class="maintenance-sidebar__group">
+        <p>ÉQUIPEMENTS</p>
+        <a href="{% url 'maintenance-equipment' %}"><i class="bi bi-cpu"></i> Équipements</a>
+        <a href="{% url 'maintenance-clients' %}"><i class="bi bi-building"></i> Clients et sites</a>
+    </div>
+    <div class="maintenance-sidebar__group">
+        <p>RESSOURCES</p>
+        <a href="{% url 'maintenance-technicians' %}"><i class="bi bi-people"></i> Techniciens</a>
+        <a href="{% url 'maintenance-parts' %}"><i class="bi bi-box-seam"></i> Pièces et stocks</a>
+    </div>
+    <div class="maintenance-sidebar__group">
+        <p>ANALYSE</p>
+        <a href="{% url 'maintenance-reports' %}"><i class="bi bi-bar-chart-line"></i> Rapports</a>
+        {% if sav_shell.can_manage_maintenance %}<a href="{% url 'maintenance-settings' %}"><i class="bi bi-gear"></i> Paramètres</a>{% endif %}
+    </div>
 </nav>

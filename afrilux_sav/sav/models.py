@@ -1557,18 +1557,22 @@ class MaintenanceProgram(TimeStampedModel):
     FREQUENCY_QUARTERLY = "quarterly"
     FREQUENCY_SEMIANNUAL = "semiannual"
     FREQUENCY_ANNUAL = "annual"
+    FREQUENCY_CUSTOM = "custom"
     FREQUENCY_CHOICES = (
         (FREQUENCY_DAILY, "Quotidienne"), (FREQUENCY_WEEKLY, "Hebdomadaire"),
         (FREQUENCY_MONTHLY, "Mensuelle"), (FREQUENCY_QUARTERLY, "Trimestrielle"),
         (FREQUENCY_SEMIANNUAL, "Semestrielle"), (FREQUENCY_ANNUAL, "Annuelle"),
+        (FREQUENCY_CUSTOM, "Personnalisée"),
     )
     TYPE_PREVENTIVE = "preventive"
     TYPE_INSPECTION = "inspection"
     TYPE_CALIBRATION = "calibration"
     TYPE_CONTROL = "control"
+    TYPE_PERIODIC_CHECK = "periodic_check"
     MAINTENANCE_TYPE_CHOICES = (
         (TYPE_PREVENTIVE, "Préventive"), (TYPE_INSPECTION, "Inspection"),
         (TYPE_CALIBRATION, "Calibration"), (TYPE_CONTROL, "Contrôle"),
+        (TYPE_PERIODIC_CHECK, "Vérification périodique"),
     )
 
     STATUS_DRAFT = "draft"
@@ -1600,9 +1604,14 @@ class MaintenanceProgram(TimeStampedModel):
     )
     client = models.ForeignKey(User, on_delete=models.SET_NULL, related_name="maintenance_rules", null=True, blank=True, limit_choices_to={"role": User.ROLE_CLIENT})
     equipment = models.ForeignKey(Product, on_delete=models.SET_NULL, related_name="maintenance_rules", null=True, blank=True)
+    site = models.ForeignKey(ClientSite, on_delete=models.SET_NULL, related_name="maintenance_programs", null=True, blank=True)
     technician = models.ForeignKey(User, on_delete=models.SET_NULL, related_name="scheduled_maintenance_programs", null=True, blank=True, limit_choices_to={"role__in": User.TECHNICIAN_SPACE_ROLES})
     team_members = models.ManyToManyField(User, related_name="maintenance_program_teams", blank=True, limit_choices_to={"role__in": User.TECHNICIAN_SPACE_ROLES})
     title = models.CharField(max_length=255, blank=True)
+    reference = models.CharField(max_length=80, blank=True)
+    description = models.TextField(blank=True)
+    city = models.CharField(max_length=120, blank=True)
+    overnight_stays = models.PositiveSmallIntegerField(default=0)
     service = models.CharField(max_length=20, choices=SERVICE_CHOICES, default=SERVICE_IT)
     period_type = models.CharField(max_length=20, choices=PERIOD_CHOICES, default=PERIOD_MONTHLY)
     month = models.PositiveSmallIntegerField(null=True, blank=True)
@@ -1614,6 +1623,9 @@ class MaintenanceProgram(TimeStampedModel):
     end_date = models.DateField(null=True, blank=True)
     frequency = models.CharField(max_length=20, choices=FREQUENCY_CHOICES, default=FREQUENCY_MONTHLY)
     frequency_interval = models.PositiveSmallIntegerField(default=1)
+    custom_frequency_unit = models.CharField(max_length=12, choices=(("days", "jours"), ("weeks", "semaines"), ("months", "mois"), ("years", "années")), default="days")
+    weekly_days = models.JSONField(default=list, blank=True)
+    monthly_rule = models.CharField(max_length=40, blank=True)
     scheduled_time = models.TimeField(default=time(8, 0))
     estimated_duration_minutes = models.PositiveIntegerField(default=60)
     checklist = models.JSONField(default=list, blank=True)
@@ -1621,6 +1633,7 @@ class MaintenanceProgram(TimeStampedModel):
     notify_email = models.BooleanField(default=True)
     notify_sms = models.BooleanField(default=False)
     notify_internal = models.BooleanField(default=True)
+    notification_days_before = models.PositiveSmallIntegerField(default=3)
     next_generation_date = models.DateField(null=True, blank=True)
     task_lines = models.JSONField(default=list, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT)
@@ -1648,6 +1661,19 @@ class MaintenanceProgram(TimeStampedModel):
     @property
     def is_rule_based(self):
         return bool(self.equipment_id and self.client_id and self.technician_id and self.start_date)
+
+
+class MaintenanceProgramPart(TimeStampedModel):
+    program = models.ForeignKey(MaintenanceProgram, on_delete=models.CASCADE, related_name="planned_parts")
+    spare_part = models.ForeignKey(SparePart, on_delete=models.SET_NULL, related_name="maintenance_program_part_lines", null=True, blank=True)
+    quantity = models.PositiveIntegerField(default=1)
+    observation = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self):
+        return f"{self.program} - {self.spare_part or 'Pièce'}"
 
 
 class MaintenanceTicket(TimeStampedModel):
@@ -1747,6 +1773,7 @@ class MaintenanceTicket(TimeStampedModel):
     periodicity = models.CharField(max_length=20, choices=PERIODICITY_CHOICES, default=PERIOD_MONTHLY)
     maintenance_type = models.CharField(max_length=20, choices=MAINTENANCE_TYPE_CHOICES, default=TYPE_PREVENTIVE)
     scheduled_date = models.DateTimeField()
+    planned_duration_minutes = models.PositiveIntegerField(default=60)
     status = models.CharField(max_length=24, choices=STATUS_CHOICES, default=STATUS_PLANNED)
     checklist = models.JSONField(default=list, blank=True)
     instructions = models.TextField(blank=True)

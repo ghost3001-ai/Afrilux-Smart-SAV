@@ -3419,6 +3419,68 @@ class SavPlatformTests(TestCase):
         self.assertEqual(operation.organization, self.organization)
         self.assertEqual(operation.status, OfflineSyncOperation.STATUS_PENDING)
 
+    def test_planning_events_and_reschedule_are_available_for_manager(self):
+        scheduled_date = timezone.now() + timedelta(days=2)
+        maintenance_ticket = MaintenanceTicket.objects.create(
+            organization=self.organization,
+            responsible=self.manager,
+            technician=self.technician,
+            client=self.client_user,
+            title="Inspection onduleur",
+            scheduled_date=scheduled_date,
+            planned_duration_minutes=90,
+        )
+        maintenance_ticket.products.add(self.product)
+        self.client.force_login(self.manager)
+
+        response = self.client.get(
+            reverse("maintenance-planning-events"),
+            {"start": (scheduled_date - timedelta(days=1)).isoformat(), "end": (scheduled_date + timedelta(days=2)).isoformat()},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()[0]["id"], str(maintenance_ticket.pk))
+        new_date = scheduled_date + timedelta(hours=3)
+        response = self.client.post(
+            reverse("maintenance-planning-reschedule", args=[maintenance_ticket.pk]),
+            data=json.dumps({"start": new_date.isoformat(), "duration": 120}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        maintenance_ticket.refresh_from_db()
+        self.assertEqual(maintenance_ticket.planned_duration_minutes, 120)
+        self.assertEqual(maintenance_ticket.scheduled_date, new_date)
+
+    def test_manager_can_create_a_single_maintenance_intervention(self):
+        self.client.force_login(self.manager)
+        scheduled_date = timezone.now() + timedelta(days=2)
+
+        response = self.client.post(
+            reverse("maintenance-ticket-create"),
+            {
+                "title": "Contrôle batterie ponctuel",
+                "client": self.client_user.pk,
+                "technician": self.technician.pk,
+                "products": [self.product.pk],
+                "maintenance_type": MaintenanceTicket.TYPE_INSPECTION,
+                "priority": Ticket.PRIORITY_NORMAL,
+                "scheduled_date": timezone.localtime(scheduled_date).strftime("%Y-%m-%dT%H:%M"),
+                "planned_duration_minutes": 45,
+                "location": "Douala",
+                "route": "Agence - client",
+                "overnight_stays": 0,
+                "intervention_reason": "Contrôle préventif",
+                "checklist": "Vérifier la tension\nNettoyer le coffret",
+            },
+        )
+
+        self.assertRedirects(response, reverse("maintenance-calendar"))
+        maintenance_ticket = MaintenanceTicket.objects.get(title="Contrôle batterie ponctuel")
+        self.assertIsNone(maintenance_ticket.program)
+        self.assertEqual(maintenance_ticket.planned_duration_minutes, 45)
+        self.assertEqual(maintenance_ticket.checklist, ["Vérifier la tension", "Nettoyer le coffret"])
+
     def test_rule_based_program_generates_monthly_interventions(self):
         start_date = timezone.localdate().replace(day=1)
         program = MaintenanceProgram.objects.create(
@@ -3440,6 +3502,26 @@ class SavPlatformTests(TestCase):
         self.assertTrue(all(ticket.program_id == program.id for ticket in tickets))
         self.assertTrue(all(ticket.maintenance_type == MaintenanceTicket.TYPE_PREVENTIVE for ticket in tickets))
         self.assertEqual(MaintenanceTicket.objects.filter(program=program).count(), len(tickets))
+
+    def test_weekly_program_generates_only_selected_days(self):
+        start_date = timezone.localdate() - timedelta(days=timezone.localdate().weekday())
+        program = MaintenanceProgram.objects.create(
+            organization=self.organization,
+            responsible=self.manager,
+            client=self.client_user,
+            equipment=self.product,
+            technician=self.technician,
+            title="Contrôle hebdomadaire",
+            start_date=start_date,
+            end_date=start_date + timedelta(days=13),
+            frequency=MaintenanceProgram.FREQUENCY_WEEKLY,
+            weekly_days=["0", "2"],
+        )
+
+        tickets = publish_maintenance_program(program, actor=self.manager)
+
+        self.assertEqual(len(tickets), 4)
+        self.assertTrue(all(ticket.scheduled_date.weekday() in {0, 2} for ticket in tickets))
 
     def test_program_form_accepts_typed_client_equipment_parts_and_team(self):
         self.expert.role = User.ROLE_TECHNICIAN

@@ -3434,6 +3434,23 @@ def _add_months(value, months):
     return value.replace(year=year, month=month, day=min(value.day, monthrange(year, month)[1]))
 
 
+def _monthly_ordinal_date(value, rule):
+    """Return the date represented by ordinal:first:monday style rules."""
+    try:
+        _, ordinal, weekday_name = rule.split(":", 2)
+        weekday = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, "friday": 4, "saturday": 5, "sunday": 6}[weekday_name]
+    except (ValueError, KeyError):
+        return value
+    last_day = monthrange(value.year, value.month)[1]
+    if ordinal == "last":
+        candidate = value.replace(day=last_day)
+        return candidate - timedelta(days=(candidate.weekday() - weekday) % 7)
+    occurrence = {"first": 1, "second": 2, "third": 3, "fourth": 4}.get(ordinal, 1)
+    candidate = value.replace(day=1)
+    candidate += timedelta(days=(weekday - candidate.weekday()) % 7 + 7 * (occurrence - 1))
+    return candidate if candidate.month == value.month else value
+
+
 def _program_rule_dates(program):
     if not program.is_rule_based:
         return []
@@ -3442,6 +3459,24 @@ def _program_rule_dates(program):
     current = program.start_date
     dates = []
     while current <= end_date:
+        if program.frequency == MaintenanceProgram.FREQUENCY_WEEKLY and program.weekly_days:
+            week_start = current - timedelta(days=current.weekday())
+            for weekday in sorted({int(day) for day in program.weekly_days if str(day).isdigit() and 0 <= int(day) <= 6}):
+                candidate = week_start + timedelta(days=weekday)
+                if program.start_date <= candidate <= end_date:
+                    dates.append(candidate)
+            current += timedelta(weeks=interval)
+            continue
+        if program.frequency == MaintenanceProgram.FREQUENCY_MONTHLY and program.monthly_rule:
+            rule = program.monthly_rule
+            if rule.startswith("day:"):
+                try:
+                    day = max(1, min(31, int(rule.split(":", 1)[1])))
+                    current = current.replace(day=min(day, monthrange(current.year, current.month)[1]))
+                except ValueError:
+                    pass
+            elif rule.startswith("ordinal:"):
+                current = _monthly_ordinal_date(current, rule)
         dates.append(current)
         if len(dates) > 1000:
             raise ValueError("La periode du programme genere trop d'interventions. Reduisez la plage ou augmentez l'intervalle.")
@@ -3449,6 +3484,16 @@ def _program_rule_dates(program):
             current += timedelta(days=interval)
         elif program.frequency == MaintenanceProgram.FREQUENCY_WEEKLY:
             current += timedelta(weeks=interval)
+        elif program.frequency == MaintenanceProgram.FREQUENCY_CUSTOM:
+            unit = program.custom_frequency_unit
+            if unit == "days":
+                current += timedelta(days=interval)
+            elif unit == "weeks":
+                current += timedelta(weeks=interval)
+            elif unit == "years":
+                current = _add_months(current, 12 * interval)
+            else:
+                current = _add_months(current, interval)
         else:
             months = {
                 MaintenanceProgram.FREQUENCY_MONTHLY: 1,
@@ -3471,6 +3516,7 @@ def _rule_task_lines(program):
         MaintenanceProgram.TYPE_INSPECTION: MaintenanceTicket.TYPE_INSPECTION,
         MaintenanceProgram.TYPE_CALIBRATION: MaintenanceTicket.TYPE_CONTROL,
         MaintenanceProgram.TYPE_CONTROL: MaintenanceTicket.TYPE_CONTROL,
+        MaintenanceProgram.TYPE_PERIODIC_CHECK: MaintenanceTicket.TYPE_CONTROL,
     }[program.maintenance_type]
     technician_ids = [program.technician_id, *program.team_members.values_list("id", flat=True)]
     title = program.title or f"{program.get_maintenance_type_display()} - {program.equipment.name}"
@@ -3487,8 +3533,11 @@ def _rule_task_lines(program):
             "periodicity": periodicity,
             "maintenance_type": maintenance_type,
             "priority": program.priority,
-            "checklist": program.checklist,
-            "instructions": f"Duree estimee : {program.estimated_duration_minutes} min.",
+            "planned_duration_minutes": program.estimated_duration_minutes,
+            "checklist": [item.get("description", "") if isinstance(item, dict) else item for item in program.checklist],
+            "instructions": f"{program.description}\nDurée estimée : {program.estimated_duration_minutes} min.\nNuitées prévues : {program.overnight_stays}".strip(),
+            "location": program.site.address if program.site_id and program.site.address else program.city,
+            "overnight_stays": program.overnight_stays,
         })
     return lines
 
@@ -3614,6 +3663,7 @@ def publish_maintenance_program(program, *, actor=None):
                 maintenance_type=str(line.get("maintenance_type") or line.get("type_maintenance") or MaintenanceTicket.TYPE_PREVENTIVE).strip(),
                 scheduled_date=scheduled_date,
                 initial_scheduled_date=scheduled_date,
+                planned_duration_minutes=max(1, int(line.get("planned_duration_minutes") or line.get("estimated_duration_minutes") or program.estimated_duration_minutes or 60)),
                 checklist=_coerce_json_list(line.get("checklist") or line.get("check_list"), "checklist"),
                 instructions=str(line.get("instructions") or line.get("notes") or "").strip(),
                 priority=str(line.get("priority") or line.get("priorite") or Ticket.PRIORITY_NORMAL).strip(),
@@ -3697,6 +3747,39 @@ def acknowledge_maintenance_ticket(maintenance_ticket, *, actor=None):
             message=f"{actor or maintenance_ticket.technician} a accuse reception de la maintenance du {timezone.localtime(maintenance_ticket.scheduled_date):%d/%m/%Y %H:%M}.",
         )
     log_audit_event(actor, "maintenance_ticket_acknowledged", maintenance_ticket)
+    return maintenance_ticket
+
+
+def reschedule_maintenance_ticket(maintenance_ticket, *, scheduled_date, planned_duration_minutes=None, actor=None):
+    """Move a generated intervention without changing its workflow status."""
+    parsed_date = _parse_datetime_value(scheduled_date, "date_prevue")
+    if actor and actor.is_authenticated and not can_act_on_maintenance_ticket(actor, maintenance_ticket):
+        raise ValueError("Seul le technicien responsable ou un responsable peut replanifier cette intervention.")
+    if maintenance_ticket.status in {
+        MaintenanceTicket.STATUS_DONE,
+        MaintenanceTicket.STATUS_ANOMALY,
+        MaintenanceTicket.STATUS_CANCELLED,
+    }:
+        raise ValueError("Une intervention terminée ou annulée ne peut pas être replanifiée.")
+
+    duration = planned_duration_minutes or maintenance_ticket.planned_duration_minutes or 60
+    try:
+        duration = max(1, int(duration))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("La durée prévue doit être un nombre de minutes valide.") from exc
+
+    maintenance_ticket.initial_scheduled_date = maintenance_ticket.initial_scheduled_date or maintenance_ticket.scheduled_date
+    maintenance_ticket.scheduled_date = parsed_date
+    maintenance_ticket.planned_duration_minutes = duration
+    maintenance_ticket.save(update_fields=[
+        "initial_scheduled_date", "scheduled_date", "planned_duration_minutes", "updated_at",
+    ])
+    log_audit_event(
+        actor,
+        "maintenance_ticket_rescheduled",
+        maintenance_ticket,
+        {"scheduled_date": parsed_date.isoformat(), "planned_duration_minutes": duration},
+    )
     return maintenance_ticket
 
 

@@ -27,6 +27,7 @@ from .forms import (
     MaintenanceCancelForm,
     MaintenanceClosureForm,
     MaintenanceProgramForm,
+    MaintenanceTicketQuickForm,
     MaintenanceSettingsForm,
     MessageForm,
     ProductForm,
@@ -130,6 +131,7 @@ from .services import (
     scope_spare_part_queryset,
     scope_ticket_queryset,
     scope_user_queryset,
+    reschedule_maintenance_ticket,
     start_maintenance_ticket,
     validate_maintenance_report,
     role_workspace_name,
@@ -749,7 +751,7 @@ class MaintenanceReadRequiredMixin(UserPassesTestMixin):
 
 def _maintenance_queryset_for_cmms(user):
     return scope_maintenance_ticket_queryset(
-        MaintenanceTicket.objects.select_related("client", "technician", "program").prefetch_related("products", "team_members"),
+        MaintenanceTicket.objects.select_related("client", "technician", "program", "responsible").prefetch_related("products__site", "team_members"),
         user,
     )
 
@@ -878,6 +880,190 @@ class MaintenanceInterventionListView(LoginRequiredMixin, MaintenanceReadRequire
         for intervention in context["page_obj"].object_list:
             intervention.can_modify = can_act_on_maintenance_ticket(self.request.user, intervention)
         return context
+
+
+def _planning_datetime(value):
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return timezone.make_aware(parsed, timezone.get_current_timezone()) if timezone.is_naive(parsed) else parsed
+
+
+def _planning_filters(queryset, params):
+    for key, field in (("technician", "technician_id"), ("client", "client_id"), ("equipment", "products__id"), ("priority", "priority"), ("maintenance_type", "maintenance_type")):
+        if params.get(key):
+            queryset = queryset.filter(**{field: params[key]})
+    status = params.get("status")
+    if status == "late":
+        queryset = queryset.exclude(status__in=[MaintenanceTicket.STATUS_DONE, MaintenanceTicket.STATUS_ANOMALY, MaintenanceTicket.STATUS_CANCELLED]).filter(scheduled_date__lt=timezone.now())
+    elif status == "done":
+        queryset = queryset.filter(status__in=[MaintenanceTicket.STATUS_DONE, MaintenanceTicket.STATUS_ANOMALY])
+    elif status == "planned":
+        queryset = queryset.filter(status__in=[MaintenanceTicket.STATUS_PLANNED, MaintenanceTicket.STATUS_NOTIFIED, MaintenanceTicket.STATUS_POSTPONED])
+    elif status:
+        queryset = queryset.filter(status=status)
+    if params.get("zone"):
+        queryset = queryset.filter(Q(location__icontains=params["zone"]) | Q(client__primary_city__icontains=params["zone"]) | Q(technician__primary_region__icontains=params["zone"]))
+    if params.get("q"):
+        query = params["q"]
+        queryset = queryset.filter(Q(title__icontains=query) | Q(client__username__icontains=query) | Q(client__company_name__icontains=query) | Q(products__name__icontains=query) | Q(products__serial_number__icontains=query))
+    if params.get("date"):
+        queryset = queryset.filter(scheduled_date__date=params["date"])
+    return queryset.distinct()
+
+
+class MaintenanceTicketQuickCreateView(LoginRequiredMixin, MaintenanceManagerRequiredMixin, CreateView):
+    model = MaintenanceTicket
+    form_class = MaintenanceTicketQuickForm
+    template_name = "sav/maintenance_ticket_form.html"
+    success_url = reverse_lazy("maintenance-calendar")
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["user"] = self.request.user
+        return kwargs
+
+    def form_valid(self, form):
+        form.instance.responsible = self.request.user
+        response = super().form_valid(form)
+        form.instance.team_members.set(form.cleaned_data["team_members"])
+        django_messages.success(self.request, "Intervention créée et ajoutée au planning.")
+        return response
+
+
+class MaintenancePlanningCalendarView(LoginRequiredMixin, MaintenanceReadRequiredMixin, TemplateView):
+    template_name = "sav/maintenance_calendar.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        tickets = _maintenance_queryset_for_cmms(self.request.user)
+        technicians = scope_user_queryset(User.objects.filter(role__in=User.TECHNICIAN_SPACE_ROLES, is_active=True), self.request.user).order_by("first_name", "last_name", "username")
+        today = timezone.localdate()
+        final_statuses = [MaintenanceTicket.STATUS_DONE, MaintenanceTicket.STATUS_ANOMALY]
+        rows = []
+        for technician in technicians:
+            count = tickets.filter(technician=technician, scheduled_date__date=today).exclude(status__in=final_statuses + [MaintenanceTicket.STATUS_CANCELLED]).count()
+            rows.append({"person": technician, "today_count": count, "availability": technician.technician_status or "available", "zone": technician.primary_region or technician.primary_city or "Zone non renseignée"})
+        context.update({
+            "planner_kpis": [
+                {"label": "Aujourd'hui", "value": tickets.filter(scheduled_date__date=today).count(), "icon": "calendar-event", "tone": "blue"},
+                {"label": "En cours", "value": tickets.filter(status=MaintenanceTicket.STATUS_IN_PROGRESS).count(), "icon": "tools", "tone": "orange"},
+                {"label": "Terminées", "value": tickets.filter(status__in=final_statuses).count(), "icon": "check2-circle", "tone": "green"},
+                {"label": "En retard", "value": sum(1 for item in tickets if item.is_late), "icon": "alarm", "tone": "red"},
+                {"label": "Urgentes", "value": tickets.filter(priority=Ticket.PRIORITY_CRITICAL).exclude(status__in=final_statuses + [MaintenanceTicket.STATUS_CANCELLED]).count(), "icon": "exclamation-octagon", "tone": "red"},
+                {"label": "Disponibles", "value": technicians.filter(technician_status="available").count(), "icon": "people", "tone": "green"},
+            ],
+            "planner_technicians": rows,
+            "technicians": technicians,
+            "clients": scope_user_queryset(User.objects.filter(role=User.ROLE_CLIENT, is_active=True), self.request.user).order_by("company_name", "username"),
+            "products": _maintenance_product_queryset(self.request.user).order_by("name")[:300],
+            "can_manage_planning": can_manage_maintenance(self.request.user),
+        })
+        return context
+
+
+class MaintenancePlanningEventsView(LoginRequiredMixin, MaintenanceReadRequiredMixin, View):
+    def get(self, request):
+        start, end = _planning_datetime(request.GET.get("start")), _planning_datetime(request.GET.get("end"))
+        if not start or not end or end <= start:
+            return JsonResponse({"detail": "Période de planning invalide."}, status=400)
+        tickets = _planning_filters(_maintenance_queryset_for_cmms(request.user), request.GET).filter(scheduled_date__gte=start, scheduled_date__lt=end).order_by("scheduled_date")[:500]
+        events = []
+        for ticket in tickets:
+            products = list(ticket.products.all())
+            product = products[0] if products else None
+            site = getattr(product, "site", None)
+            duration = max(1, ticket.planned_duration_minutes or 60)
+            events.append({
+                "id": str(ticket.pk), "title": f"{ticket.client} · {ticket.title}", "start": ticket.scheduled_date.isoformat(),
+                "end": (ticket.scheduled_date + timedelta(minutes=duration)).isoformat(),
+                "classNames": [f"planner-event--{ticket.cmms_status}"],
+                "extendedProps": {"client": str(ticket.client), "site": ticket.location or getattr(site, "name", "") or "Site non renseigné", "technician": ticket.technician_team_label, "technicianId": ticket.technician_id, "canModify": can_act_on_maintenance_ticket(request.user, ticket), "latitude": float(site.gps_latitude) if site and site.gps_latitude is not None else None, "longitude": float(site.gps_longitude) if site and site.gps_longitude is not None else None},
+            })
+        return JsonResponse(events, safe=False)
+
+
+class MaintenancePlanningDetailView(LoginRequiredMixin, MaintenanceReadRequiredMixin, View):
+    def get(self, request, pk):
+        ticket = get_object_or_404(_maintenance_queryset_for_cmms(request.user), pk=pk)
+        report = getattr(ticket, "report", None)
+        required_parts = list(ticket.program.required_parts.all()) if ticket.program_id else []
+        return JsonResponse({
+            "id": ticket.pk, "title": ticket.title, "program": str(ticket.program) if ticket.program_id else "Intervention manuelle", "client": str(ticket.client),
+            "site": ticket.location or ticket.client.address or "Non renseigné", "equipment": [str(product) for product in ticket.products.all()] or [ticket.equipment_identifier or "Non renseigné"],
+            "technician": ticket.technician_team_label, "priority": ticket.get_priority_display(), "status": ticket.cmms_status_label,
+            "scheduled_date": timezone.localtime(ticket.scheduled_date).strftime("%d/%m/%Y %H:%M"), "actual_date": timezone.localtime(ticket.started_at).strftime("%d/%m/%Y %H:%M") if ticket.started_at else "Non démarrée",
+            "duration": ticket.planned_duration_minutes, "objective": ticket.intervention_reason or ticket.title, "checklist": ticket.checklist or [], "required_parts": [str(part) for part in required_parts],
+            "history": [{"label": "Créée", "date": timezone.localtime(ticket.created_at).strftime("%d/%m/%Y %H:%M")}, *([{"label": "Démarrée", "date": timezone.localtime(ticket.started_at).strftime("%d/%m/%Y %H:%M")}] if ticket.started_at else []), *([{"label": "Terminée", "date": timezone.localtime(ticket.finished_at).strftime("%d/%m/%Y %H:%M")}] if ticket.finished_at else [])],
+            "observations": report.observations if report else "Aucune observation.", "route": ticket.route, "overnight_stays": ticket.overnight_stays, "can_modify": can_act_on_maintenance_ticket(request.user, ticket),
+            "start_url": reverse("maintenance-planning-action", args=[ticket.pk, "start"]), "close_url": reverse("maintenance-ticket-close", args=[ticket.pk]), "assign_url": reverse("maintenance-planning-assign", args=[ticket.pk]),
+        })
+
+
+class MaintenancePlanningRescheduleView(LoginRequiredMixin, MaintenanceReadRequiredMixin, View):
+    def post(self, request, pk):
+        try:
+            payload = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "Données de replanification invalides."}, status=400)
+        ticket = get_object_or_404(_maintenance_queryset_for_cmms(request.user), pk=pk)
+        scheduled_date = _planning_datetime(payload.get("start"))
+        try:
+            duration = max(1, int(payload.get("duration") or ticket.planned_duration_minutes or 60))
+        except (TypeError, ValueError):
+            return JsonResponse({"detail": "Durée invalide."}, status=400)
+        if not scheduled_date:
+            return JsonResponse({"detail": "Date prévue invalide."}, status=400)
+        candidate_end = scheduled_date + timedelta(minutes=duration)
+        product_ids = list(ticket.products.values_list("id", flat=True))
+        conflicts = []
+        candidates = _maintenance_queryset_for_cmms(request.user).exclude(pk=ticket.pk).exclude(status__in=[MaintenanceTicket.STATUS_DONE, MaintenanceTicket.STATUS_ANOMALY, MaintenanceTicket.STATUS_CANCELLED]).filter(scheduled_date__lt=candidate_end, scheduled_date__gte=scheduled_date - timedelta(hours=24))
+        for candidate in candidates.distinct():
+            overlaps = candidate.scheduled_date < candidate_end and candidate.scheduled_date + timedelta(minutes=max(1, candidate.planned_duration_minutes or 60)) > scheduled_date
+            same_technician = candidate.technician_id == ticket.technician_id
+            same_equipment = bool(product_ids and candidate.products.filter(pk__in=product_ids).exists())
+            if overlaps and (same_technician or same_equipment):
+                conflicts.append({"id": candidate.pk, "title": candidate.title, "reason": "Même technicien" if same_technician else "Même équipement", "scheduled_date": timezone.localtime(candidate.scheduled_date).strftime("%d/%m %H:%M")})
+        if conflicts and not payload.get("force"):
+            return JsonResponse({"detail": "Conflit de planning détecté.", "conflicts": conflicts}, status=409)
+        try:
+            updated = reschedule_maintenance_ticket(ticket, scheduled_date=scheduled_date, planned_duration_minutes=duration, actor=request.user)
+        except ValueError as exc:
+            return JsonResponse({"detail": str(exc)}, status=403)
+        return JsonResponse({"detail": "Intervention replanifiée avec succès.", "start": updated.scheduled_date.isoformat(), "duration": updated.planned_duration_minutes, "conflicts": conflicts})
+
+
+class MaintenancePlanningActionView(LoginRequiredMixin, MaintenanceReadRequiredMixin, View):
+    def post(self, request, pk, action):
+        ticket = get_object_or_404(_maintenance_queryset_for_cmms(request.user), pk=pk)
+        if action != "start":
+            return JsonResponse({"detail": "Action inconnue."}, status=400)
+        try:
+            start_maintenance_ticket(ticket, actor=request.user)
+        except ValueError as exc:
+            return JsonResponse({"detail": str(exc)}, status=403)
+        return JsonResponse({"detail": "Intervention démarrée."})
+
+
+class MaintenancePlanningAssignView(LoginRequiredMixin, MaintenanceManagerRequiredMixin, View):
+    def post(self, request, pk):
+        try:
+            payload = json.loads(request.body or "{}")
+            technician_id = int(payload.get("technician_id"))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return JsonResponse({"detail": "Technicien invalide."}, status=400)
+        ticket = get_object_or_404(_maintenance_queryset_for_cmms(request.user), pk=pk)
+        technician = get_object_or_404(
+            scope_user_queryset(User.objects.filter(role__in=User.TECHNICIAN_SPACE_ROLES, is_active=True), request.user),
+            pk=technician_id,
+        )
+        ticket.technician = technician
+        ticket.save(update_fields=["technician", "updated_at"])
+        log_audit_event(request.user, "maintenance_ticket_reassigned", ticket, {"technician_id": technician.pk})
+        return JsonResponse({"detail": "Technicien réaffecté avec succès.", "technician": str(technician)})
 
 
 class MaintenanceCalendarView(LoginRequiredMixin, MaintenanceReadRequiredMixin, TemplateView):
@@ -1096,6 +1282,7 @@ class MaintenanceProgramCreateView(LoginRequiredMixin, MaintenanceManagerRequire
                 "maintenance_clients": clients[:40],
                 "maintenance_products": products[:60],
                 "periodicity_choices": MaintenanceTicket.PERIODICITY_CHOICES,
+                "monthly_days": range(1, 32),
             }
         )
         return context
@@ -1103,9 +1290,20 @@ class MaintenanceProgramCreateView(LoginRequiredMixin, MaintenanceManagerRequire
     def form_valid(self, form):
         form.instance.responsible = self.request.user
         form.instance.organization = getattr(self.request.user, "organization", None)
+        publish_now = self.request.POST.get("submit_action") == "publish"
+        if not publish_now:
+            form.instance.status = MaintenanceProgram.STATUS_DRAFT
         response = super().form_valid(form)
         log_audit_event(self.request.user, "maintenance_program_created_web", self.object, {"via": "portal"})
-        django_messages.success(self.request, "Programme de maintenance enregistre. Vous pouvez le publier.")
+        if publish_now:
+            try:
+                tickets = publish_maintenance_program(self.object, actor=self.request.user)
+            except ValueError as exc:
+                django_messages.error(self.request, f"Programme enregistré en brouillon : {exc}")
+            else:
+                django_messages.success(self.request, f"Programme publié : {len(tickets)} intervention(s) générée(s).")
+        else:
+            django_messages.success(self.request, "Programme enregistré comme brouillon.")
         return response
 
 
@@ -1142,6 +1340,7 @@ class MaintenanceProgramUpdateView(LoginRequiredMixin, MaintenanceManagerRequire
                 "maintenance_clients": clients[:40],
                 "maintenance_products": products[:60],
                 "periodicity_choices": MaintenanceTicket.PERIODICITY_CHOICES,
+                "monthly_days": range(1, 32),
             }
         )
         return context
@@ -1149,9 +1348,20 @@ class MaintenanceProgramUpdateView(LoginRequiredMixin, MaintenanceManagerRequire
     def form_valid(self, form):
         form.instance.responsible = form.instance.responsible or self.request.user
         form.instance.organization = form.instance.organization or getattr(self.request.user, "organization", None)
+        publish_now = self.request.POST.get("submit_action") == "publish"
+        if not publish_now and form.instance.status != MaintenanceProgram.STATUS_SUSPENDED:
+            form.instance.status = MaintenanceProgram.STATUS_DRAFT
         response = super().form_valid(form)
         log_audit_event(self.request.user, "maintenance_program_updated_web", self.object, {"via": "portal"})
-        django_messages.success(self.request, "Programme de maintenance mis a jour. Vous pouvez le publier.")
+        if publish_now:
+            try:
+                tickets = publish_maintenance_program(self.object, actor=self.request.user)
+            except ValueError as exc:
+                django_messages.error(self.request, f"Programme enregistré : {exc}")
+            else:
+                django_messages.success(self.request, f"Programme publié : {len(tickets)} intervention(s) générée(s).")
+        else:
+            django_messages.success(self.request, "Programme de maintenance enregistré comme brouillon.")
         return response
 
 
