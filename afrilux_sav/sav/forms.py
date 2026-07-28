@@ -35,7 +35,7 @@ from .services import (
     ESCALATION_TARGET_HEAD_SAV,
     ESCALATION_TARGET_ROLE_MAP,
     ESCALATION_TARGET_SUPERVISOR,
-    compute_ticket_sla_deadline,
+    ticket_conversation_participant_ids,
     provision_client_account,
 )
 
@@ -166,11 +166,9 @@ class TicketForm(forms.ModelForm):
             "status",
             "priority",
             "location",
-            "sla_deadline",
         ]
         widgets = {
             "description": forms.Textarea(attrs={"rows": 5}),
-            "sla_deadline": forms.DateTimeInput(attrs={"type": "datetime-local"}),
         }
 
     def __init__(self, *args, user=None, **kwargs):
@@ -204,11 +202,12 @@ class TicketForm(forms.ModelForm):
             for choice in self.fields["category"].choices
             if choice[0] in {Ticket.CATEGORY_BREAKDOWN, Ticket.CATEGORY_INSTALLATION, Ticket.CATEGORY_MAINTENANCE, Ticket.CATEGORY_BUG}
         ]
-        if not self.instance.pk and not self.initial.get("sla_deadline"):
-            base_priority = self.initial.get("priority") or self.fields["priority"].initial or Ticket.PRIORITY_NORMAL
-            org = getattr(user, "organization", None) if user and user.is_authenticated else None
-            default_deadline = compute_ticket_sla_deadline(base_priority, base_time=timezone.now(), organization=org)
-            self.initial["sla_deadline"] = timezone.localtime(default_deadline).replace(second=0, microsecond=0)
+        self.fields["channel"].choices = [
+            (Ticket.CHANNEL_PHONE, "Téléphone"),
+            (Ticket.CHANNEL_EMAIL, "Email"),
+            (Ticket.CHANNEL_WHATSAPP, "WhatsApp"),
+            (Ticket.CHANNEL_WEB, "Portail Web"),
+        ]
 
         if user and user.is_authenticated and user.role == User.ROLE_CLIENT:
             self.fields["client"].queryset = client_queryset.filter(pk=user.pk)
@@ -224,6 +223,8 @@ class TicketForm(forms.ModelForm):
             self.fields["priority"].initial = Ticket.PRIORITY_NORMAL
             self.fields["priority"].widget = forms.HiddenInput()
             self.fields["priority"].required = False
+            self.fields["channel"].widget = forms.HiddenInput()
+            self.fields["channel"].initial = Ticket.CHANNEL_WEB
             self.fields["product"].queryset = Product.objects.filter(client=user).order_by("name")
         else:
             product_queryset = Product.objects.select_related("client")
@@ -247,6 +248,7 @@ class TicketForm(forms.ModelForm):
             cleaned_data["assigned_agent"] = None
             cleaned_data["status"] = Ticket.STATUS_PENDING_ASSIGNMENT
             cleaned_data["priority"] = Ticket.PRIORITY_NORMAL
+            cleaned_data["channel"] = Ticket.CHANNEL_WEB
             client = self.user
         if client and product and product.client_id != client.id:
             self.add_error("product", "Le produit selectionne n'appartient pas a ce client.")
@@ -548,18 +550,7 @@ class MessageForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         recipient_queryset = User.objects.none()
         if user and user.is_authenticated and ticket:
-            participant_ids = {ticket.client_id}
-            if ticket.assigned_agent_id:
-                participant_ids.add(ticket.assigned_agent_id)
-            if user.organization_id:
-                support_queryset = User.objects.filter(
-                    organization=user.organization,
-                    role=User.ROLE_HEAD_SAV,
-                    is_active=True,
-                )
-            else:
-                support_queryset = User.objects.filter(role=User.ROLE_HEAD_SAV, is_active=True)
-            participant_ids.update(support_queryset.values_list("id", flat=True))
+            participant_ids = ticket_conversation_participant_ids(ticket)
             recipient_queryset = User.objects.filter(pk__in=participant_ids).exclude(pk=user.pk).order_by(
                 "first_name",
                 "last_name",
@@ -977,7 +968,7 @@ class CreditAccountForm(forms.Form):
 
 class MaintenanceTicketQuickForm(forms.ModelForm):
     checklist = forms.CharField(
-        label="Checklist",
+        label="Liste de contrôle",
         required=False,
         widget=forms.Textarea(attrs={"rows": 4, "placeholder": "Une tâche par ligne"}),
     )
@@ -1017,7 +1008,7 @@ class MaintenanceProgramForm(forms.ModelForm):
     client_label = forms.CharField(label="Client", max_length=255, required=False)
     equipment_label = forms.CharField(label="Équipement", max_length=255, required=False)
     required_parts_label = forms.CharField(label="Pièces nécessaires", max_length=500, required=False)
-    checklist = forms.CharField(label="Checklist", required=False, widget=forms.Textarea(attrs={"rows": 5, "placeholder": "Une tache par ligne"}))
+    checklist = forms.CharField(label="Liste de contrôle", required=False, widget=forms.Textarea(attrs={"rows": 5, "placeholder": "Une tâche par ligne"}))
     parts_plan = forms.CharField(required=False, widget=forms.HiddenInput())
     weekly_days = forms.MultipleChoiceField(
         label="Jours d'intervention",
@@ -1066,7 +1057,7 @@ class MaintenanceProgramForm(forms.ModelForm):
         self.fields["monthly_rule"].label = "Règle mensuelle"
         self.fields["scheduled_time"].label = "Heure prévue"
         self.fields["estimated_duration_minutes"].label = "Durée estimée (minutes)"
-        self.fields["checklist"].label = "Checklist"
+        self.fields["checklist"].label = "Liste de contrôle"
         self.fields["required_parts"].label = "Pièces nécessaires (facultatif)"
         self.fields["notify_email"].label = "Envoyer un e-mail"
         self.fields["notify_sms"].label = "Envoyer un SMS"

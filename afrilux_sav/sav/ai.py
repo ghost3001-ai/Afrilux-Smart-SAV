@@ -1,5 +1,8 @@
 import json
 import re
+import time
+import threading
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Any
 from urllib import error, request
@@ -18,8 +21,36 @@ class LLMCompletion:
     error_message: str = ""
 
 
+class _RateLimiter:
+    def __init__(self, max_requests: int = 30, window_seconds: int = 60):
+        self._max_requests = max_requests
+        self._window_seconds = window_seconds
+        self._timestamps: deque[float] = deque()
+        self._lock = threading.Lock()
+
+    def acquire(self) -> bool:
+        now = time.monotonic()
+        with self._lock:
+            while self._timestamps and self._timestamps[0] < now - self._window_seconds:
+                self._timestamps.popleft()
+            if len(self._timestamps) >= self._max_requests:
+                return False
+            self._timestamps.append(now)
+            return True
+
+    @property
+    def retry_after(self) -> float:
+        if not self._timestamps:
+            return 0.0
+        return max(0.0, self._window_seconds - (time.monotonic() - self._timestamps[0]))
+
+
 class OpenAIResponsesClient:
     PLACEHOLDER_KEYS = {"", "sk-...", "sk-xxx", "change-me", "votre-cle-openai"}
+    _rate_limiter = _RateLimiter(
+        max_requests=getattr(settings, "OPENAI_RATE_LIMIT_MAX_REQUESTS", 30),
+        window_seconds=getattr(settings, "OPENAI_RATE_LIMIT_WINDOW_SECONDS", 60),
+    )
 
     @property
     def api_key(self) -> str:
@@ -121,10 +152,22 @@ class OpenAIResponsesClient:
             provider=raw_response.provider,
             model=raw_response.model,
             request_id=raw_response.request_id,
-            error_message="OpenAI returned non-JSON output.",
+            error_message="OpenAI a renvoyé une réponse qui n’est pas au format JSON.",
         )
 
     def _post(self, path: str, payload: dict[str, Any]) -> LLMCompletion:
+        if not self._rate_limiter.acquire():
+            retry_after = self._rate_limiter.retry_after
+            return LLMCompletion(
+                ok=False,
+                content="",
+                raw={},
+                provider="openai",
+                model=self.model,
+                request_id="",
+                error_message=f"Rate limit OpenAI atteint. Reessayez dans {retry_after:.0f}s.",
+            )
+
         body = json.dumps(payload).encode("utf-8")
         req = request.Request(
             f"{self.base_url}{path}",

@@ -148,6 +148,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     'rest_framework',
+    'drf_spectacular',
     'sav',
 ]
 
@@ -370,7 +371,6 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework_simplejwt.authentication.JWTAuthentication",
         "rest_framework.authentication.SessionAuthentication",
-        "rest_framework.authentication.BasicAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
@@ -382,6 +382,37 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "sav.pagination.OptionalPageNumberPagination",
     "PAGE_SIZE": int(os.getenv("API_DEFAULT_PAGE_SIZE", "25")),
     "URL_FORMAT_OVERRIDE": None,
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "30/minute",
+        "user": "120/minute",
+    },
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Afrilux Smart SAV API",
+    "DESCRIPTION": "API REST pour la plateforme SAV/Maintenance AFRILUX SMART SOLUTIONS. Gestion des tickets, clients, equipements, maintenances, interventions, notifications et reporting.",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    "SCHEMA_PATH_PREFIX": r"/api/",
+    "TAGS": [
+        {"name": "Tickets", "description": "Gestion des dossiers SAV"},
+        {"name": "Clients", "description": "Gestion des clients et contacts"},
+        {"name": "Equipment", "description": "Produits et equipements"},
+        {"name": "Maintenance", "description": "Maintenance preventive"},
+        {"name": "Interventions", "description": "Interventions terrain"},
+        {"name": "Notifications", "description": "Notifications multi-canaux"},
+        {"name": "Reporting", "description": "Rapports et exports"},
+        {"name": "Analytics", "description": "BI et analyse"},
+        {"name": "AI", "description": "Fonctions IA"},
+        {"name": "Financial", "description": "Transactions et offres"},
+        {"name": "Automation", "description": "Automatisation et workflows"},
+        {"name": "Auth", "description": "Authentification JWT"},
+    ],
 }
 
 SIMPLE_JWT = {
@@ -399,20 +430,24 @@ LOGOUT_REDIRECT_URL = "/login/"
 
 SESSION_COOKIE_AGE = int(os.getenv("SESSION_COOKIE_AGE", str(60 * 60 * 8)))
 SESSION_EXPIRE_AT_BROWSER_CLOSE = _env_bool("SESSION_EXPIRE_AT_BROWSER_CLOSE", False)
-SESSION_COOKIE_SECURE = _env_bool("SESSION_COOKIE_SECURE", False)
+SESSION_COOKIE_SECURE = _env_bool("SESSION_COOKIE_SECURE", not DEBUG)
 SESSION_COOKIE_HTTPONLY = _env_bool("SESSION_COOKIE_HTTPONLY", True)
 SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
-CSRF_COOKIE_SECURE = _env_bool("CSRF_COOKIE_SECURE", False)
-CSRF_COOKIE_HTTPONLY = _env_bool("CSRF_COOKIE_HTTPONLY", False)
+CSRF_COOKIE_SECURE = _env_bool("CSRF_COOKIE_SECURE", not DEBUG)
+CSRF_COOKIE_HTTPONLY = _env_bool("CSRF_COOKIE_HTTPONLY", True)
 CSRF_COOKIE_SAMESITE = os.getenv("CSRF_COOKIE_SAMESITE", "Lax")
 CSRF_TRUSTED_ORIGINS = _env_list("CSRF_TRUSTED_ORIGINS")
 if SAV_PUBLIC_BASE_URL.startswith("https://") and SAV_PUBLIC_BASE_URL not in CSRF_TRUSTED_ORIGINS:
     CSRF_TRUSTED_ORIGINS.append(SAV_PUBLIC_BASE_URL)
-SECURE_SSL_REDIRECT = _env_bool("SECURE_SSL_REDIRECT", False)
-SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "0"))
-SECURE_HSTS_INCLUDE_SUBDOMAINS = _env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", False)
-SECURE_HSTS_PRELOAD = _env_bool("SECURE_HSTS_PRELOAD", False)
+SECURE_SSL_REDIRECT = _env_bool("SECURE_SSL_REDIRECT", not DEBUG)
+SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "31536000" if not DEBUG else "0"))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = _env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", not DEBUG)
+SECURE_HSTS_PRELOAD = _env_bool("SECURE_HSTS_PRELOAD", not DEBUG)
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
 X_FRAME_OPTIONS = "DENY"
+
+NOTIFICATION_DEDUP_WINDOW_HOURS = int(os.getenv("NOTIFICATION_DEDUP_WINDOW_HOURS", "6"))
+OPENAI_RATE_LIMIT_MAX_REQUESTS = int(os.getenv("OPENAI_RATE_LIMIT_MAX_REQUESTS", "30"))
+OPENAI_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("OPENAI_RATE_LIMIT_WINDOW_SECONDS", "60"))

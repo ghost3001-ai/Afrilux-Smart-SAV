@@ -145,7 +145,7 @@
                     <strong>{{ category.name }}</strong>
                     <p>{{ category.description|default:"Categorie standard" }}</p>
                 </div>
-                <span class="badge badge--{% if category.is_active %}success{% else %}neutral{% endif %}">{% if category.is_active %}Active{% else %}Inactive{% endif %}</span>
+                <span class="badge badge--{% if category.is_active %}success{% else %}neutral{% endif %}">{% if category.is_active %}Actif{% else %}Inactif{% endif %}</span>
             </div>
         {% empty %}
             <p class="muted">Aucune categorie d'equipement disponible.</p>
